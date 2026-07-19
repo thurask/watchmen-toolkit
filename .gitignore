@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# Never commit game files (extract from your own copy of the game)
+*.naz
+*.exe
+*.block
+*.block_h_z
+*.block_s_z
+
+# In-tree extraction / bake output
+OUT*/
+out*/
+*.glb
+*.npy
+
+# `watchmen gendata` output written to the working directory
+# (the shipped tables live in wlib/ and ARE tracked)
+/prop_hash_dict.pkl
+/reg_dump.json
+/prop_names_from_reg.json
+/kapow_fragment_keys.pkl
+/kapow_fragment_keys.json
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
