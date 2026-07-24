@@ -28,6 +28,10 @@ out*/
 /kapow_fragment_keys.pkl
 /kapow_fragment_keys.json
 
+# Test / tooling caches
+.pytest_cache/
+.coverage
+
 # Editors / OS
 .vscode/
 .idea/

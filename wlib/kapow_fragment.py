@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """kapow_fragment — LOSSLESS .fragment parser (engine-verified, 2026-07-07).
-Format (from KapowMultiDEDRM decomp FUN_005473ee/FUN_00545e1b + TOD_tools):
+Format (from executable decomp FUN_005473ee/FUN_00545e1b + TOD_tools):
   file = [header (17B, or extended w/ name when flags bit set)] + chunks
   chunk = [u32 size<=0x2800][payload]; payloads concatenate into ONE stream
   stream = schema records [FFFFFFFF][selfHash][wc][TypeName(...)] ...
@@ -20,11 +20,19 @@ strings verified present in output; EmbeddedJoint spring constants recovered.
 import struct, pickle, sys, re
 import os as _os
 
-sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
-import os as _os0
-
-_KP = _os0.path.join(_os0.path.dirname(_os0.path.abspath(__file__)), "kapow_fragment_keys.pkl")
-_KD = pickle.load(open(_KP, "rb"))
+_D = _os.path.dirname(_os.path.abspath(__file__))
+if _D not in sys.path:
+    sys.path.append(_D)  # append, never insert(0): flat module names must not shadow the stdlib
+_KP = _os.path.join(_D, "kapow_fragment_keys.pkl")
+try:
+    with open(_KP, "rb") as _fh:
+        _KD = pickle.load(_fh)
+except OSError as _ex:
+    raise SystemExit(
+        "watchmen: missing data table %s (%s)\n"
+        "  reinstall the package, or rebuild it with `watchmen gendata keys-import KEYS.json`"
+        % (_KP, _ex)
+    )
 h2t = _KD["keytable"]
 std = _KD["stdkeys"]
 STDTYPES = {

@@ -7,19 +7,30 @@
 import os, sys, json, struct, pickle
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+_D = os.path.dirname(os.path.abspath(__file__))
+if _D not in sys.path:
+    sys.path.append(_D)  # append, never insert(0): flat module names must not shadow the stdlib
 import watchmen_extract as we, export_female_anims as efa, rig_glb, extract_skeletons as es
 
-C = np.array([[1, 0, 0], [0, 0, 1], [0, -1.0, 0]])
-C4 = np.eye(4)
-C4[:3, :3] = C
-C4i = np.linalg.inv(C4)
-Ry = np.eye(4)
-Ry[:3, :3] = [[1, 0, 0], [0, 0, -1], [0, 1, 0]]
+# 2026-07-24 AXIS: the Kapow engine is ALREADY Y-up, so no axis conversion is
+# needed for glTF.  This module used to carry a Z-up->Y-up rotation C (applied
+# to POSITION) together with its exact inverse Ry (folded into the joint world
+# matrices), i.e. Ry @ C4 == I.  The pair cancelled in the *animated* result but
+# left the raw POSITION accessor -- and therefore the bind pose -- rotated 90
+# degrees about X.  Both are gone; animated output is bit-identical, the bind
+# pose is now upright.
+#
+# Evidence: on CHAR_Rorschach_v10_walk_cycle.glb the skinned frame-0 bbox is
+# (0.519, 1.751, 0.662) -- 1.75 m tall along Y, feet down -- while POSITION
+# alone measured (1.276, 0.426, 1.802), i.e. lying on its back.  The old Z-up
+# reading came from decode_skeleton_model.py, which is superseded for an
+# off-by-one node/name attribution bug (it also reported a 1.4 m character).
+# Independent confirmation: GameEssentials.fragment gravity is (0, -14.82, 0)
+# == World -Y (jiggle_d6.py).
 
 
 # Engine playback-speed overrides -- MOSTLY RETIRED (2026-07-09,
-# work_E/ENGINE_CONSTANTS.md): the clip header was misread (hdr[0]=keyRate Hz
+# docs/ENGINE_CONSTANTS.md): the clip header was misread (hdr[0]=keyRate Hz
 # was taken as duration; hdr[1] is the true duration).  With header-exact fps
 # the old turn/settle/step/run_start/stop multipliers (2.7-3.2 needed vs 3.0
 # empirical etc.) are reproduced NATIVELY and are gone.  What remains is
@@ -226,7 +237,7 @@ def write_glb(parts, manifest, out, bindnpz, textures=None, face=None, attachmen
     B4 = np.tile(np.eye(4), (NB, 1, 1))
     B4[:, :3, :3] = Rb
     B4[:, :3, 3] = tb
-    IBM = np.array([C4 @ np.linalg.inv(B4[k]) @ C4i for k in range(NB)])
+    IBM = np.array([np.linalg.inv(B4[k]) for k in range(NB)])
     j = {
         "asset": {"version": "2.0", "generator": "watchmen_extract variant_glb"},
         "scene": 0,
@@ -262,15 +273,30 @@ def write_glb(parts, manifest, out, bindnpz, textures=None, face=None, attachmen
         return len(j["accessors"]) - 1
 
     _texdone = {}
+
+    def _node_trs(L):
+        """4x4 -> glTF node TRS dict (rotation is XYZW, same as glTF)."""
+        q = batch_m2q(np.ascontiguousarray(L[:3, :3])[None])[0]
+        return {"rotation": [float(x) for x in q], "translation": [float(x) for x in L[:3, 3]]}
+
+    # Joint nodes carry the BIND pose, not identity.  They are flat children of
+    # an identity `root`, so node-local == node-global and the bind world matrix
+    # B4[k] goes straight in.  Previously these were identity while the IBMs
+    # were real, so any viewer showing the scene before an animation is picked
+    # (Blender's rest pose, default glTF viewer state, thumbnailers) rendered
+    # the mesh in bind-LOCAL space -- measured 0.72 m mean vertex displacement
+    # and a mesh collapsed to ~1/5 of its animated size.
     bnode = [len(j["nodes"]) + k for k in range(NB)]
     for k in range(NB):
-        j["nodes"].append({"name": "b%d" % k, "translation": [0, 0, 0], "rotation": [0, 0, 0, 1]})
+        nd = {"name": "b%d" % k}
+        nd.update(_node_trs(B4[k]))
+        j["nodes"].append(nd)
     ibmacc = ac(
         av(np.array([m.T.reshape(16) for m in IBM], np.float32).tobytes()), 5126, NB, "MAT4"
     )
     prims = []
     for V, SI, SW, T, UV, nm in parts:
-        Vg = (C @ V.T).T.astype(np.float32)
+        Vg = np.ascontiguousarray(V, np.float32)
         ap = ac(av(Vg.tobytes()), 5126, len(Vg), "VEC3", Vg.min(0).tolist(), Vg.max(0).tolist())
         aj = ac(av(np.ascontiguousarray(SI).tobytes()), 5123, len(Vg), "VEC4")
         aw = ac(av(np.ascontiguousarray(SW).tobytes()), 5126, len(Vg), "VEC4")
@@ -409,7 +435,7 @@ def write_glb(parts, manifest, out, bindnpz, textures=None, face=None, attachmen
         # separate object, individually hideable.
         aprims = []
         for V, SI, SW, T, UV, nm in aparts:
-            Vg = (C @ V.T).T.astype(np.float32)
+            Vg = np.ascontiguousarray(V, np.float32)
             ap = ac(av(Vg.tobytes()), 5126, len(Vg), "VEC3", Vg.min(0).tolist(), Vg.max(0).tolist())
             aj = ac(av(np.ascontiguousarray(SI).tobytes()), 5123, len(Vg), "VEC4")
             aw = ac(av(np.ascontiguousarray(SW).tobytes()), 5126, len(Vg), "VEC4")
@@ -452,31 +478,29 @@ def write_glb(parts, manifest, out, bindnpz, textures=None, face=None, attachmen
         M4[:3, :3] = face["M"]
         M4[:3, 3] = face["t"]
         ai = face["attach_idx"]
-        L_att = C4 @ np.linalg.inv(B4[ai]) @ M4 @ C4i
 
         def _trs(L):
             q = batch_m2q(L[:3, :3][None])[0]
             return {"rotation": [float(x) for x in q], "translation": [float(x) for x in L[:3, 3]]}
 
-        RyC4 = Ry @ C4
         frn = len(j["nodes"])
         j["nodes"].append({"name": "face_root"})
         anchor = len(j["nodes"])
         nd = {"name": "f_anchor"}
-        nd.update(_trs(RyC4 @ M4 @ C4i))
+        nd.update(_trs(M4))
         j["nodes"].append(nd)
         proxynodes = []
         _palign = face.get("proxy_align") or None  # per-proxy 4x4 (giraffe fix)
         for pi, bs in enumerate(face.get("proxy_slots", [])):
             _Mk = _palign[pi] if _palign is not None else M4
-            Lp = RyC4 @ _Mk @ C4i
+            Lp = _Mk
             nd = {"name": "face_proxy_b%d_%d" % (bs, pi)}
             nd.update(_trs(Lp))
             pn = len(j["nodes"])
             j["nodes"].append(nd)
             proxynodes.append(pn)
         for k in range(NF):
-            L = C4 @ B4f[k] @ C4i  # LOCAL under f_anchor
+            L = B4f[k]  # LOCAL under f_anchor
             nd = {"name": "f_%s" % str(fb["names"][k])}
             nd.update(_trs(L))
             facenodes.append(len(j["nodes"]))
@@ -484,9 +508,9 @@ def write_glb(parts, manifest, out, bindnpz, textures=None, face=None, attachmen
         j["nodes"][anchor]["children"] = facenodes[:]
         j["nodes"][frn]["children"] = [anchor] + proxynodes
         _fj_ibms = (
-            [(C4 @ np.linalg.inv(B4f[k]) @ C4i) for k in range(NF)]
+            [np.linalg.inv(B4f[k]) for k in range(NF)]
             + [np.eye(4) for _ in proxynodes]
-            + [C4 @ np.linalg.inv(M4) @ C4i @ np.linalg.inv(RyC4)]
+            + [np.linalg.inv(M4)]
         )
         fibm = ac(
             av(np.array([m.T.reshape(16) for m in _fj_ibms], np.float32).tobytes()),
@@ -496,7 +520,7 @@ def write_glb(parts, manifest, out, bindnpz, textures=None, face=None, attachmen
         )
         fprims = []
         for V, SI, SW, T, UV, nm in face["parts"]:
-            Vg = (C @ V.T).T.astype(np.float32)
+            Vg = np.ascontiguousarray(V, np.float32)
             ap = ac(av(Vg.tobytes()), 5126, len(Vg), "VEC3", Vg.min(0).tolist(), Vg.max(0).tolist())
             aj = ac(av(np.ascontiguousarray(SI).tobytes()), 5123, len(Vg), "VEC4")
             aw = ac(av(np.ascontiguousarray(SW).tobytes()), 5126, len(Vg), "VEC4")
@@ -607,7 +631,7 @@ def write_glb(parts, manifest, out, bindnpz, textures=None, face=None, attachmen
         _M4 = np.eye(4)
         _M4[:3, :3] = face["M"]
         _M4[:3, 3] = face["t"]
-        _M4Ci = _M4 @ C4i
+        _M4Ci = _M4
 
         def _locals_for(_A):
             """pose palettes frame (NF,3,4) -> (quat,(NF,3)) LOCALS under anchor."""
@@ -620,7 +644,7 @@ def write_glb(parts, manifest, out, bindnpz, textures=None, face=None, attachmen
             )
             _W = np.einsum("kab,kbc->kac", _A4, _B4f)
             _fx = _B4f[_fhead] @ np.linalg.inv(_W[_fhead])
-            _L = np.einsum("ab,kbc->kac", C4 @ _fx, _W) @ C4i
+            _L = np.einsum("ab,kbc->kac", _fx, _W)
             return batch_m2q(_L[:, :3, :3]), _L[:, :3, 3]
 
         _cand = [a for a in face["anims"] if "MouthClosed_EyesOpen" in a[0]] or list(face["anims"])
@@ -672,7 +696,7 @@ def write_glb(parts, manifest, out, bindnpz, textures=None, face=None, attachmen
             ],
             axis=2,
         )  # (F,NB,4,4)
-        W = np.einsum("ab,fkbc->fkac", Ry @ C4, np.einsum("fkab,kbc->fkac", A4, B4)) @ C4i
+        W = np.einsum("fkab,kbc->fkac", A4, B4)
         Q = batch_m2q(W[:, :, :3, :3].reshape(-1, 3, 3)).reshape(F, NB, 4)
         # sign continuity along time per bone
         for f in range(1, F):
@@ -695,8 +719,7 @@ def write_glb(parts, manifest, out, bindnpz, textures=None, face=None, attachmen
             # children with LOCAL channels -> expressions follow the head, and
             # a FACE action layered/posed on top keeps riding).
             _ai, _pslots, _palign, _fneut, _fpose, _fblink, _fs = _faceride
-            RyC4 = Ry @ C4
-            FH = np.einsum("ab,fbc->fac", RyC4, A4[:, _ai])  # (F,4,4)
+            FH = A4[:, _ai]  # (F,4,4)
             La = np.einsum("fab,bc->fac", FH, _M4Ci)
             Qf = batch_m2q(La[:, :3, :3])
             for f in range(1, F):
@@ -792,8 +815,8 @@ def write_glb(parts, manifest, out, bindnpz, textures=None, face=None, attachmen
                         }
                     )
             for pi, bs in enumerate(_pslots):
-                _MkCi = (_palign[pi] @ C4i) if _palign is not None else _M4Ci
-                Lp = np.einsum("ab,fbc->fac", RyC4, np.einsum("fab,bc->fac", A4[:, bs], _MkCi))
+                _MkCi = _palign[pi] if _palign is not None else _M4Ci
+                Lp = np.einsum("fab,bc->fac", A4[:, bs], _MkCi)
                 Qf = batch_m2q(Lp[:, :3, :3])
                 for f in range(1, F):
                     if (Qf[f] * Qf[f - 1]).sum() < 0:
@@ -837,9 +860,7 @@ def write_glb(parts, manifest, out, bindnpz, textures=None, face=None, attachmen
             )
             Wp = np.einsum("fkab,kbc->fkac", A4, B4f)
             fix = np.einsum("ab,fbc->fac", B4f[_fhead], np.linalg.inv(Wp[:, _fhead]))
-            L = (
-                np.einsum("ab,fkbc->fkac", C4, np.einsum("fab,fkbc->fkac", fix, Wp)) @ C4i
-            )  # LOCAL under anchor
+            L = np.einsum("fab,fkbc->fkac", fix, Wp)  # LOCAL under anchor
             Q = batch_m2q(L[:, :, :3, :3].reshape(-1, 3, 3)).reshape(F, NF, 4)
             for f in range(1, F):
                 flip = np.einsum("kc,kc->k", Q[f], Q[f - 1]) < 0
@@ -868,9 +889,9 @@ def write_glb(parts, manifest, out, bindnpz, textures=None, face=None, attachmen
                     }
                 )
             j["animations"].append({"name": animname, "samplers": sm, "channels": chn})
-    for kk in ("images", "textures"):
-        if not j[kk]:
-            del j[kk]
+    for kk in ("animations", "skins", "images", "textures", "materials"):
+        if not j.get(kk):
+            j.pop(kk, None)
     if "textures" not in j:
         del j["samplers"]
     j["buffers"].append({"byteLength": len(BIN)})
@@ -895,18 +916,32 @@ def write_glb(parts, manifest, out, bindnpz, textures=None, face=None, attachmen
     print("wrote %s  (%d anims, %.1f MB)" % (out, len(manifest), (12 + len(jb) + len(bb)) / 1e6))
 
 
-_CAPD = __import__("os").path.join(
-    __import__("os").path.dirname(__import__("os").path.abspath(__file__)),
-    "..",
-    "dominatrix_capture",
-)
-BINDS = {
-    "Female_Skeleton": _CAPD + "/bind_female_file_v1.npz",
-    "Large_Gimp_Skeleton": _CAPD + "/bind_gimp_file_v1.npz",
-    "Medium_Skeleton": _CAPD + "/bind_medium_file_v1.npz",
-    "Large_Skeleton": _CAPD + "/bind_large_file_v1.npz",
-    "Small_Skeleton": _CAPD + "/bind_small_file_v1.npz",
+# Skeleton asset name -> the bind npz built for it.  Populated from a binds
+# directory (watchmenlib.ensure_binds / `watchmen binds`); the old hardcoded
+# table pointed at a developer-machine directory that never shipped.
+_BIND_KEY = {
+    "Female_Skeleton": "female",
+    "Large_Gimp_Skeleton": "gimp",
+    "Medium_Skeleton": "medium",
+    "Large_Skeleton": "large",
+    "Small_Skeleton": "small",
+    "Rorschach": "rsh",
+    "NiteOwl": "nto",
 }
+
+
+def binds_from_dir(binddir):
+    """-> {skeleton asset name: bind npz path} for the binds present in binddir."""
+    import os as _os
+
+    out = {}
+    for skel, key in _BIND_KEY.items():
+        p = _os.path.join(binddir, "bind_%s_file_v1.npz" % key)
+        if _os.path.exists(p):
+            out[skel] = p
+    return out
+
+
 CLIP_PREFIX = {"Female_Skeleton": ("EN4", "BS2"), "Large_Gimp_Skeleton": ("EN2",)}
 
 
@@ -932,10 +967,29 @@ def variant_from_fragment(fragjson, variant):
 
 
 def build(
-    fragjson, variant, out, bakedir="/tmp/allbake", bank=None, prefix=None, bind=None, jiggle=False
+    fragjson,
+    variant,
+    out,
+    bakedir="bake",
+    bank=None,
+    prefix=None,
+    bind=None,
+    binddir=None,
+    jiggle=False,
 ):
+    """One fragment variant -> one GLB carrying every baked clip in `bakedir`.
+
+    bind    : path to the bind npz for this variant's skeleton, or
+    binddir : a directory of binds (see `watchmen binds`) to pick it from.
+    """
     skel, meshes = variant_from_fragment(fragjson, variant)
-    bind = bind or BINDS.get(skel)
+    if not bind and binddir:
+        bind = binds_from_dir(binddir).get(skel)
+    if not bind:
+        raise ValueError(
+            "no bind for skeleton %r -- pass bind=<npz> or binddir=<dir built by "
+            "`watchmen binds NAZ OUT/binds`)" % skel
+        )
     prefix = prefix or CLIP_PREFIX.get(skel, ("EN4",))
     if isinstance(prefix, str):
         prefix = (prefix,)
@@ -963,9 +1017,12 @@ def build(
         if bank:
             h = bank.get(nm + ".animation")
             if h is not None:
-                dur = struct.unpack_from("<f", h, 0)[0]
-                if dur > 0:
-                    fps = len(A) / dur
+                # header = [f32 keyRate Hz][f32 duration s] ... -- hdr[0] is the
+                # RATE, not the duration (bake_v4.py:265).  fps must match
+                # bake_v4.fps_for(): (keys-1)/duration.
+                dur = struct.unpack_from("<f", h, 4)[0]
+                if dur > 0 and len(A) > 1:
+                    fps = (len(A) - 1) / dur
         fps *= speed_mult(nm)
         if jiggle:
             try:

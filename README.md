@@ -51,6 +51,7 @@ watchmen characters OUT CHARS game.naz   # one glb per character variant (resuma
 watchmen faces OUT FACES                 # cutscene heads + 24 expression poses
 watchmen fragment OUT/extracted/.../Gimp.fragment   # lossless fragment -> JSON
 watchmen hash SomePropertyName           # Kapow property-key hash
+watchmen --version
 ```
 
 `watchmen --help` lists all commands; `watchmen extract --help` shows extractor
@@ -67,9 +68,16 @@ import watchmenlib as wl        # the facade — one import for everything
 
 j = wl.fragment_json_file('X.fragment')          # lossless fragment JSON
 binds = wl.ensure_binds('game.naz', 'OUT/binds') # file-only engine-exact binds
-wl.build_variant_glb('Gimp.fragment.json', 'Gimp2', 'out.glb')
 pal, dur = wl.bake('run_cycle', binds['female']) # (F,NB,3,4) engine palettes
+wl.build_variant_glb('Gimp.fragment.json', 'Gimp2', 'out.glb',
+                     binddir='OUT/binds')
 ```
+
+(The three lines after the imports need game files; `import wlib` /
+`import watchmenlib` on their own do not, and have no side effects on your
+process — no `sys.argv` rewriting, no recursion-limit changes, and the package
+directory is appended to `sys.path`, never prepended, so it cannot shadow the
+stdlib.)
 
 `wlib/watchmenlib.py` documents the full facade. Notable standalone modules:
 `wlib/anim_state_machine.py` (animation state-machine interpreter),
@@ -77,6 +85,24 @@ pal, dur = wl.bake('run_cycle', binds['female']) # (F,NB,3,4) engine palettes
 the executable), `wlib/jiggle_d6.py` (PhysX D6 jiggle integrator),
 `wlib/kapow_fragment.py` (lossless `.fragment` parser, 906/906 files
 round-trip).
+
+## Tests
+
+```
+pip install -e ".[dev]"
+pytest
+```
+
+The suite runs with **no game files**: it covers the archive-entry path
+sanitizer, the Kapow property hash, the little/big-endian skeleton decoder
+against synthetic ModelRes headers, glTF structural conformance of the GLB
+writer (chunk padding, accessor alignment, accessor min/max, no empty arrays),
+clip-timing arithmetic, and output determinism. It is the executable form of
+the correctness claims below — if you change a decoder, this is what tells you
+whether you changed its output.
+
+Round-tripping the real corpus (the "906/906 fragments" figure) needs a game
+archive and is not part of the offline suite.
 
 ## Documentation
 
@@ -112,9 +138,17 @@ capture-parity default.
 
 ## Notes
 
-- Skeleton binds and clip decoding are **engine-exact**: validated against
-  GPU-captured bone palettes (median joint error ~0.0000, rotation ≤0.5°) and
-  against the decompiled executable's math. Outputs are byte-reproducible.
+- Skeleton binds and clip decoding are **engine-exact**: in our testing,
+  validated against GPU-captured bone palettes (median joint error ~0.0000,
+  rotation ≤0.5°) and against the decompiled executable's math. The captures
+  themselves are research input and are not shipped, so that specific number is
+  not reproducible from this repository alone; what *is* checkable here is in
+  `tests/` (see **Tests** below).
+- Extraction output is deterministic: repeated runs over the same archive
+  produce byte-identical files, on the same platform and across platforms
+  (all text output is written UTF-8 with LF endings).
+- Coordinates: the Kapow engine is Y-up, the same as glTF, so no axis
+  conversion is applied. GLB output is upright both at rest and animated.
 - Console block payloads are big-endian; byte order is auto-detected per
   archive — there is no flag to pass.
 - This toolkit reads only data you extracted from your own copy of the game;

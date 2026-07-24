@@ -12,8 +12,9 @@ Provenance of the data files shipped in wlib/ (see docs/INDEX.md):
   reg_dump.json            441 engine classes (props/commands/defaults/UI
                            captions), recovered by scanning registration call
                            sites in the executable's CODE.  Regenerable with
-                           `gen_data regdump`, but ONLY from a DRM-free exe
-                           (retail .text is SecuROM-encrypted in place) and
+                           `gen_data regdump`, but ONLY from an executable whose
+                           .text is not encrypted (retail .text is SecuROM-
+                           packed in place; this toolkit does not unpack it) and
                            needs the `capstone` package.
   prop_names_from_reg.json Pure aggregation of reg_dump.json (hash ->
                            classes/ui/default).  Derived at runtime by
@@ -49,7 +50,7 @@ import sys
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
-    sys.path.insert(0, _HERE)
+    sys.path.append(_HERE)  # append, never insert(0): flat module names must not shadow the stdlib
 
 from kapow_props import kapow_hash
 
@@ -185,8 +186,11 @@ def build_prop_dict(exe_path, sources=()):
     return out
 
 
-# ---- reg_dump (ported claude/work_E/reg_scan.py, Ghidra-free) ---------------
-CREATE, PROP, CMD = 0x47E126, 0x47FDE4, 0x47ECCC  # registration fns (this exe)
+# ---- reg_dump (registration-site scan, Ghidra-free) -------------------------
+# Registration-function VAs for the ONE build this was reversed against.  A
+# different executable will have different addresses and produce garbage, so the
+# recovered class count is sanity-checked in build_reg_dump before returning.
+CREATE, PROP, CMD = 0x47E126, 0x47FDE4, 0x47ECCC
 
 
 def build_reg_dump(exe_path):
@@ -195,8 +199,10 @@ def build_reg_dump(exe_path):
     d = open(exe_path, "rb").read()
     if text_is_packed(d):
         raise RuntimeError(
-            "%s has a DRM-packed .text section - reg_dump can only be "
-            "regenerated from a DRM-free executable (e.g. KapowMultiDEDRM.exe)" % exe_path
+            "%s has a DRM-packed .text section. reg_dump can only be regenerated "
+            "from an executable whose .text is not encrypted; this toolkit neither "
+            "provides such a binary nor assists in producing one. The other tables "
+            "(prop_hash_dict, kapow_fragment_keys) do not need it." % exe_path
         )
     secs = {s[0]: s for s in pe_sections(d)}
     _, tva, _, traw, tsz = secs[".text"]
@@ -294,6 +300,12 @@ def build_reg_dump(exe_path):
                     "argc": argc,
                 }
             )
+    if len(classes) < 50:
+        raise RuntimeError(
+            "recovered only %d engine classes from %s -- the registration-function "
+            "addresses in this module were reversed from one specific build and do "
+            "not apply here; the result would be garbage." % (len(classes), exe_path)
+        )
     return classes
 
 
@@ -341,15 +353,28 @@ def check(game_root):
     tables.  Success criterion is FUNCTIONAL: every hash the shipped tables
     resolve must resolve to the same name in the regenerated ones."""
     eng = os.path.join(game_root, "Data", "Engine")
-    exe = next(
-        (
-            os.path.join(eng, n)
-            for n in ("KapowMultiDEDRM.exe", "KapowMulti.exe")
-            if os.path.exists(os.path.join(eng, n))
-        ),
-        None,
+    exe = (
+        next(
+            (
+                os.path.join(eng, n)
+                for n in sorted(os.listdir(eng))
+                if n.lower().startswith("kapowmulti") and n.lower().endswith(".exe")
+            ),
+            None,
+        )
+        if os.path.isdir(eng)
+        else None
     )
     naz = os.path.join(game_root, "game.naz")
+    if exe is None:
+        print(
+            "error: no KapowMulti*.exe under %s\n"
+            "  `gendata check` verifies the shipped tables against a fresh regeneration,\n"
+            "  which needs a game install: pass its root, e.g. `watchmen gendata check /path/to/game`."
+            % eng,
+            file=sys.stderr,
+        )
+        return 2
     print("exe:", exe)
     rc = 0
 
@@ -400,8 +425,14 @@ def main(argv):
     out = None
     if "-o" in args:
         i = args.index("-o")
+        if i + 1 >= len(args):
+            print("error: -o needs a path", file=sys.stderr)
+            return 2
         out = args[i + 1]
         args = args[:i] + args[i + 2 :]
+    if cmd in ("strings", "regdump", "keys-import") and not args:
+        print("error: %s needs a path argument (see `gendata -h`)" % cmd, file=sys.stderr)
+        return 2
     if cmd == "strings":
         d = build_prop_dict(args[0], args[1:])
         out = out or "prop_hash_dict.pkl"
@@ -410,7 +441,8 @@ def main(argv):
     elif cmd == "regdump":
         r = build_reg_dump(args[0])
         out = out or "reg_dump.json"
-        json.dump(r, open(out, "w"), indent=1)
+        with open(out, "w", encoding="utf-8", newline="\n") as _f:
+            json.dump(r, _f, indent=1)
         print(
             "wrote %s (%d classes, %d props, %d commands)"
             % (
@@ -424,12 +456,14 @@ def main(argv):
         src = args[0] if args else os.path.join(_HERE, "reg_dump.json")
         p = derive_prop_names(json.load(open(src)))
         out = out or "prop_names_from_reg.json"
-        json.dump(p, open(out, "w"), indent=1)
+        with open(out, "w", encoding="utf-8", newline="\n") as _f:
+            json.dump(p, _f, indent=1)
         print("wrote %s (%d hashes)" % (out, len(p)))
     elif cmd == "keys-export":
         j = keys_export(args[0] if args else None)
         out = out or "kapow_fragment_keys.json"
-        json.dump(j, open(out, "w"), indent=1)
+        with open(out, "w", encoding="utf-8", newline="\n") as _f:
+            json.dump(j, _f, indent=1)
         print("wrote %s" % out)
     elif cmd == "keys-import":
         kd = keys_import(json.load(open(args[0])))

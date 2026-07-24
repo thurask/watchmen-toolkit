@@ -23,7 +23,7 @@ import numpy as np
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
-    sys.path.insert(0, _HERE)
+    sys.path.append(_HERE)  # append, never insert(0): flat module names must not shadow the stdlib
 
 
 def find_heads(extract_out):
@@ -72,7 +72,7 @@ def head_family(head):
 
 
 def export(extract_out, outdir, budget=None):
-    import importlib, bake_v4, char_lib, variant_glb as vg, build_bind_file as bbf
+    import bake_v4, char_lib, variant_glb as vg, build_bind_file as bbf
 
     clips = face_clips(extract_out)
     print(len(clips), "face clips")
@@ -94,8 +94,7 @@ def export(extract_out, outdir, budget=None):
         bind = os.path.join(bdir, "bind_face_%s.npz" % head)
         if not os.path.exists(bind):
             bbf.build(mbase + ".model", None, bind)
-        sys.argv = ["bake", "--bind", bind, "--conj"]
-        importlib.reload(bake_v4)
+        bake_v4._load_bind(bind)
         bake_v4._bank_lookup = lambda nm: open(clips[nm], "rb").read() if nm in clips else None
         fam = head_family(head)
         anims = []

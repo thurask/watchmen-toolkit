@@ -4,7 +4,7 @@
 Everything file-only + engine-exact: bind from build_bind_file (conj-FK),
 palettes from bake_v4 (conjugate clips, absolute root, fps=frames/(dur/3)),
 diffuse textures embedded.  No worldG (engine applies no root-pitch:
-claude/work_D/worldg_test.py).
+docs/ENGINE_CONSTANTS.md).
 """
 
 import os, sys, glob, struct
@@ -12,7 +12,7 @@ import numpy as np
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
-    sys.path.insert(0, _HERE)
+    sys.path.append(_HERE)  # append, never insert(0): flat module names must not shadow the stdlib
 
 
 def _clip_bank(animroot):
@@ -243,12 +243,10 @@ def build_lib(bind, models, clips, out, animroot, texroots=(), upsample=2):
     """bind: npz path; models: iterable of .model base paths (no extension);
     clips: iterable of clip names; out: .glb path; animroot: extracted
     Animation dir; texroots: texture trees (<root>/**/<mat>.bmp/*_diffuse_*.png)."""
-    sys.argv = ["bake", "--bind", bind, "--conj"]
-    import importlib, bake_v4
-
-    importlib.reload(bake_v4)
+    import bake_v4
     import variant_glb as vg
 
+    bake_v4._load_bind(bind)
     bank = _clip_bank(animroot)
     bake_v4._bank_lookup = lambda nm: open(bank[nm], "rb").read() if nm in bank else None
     bv = np.load(bind, allow_pickle=True)
@@ -258,7 +256,7 @@ def build_lib(bind, models, clips, out, animroot, texroots=(), upsample=2):
     anims = []
     for clip in clips:
         p_, dur = bake_v4.bake(clip, upsample)
-        fps = bake_v4.fps_for(len(p_), dur)  # header-exact (work_E/ENGINE_CONSTANTS.md)
+        fps = bake_v4.fps_for(len(p_), dur)  # header-exact (docs/ENGINE_CONSTANTS.md)
         anims.append((clip, p_, fps))
     tex = {}
     for pt in parts:

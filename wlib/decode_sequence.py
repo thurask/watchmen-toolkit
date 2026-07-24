@@ -28,6 +28,8 @@ def rdname(b, p, maxl=64, bo="<"):
 def detect_order(b):
     import math
 
+    if len(b) < 4:
+        return "<"
     for bo in ("<", ">"):
         v = struct.unpack_from(bo + "f", b, 0)[0]
         if math.isfinite(v) and 0.01 <= v <= 1000:
@@ -38,6 +40,19 @@ def detect_order(b):
 def parse(b, order=None):
     bo = order or detect_order(b)
     n = len(b)
+    # .sequence payloads are carved heuristically, so a short/truncated buffer is
+    # routine: report it through the same `warn` channel the desync path uses
+    # rather than letting struct.error escape into the caller's whole pass.
+    if n < 12:
+        return {
+            "version": None,
+            "h1": None,
+            "nobjects": 0,
+            "objects": [],
+            "parsed_bytes": 0,
+            "file_bytes": n,
+            "warn": ["truncated: %d bytes, need at least 12" % n],
+        }
     out = {"version": struct.unpack_from(bo + "f", b, 0)[0], "objects": []}
     out["h1"], out["nobjects"] = struct.unpack_from(bo + "2I", b, 4)
     p = 12
@@ -74,6 +89,9 @@ def parse(b, order=None):
             break
         kind, tgt, (cls, p2) = found
         obj = {"class": cls, ("path" if kind == "path" else "ids"): tgt, "tracks": []}
+        if p2 + 4 > n:
+            out.setdefault("warn", []).append("truncated before track count at %d" % p2)
+            break
         ntr = struct.unpack_from(bo + "I", b, p2)[0]
         p2 += 4
         ok = True
@@ -83,6 +101,9 @@ def parse(b, order=None):
                 ok = False
                 break
             pname, p2 = r
+            if p2 + 8 > n:
+                ok = False
+                break
             ttype, nkeys = struct.unpack_from(bo + "2I", b, p2)
             p2 += 8
             keys = []
@@ -95,7 +116,7 @@ def parse(b, order=None):
                     break
                 t, mode, dim = struct.unpack_from(bo + "fII", b, p2)
                 p2 += 12
-                if not 1 <= dim <= 4:
+                if not 1 <= dim <= 4 or p2 + 4 * dim > n:
                     ok = False
                     break
                 val = [round(x, 5) for x in struct.unpack_from(bo + "%df" % dim, b, p2)]
@@ -115,13 +136,14 @@ def parse(b, order=None):
                         return True
                     if rdname(b, q, bo=bo):
                         return True
+                    if q + 4 > n:
+                        return False
                     v = struct.unpack_from(bo + "I", b, q)[0]
                     if 1 <= v <= 8 and q + 4 + 4 * v + 4 <= n and rdname(b, q + 4 + 4 * v, bo=bo):
                         return True
                     return False
 
                 last = k == nkeys - 1
-                took = False
                 if p2 + 4 <= n:
                     hdim = struct.unpack_from(bo + "I", b, p2)[0]
                     if 1 <= hdim <= 4 and p2 + 4 + 16 * hdim <= n:
@@ -132,12 +154,17 @@ def parse(b, order=None):
                         if all(abs(x) < 1e9 for x in hh) and (okctx or not okctx_wo):
                             kd["handles"] = [round(x, 5) for x in hh]
                             p2 = q
-                            took = True
                 keys.append(kd)
             if not ok:
                 break
             obj["tracks"].append({"prop": pname, "type": ttype, "nkeys": nkeys, "keys": keys})
         out["objects"].append(obj)
+        if p2 <= p:
+            # the resync window scans 24 bytes BACKWARD, so a match can hand back
+            # an earlier offset; without this guard a 2-cycle would spin forever
+            # appending to out["objects"].
+            out.setdefault("warn", []).append("no forward progress at %d" % p)
+            break
         p = p2
         if not ok:
             out.setdefault("warn", []).append("desync in %s" % cls)
@@ -151,6 +178,7 @@ if __name__ == "__main__":
     d = parse(b)
     j = json.dumps(d, indent=1)
     if len(sys.argv) > 2:
-        open(sys.argv[2], "w").write(j)
+        with open(sys.argv[2], "w", encoding="utf-8", newline="\n") as _f:
+            _f.write(j)
     else:
         print(j[:3500])

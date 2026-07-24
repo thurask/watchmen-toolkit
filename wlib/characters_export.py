@@ -13,7 +13,7 @@ import numpy as np
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
-    sys.path.insert(0, _HERE)
+    sys.path.append(_HERE)  # append, never insert(0): flat module names must not shadow the stdlib
 
 # skeleton-model ref -> bind key ; bind key -> clip prefix
 SKEL_BIND = {
@@ -360,10 +360,9 @@ def bake_cache(key, bind, extract_out, outdir, budget=None):
     Resumable (skips existing .npy).  Returns (done, remaining).
     ADAPTIVE RATE: bake at 2x, keep 1x when LERP mid-frame error <= LERP_ERR_DEG,
     escalate to 4x (keeping 2x/4x) for fast clips -- fixes hand/finger shear."""
-    import importlib, bake_v4
+    import bake_v4
 
-    sys.argv = ["bake", "--bind", bind, "--conj"]
-    importlib.reload(bake_v4)
+    bake_v4._load_bind(bind)
     bv = np.load(bind, allow_pickle=True)
     _NB = len(bv["Rb"])
     _B4 = np.tile(np.eye(4), (_NB, 1, 1))
@@ -515,6 +514,9 @@ def export(extract_out, outdir, naz="game.naz", budget=None, only=None):
                     # (was named `pending`, which shadowed the outer resumable-
                     #  bake counter and made export() return a list)
                     for f in sorted(glob.glob(os.path.join(cdir, "*.npz"))):
+                        if f.endswith(".tmp.npz"):
+                            os.remove(f)  # torn write from a killed run
+                            continue
                         nm = os.path.basename(f)[:-4]
                         d = np.load(f)
                         if "fps" in d:
@@ -954,7 +956,7 @@ def _face_attach(model_base, bone, bind, bn, cname, extract_out, outdir, align_r
     """Animated face attach: face bind from the head model's own nodes, its
     family's expression poses baked on, alignment M,t mapping face-model space
     -> body bind space (same node-FK alignment as the old rigid attach)."""
-    import importlib, bake_v4, char_lib, parse_model_nodes, build_bind_file as bbf
+    import bake_v4, char_lib, parse_model_nodes, build_bind_file as bbf
     import face_export
 
     # face bind
@@ -982,7 +984,7 @@ def _face_attach(model_base, bone, bind, bn, cname, extract_out, outdir, align_r
     parts = char_lib.load_parts([model_base], fbn)
     proxy_slots = []
     if align_ref is None:
-        # 2026-07-13: NAME-PROXY RIDE (designed in work_D/NTO_FACE_FINDINGS.md,
+        # 2026-07-13: NAME-PROXY RIDE (see docs/ENGINE_CONSTANTS.md,
         # now applied after user QA: NiteOwl cowl moved separately from the
         # body).  The cowl/head models blend real weight onto Bip01/Neck/
         # clavicles/twists; a rigid Head ride over-rotates all of it.  Face-rig
@@ -1090,7 +1092,7 @@ def _face_attach(model_base, bone, bind, bn, cname, extract_out, outdir, align_r
         ref_parts = char_lib.load_parts([align_ref], bn)
         A = max((pt[0] for pt in parts), key=len)  # twin's biggest submesh
         B = np.vstack([pt[0] for pt in ref_parts])
-        M0, t0 = M.copy(), t.copy()
+        M0 = M.copy()
         M, t, res = _icp_refine(np.asarray(A, float), np.asarray(B, float), M, t)
         dang = np.degrees(np.arccos(np.clip((np.trace(M0.T @ M) - 1) / 2, -1, 1)))
         print(
@@ -1162,8 +1164,7 @@ def _face_attach(model_base, bone, bind, bn, cname, extract_out, outdir, align_r
     clips = {
         k: v for k, v in face_export.face_clips(extract_out).items() if k.startswith(fam + "/")
     }
-    sys.argv = ["bake", "--bind", fbind, "--conj"]
-    importlib.reload(bake_v4)
+    bake_v4._load_bind(fbind)
     bake_v4._bank_lookup = lambda nm: open(clips[nm], "rb").read() if nm in clips else None
     anims = []
     for nm in sorted(clips):

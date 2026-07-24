@@ -20,6 +20,9 @@ import sys as _sys
 
 _HERE = _os.path.dirname(_os.path.abspath(__file__))
 if _HERE not in _sys.path:
-    _sys.path.insert(0, _HERE)
+    # APPEND, never insert(0): these are flat, generic module names (char_lib,
+    # gen_data, engine_schema, ...) and must not shadow the stdlib or any other
+    # installed package for the rest of the host process.
+    _sys.path.append(_HERE)
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"

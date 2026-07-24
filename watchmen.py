@@ -20,9 +20,11 @@ Commands
   characters EXTRACT_OUT OUT_DIR [NAZ]  Folder per character, one glb per fragment
                                  variant, EVERY animation of its skeleton (resumable)
   fragment FILE [OUT.json]       Lossless .fragment -> JSON
-  bake CLIPNAME BIND OUT.npy     Engine-exact palettes for one clip
-  char FRAG.json VARIANT OUT.glb Character variant -> GLB with all its clips
+  bake CLIPNAME BIND.npz OUT.npy Engine-exact palettes for one clip
+  char FRAG.json VARIANT OUT.glb [BINDDIR [BAKEDIR]]
+                                 Character variant -> GLB with all its clips
   hash NAME                      Kapow property-key hash of a name
+  --version                      Print the toolkit version and exit
   gendata SUBCMD ...             Regenerate wlib's data tables from a game
                                  install (strings/regdump/propnames/keys-export/
                                  keys-import/check; see gendata -h)
@@ -37,9 +39,27 @@ Examples
 
 import os, sys, json
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "wlib"))
+# append, never insert(0): wlib holds flat, generically-named modules
+# (char_lib, gen_data, engine_schema, ...) that must not shadow the stdlib.
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "wlib"))
 _ARGV = list(sys.argv)  # watchmenlib rewrites sys.argv for bake_v4
-import watchmenlib as wl
+
+try:
+    from wlib import __version__ as VERSION
+except Exception:  # running from a source checkout without the package installed
+    VERSION = "1.0.0"
+
+
+def _wl():
+    """Import the facade lazily.
+
+    `watchmenlib` costs numpy + Pillow + three pickled data tables at import
+    time and rewrites sys.argv, so --help / --version / hash must not pay for
+    it (and must not fail when a data table is missing)."""
+    import watchmenlib as wl
+
+    return wl
+
 
 # per-command positional spec: (min_positional_args, one-line usage).
 # lets a bare/short `watchmen.py CMD` print a clean usage line instead of an
@@ -52,8 +72,8 @@ USAGE = {
     "faces": (2, "faces EXTRACT_OUT OUT_DIR"),
     "characters": (2, "characters EXTRACT_OUT OUT_DIR [NAZ]"),
     "fragment": (1, "fragment FILE [OUT.json]"),
-    "bake": (3, "bake CLIPNAME BIND OUT.npy"),
-    "char": (3, "char FRAG.json VARIANT OUT.glb"),
+    "bake": (3, "bake CLIPNAME BIND.npz OUT.npy"),
+    "char": (3, "char FRAG.json VARIANT OUT.glb [BINDDIR [BAKEDIR]]"),
     "hash": (1, "hash NAME"),
     "gendata": (1, "gendata strings|regdump|propnames|keys-export|keys-import|check ..."),
 }
@@ -63,10 +83,13 @@ def main(argv):
     if len(argv) < 2 or argv[1] in ("-h", "--help", "help"):
         print(__doc__)
         return 0 if len(argv) >= 2 else 1
+    if argv[1] in ("-V", "--version", "version"):
+        print("watchmen-kapow-toolkit %s" % VERSION)
+        return 0
     cmd, args = argv[1], argv[2:]
     if cmd not in USAGE:
-        print("unknown command %r" % cmd)
-        print(__doc__)
+        print("unknown command %r" % cmd, file=sys.stderr)
+        print(__doc__, file=sys.stderr)
         return 1
     if "-h" in args or "--help" in args:
         if cmd == "extract":
@@ -81,6 +104,8 @@ def main(argv):
         print("usage: watchmen.py %s" % USAGE[cmd][1])
         print("  (%s takes at least %d argument%s)" % (cmd, need, "" if need == 1 else "s"))
         return 2
+
+    wl = _wl()
 
     if cmd == "extract":
         naz, out = args[0], args[1]
@@ -136,9 +161,16 @@ def main(argv):
 
     elif cmd == "fragment":
         j = wl.fragment_json_file(args[0])
+        if j is None:
+            print("error: %s is not a recognized Kapow asset type" % args[0], file=sys.stderr)
+            return 2
         out = args[1] if len(args) > 1 else args[0] + ".json"
-        open(out, "w").write(json.dumps(j, indent=1))
+        with open(out, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(json.dumps(j, indent=1))
         print("wrote", out, "(lossless:", j.get("lossless"), ")")
+        if j.get("lossless") is False:
+            print("warning: parse was not lossless -- see the 'warn' key", file=sys.stderr)
+            return 3
 
     elif cmd == "bake":
         clip, bind, out = args[0], args[1], args[2]
@@ -150,7 +182,12 @@ def main(argv):
 
     elif cmd == "char":
         frag, variant, out = args[0], args[1], args[2]
-        wl.build_variant_glb(frag, variant, out)
+        kw = {}
+        if len(args) > 3:
+            kw["binddir"] = args[3]
+        if len(args) > 4:
+            kw["bakedir"] = args[4]
+        wl.build_variant_glb(frag, variant, out, **kw)
 
     elif cmd == "hash":
         print("%08x" % wl.kapow_hash(args[0]))
@@ -169,7 +206,15 @@ def main(argv):
 
 def cli():
     """Console-script entry point (``watchmen`` after ``pip install``)."""
-    sys.exit(main(_ARGV))
+    try:
+        sys.exit(main(_ARGV))
+    except KeyboardInterrupt:
+        print("interrupted", file=sys.stderr)
+        sys.exit(130)
+    except (OSError, ValueError) as ex:
+        # bad path / wrong file type: an actionable line, not a traceback
+        print("error: %s" % ex, file=sys.stderr)
+        sys.exit(2)
 
 
 if __name__ == "__main__":

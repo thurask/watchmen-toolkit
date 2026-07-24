@@ -52,7 +52,7 @@ The Edit tool truncated/corrupted wlib files FIVE times this session
 (characters_export ×2, variant_glb ×2 incl. trailing NUL bytes, bake_v4 ×1,
 face_export ×1). face_export's tail was recovered by disassembling
 wlib/__pycache__/face_export.cpython-310.pyc (marshal+dis) — pycache is a
-viable recovery source. Snapshot: claude/work_E/wlib_snap_20260709_engineconstants.tgz.
+viable recovery source. 
 Protocol: edit wlib ONLY via python scripts writing to /tmp + ast.parse + copy.
 
 # m_iHeadModelType — SOLVED (2026-07-09c)
@@ -84,7 +84,7 @@ AR(2) implies d≈17.9-19.4, k≈166-170 vs 200 — within ~15-20%; integrator
 function not in our decomp dump, semi-implicit Euler assumed).
 jiggle_pass.py: now falls back to engine-derived AR(2) coeffs when
 jiggle_params.npz is absent (fresh-install bug fixed: the npz lived only in
-claude/work_B; now also in wlib/). Capture-fit npz stays preferred when present.
+wlib/). Capture-fit npz stays preferred when present.
 
 # Runtime layers / weapon grip (2026-07-09d)
 Engine machinery confirmed in exe: AnimLayer (kernel/animation/animlayer.cpp;
@@ -171,7 +171,7 @@ restoration; jiggle distance limit unimplemented in jiggle_pass.
 The registration fn FUN_0047fde4 has an SEH prologue (mov eax,imm; call 0x991850)
 that made Ghidra truncate it to a 10-byte stub, and the whole PhysicsWorld ctor
 (0x7eba0e) + CharacterAddonCtrl code (0x6563a0-0x657d54) fell in DECOMP GAPS.
-Raw capstone disasm of KapowMultiDEDRM.exe was required. Caption strings are
+Raw capstone disasm of the executable was required. Caption strings are
 pushed as code immediates (PUSH imm32), findable by scanning .text for the
 string VAs — grep of decomp .c files misses them.
 
@@ -363,7 +363,7 @@ heuristics. Format residue: joint type4/5 blobs, meshbuffer internals,
 0x593F430A.
 
 ## Tooling
-claude/work_E/exe_dis.py (capstone CLI; pip install capstone
+a capstone-based disassembler (pip install capstone
 --break-system-packages) — ALWAYS use it over Ghidra for SEH-prologue fns
 (CharacterAddonCtrl setup/update are such gaps). reg_scan.py = registration
 scanner (regenerates wlib/reg_dump.json).
@@ -380,7 +380,7 @@ state rec: +0x38 easein, +0x6c transitions list, +0x78 fallback/default;
 group rec: +0x14 transitions, +0x18 default state; transition rec:
 +0x8 target, +0xc from-filter.
 
-## Registration scan (claude/work_E/reg_scan.py -> reg_dump.json)
+## Registration scan (`watchmen gendata regdump` -> reg_dump.json)
 Scans exe for call sites of:
   0x47e126 create class (name, classId, ?, baseName)
   0x47fde4 register prop (hash, defaultVA, uiCaptionVA, 3, X)
@@ -492,7 +492,7 @@ criteria (7/8) need overlay pages; page stack capped at 8.
   OPEN: unk1, unk2, unk5. entry flag: 0=header-only, 1=has 6 stream chunks.
 .fragment: reg_dump prop hashes resolve 250 distinct key_XXXX (=56% of all
   339,574 unresolved prop instances; mapping written to
-  claude/work_E/prop_names_from_reg.json — feed into kapow_fragment key
+  prop_names_from_reg.json — feed into kapow_fragment key
   dict). Remaining unresolved keys are mostly small-int creation-record
   keys (key_00000000/2/6/7), different keyspace. Type guesses 'raw4?' etc.
   remain heuristic (seen: sync marker 8 local misread as vector?).
@@ -546,7 +546,7 @@ suffix/prefix brute over 45k exe words failed. Semantics classified.
 All 429 caption-recoverable m_* names were ALREADY in kapow_fragment_keys
 keytable (4564 entries). Sync-marker true names NOT brute-recoverable
 (hash pairs 0xee2a40XX/0x4cadfbXX differ per digit); keep key_XXXX +
-claude/work_E/prop_names_from_reg.json side lookup (hash->class/caption/
+prop_names_from_reg.json side lookup (hash->class/caption/
 default for all 3602 registered props).
 
 ## FORMAT SCOREBOARD after this session
@@ -561,7 +561,7 @@ tangent dwords, 2 asset-type hash names, block_h_z magic 0x593F430A meaning.
 Policy (user): exe-derived constants are legitimate library data. Added
 wlib/engine_schema.py + wlib/reg_dump.json + wlib/prop_names_from_reg.json:
 defaults(class) (fragments omit default-valued props!), prop_info/caption
-for unresolved key_XXXX hashes, BASE_FPS. reg_scan.py stays in work_E as the
+for unresolved key_XXXX hashes, BASE_FPS. the registration scanner lives in wlib/gen_data.py as the
 regenerator. Interpreter fallback defaults in anim_state_machine were
 checked against registered defaults (match); future props should use
 engine_schema.defaults().
@@ -612,7 +612,7 @@ wlib/jiggle_d6.py — apply_jiggle(P,fps,bind, mode='engine'|'ratio'|'absolute',
 props=, extract_root=), same interface as jiggle_pass; reads PhysicsWorld
 props from GameEssentials.fragment.json, geometry from bind npz (r=tb[bone]),
 sim at 60Hz, engine radial clamp (replaces tanh).  Validation:
-claude/work_E/validate_jiggle_d6.py.
+the jiggle validation harness.
 GOTCHA FIXED: derivatives must be taken on the ORIGINAL clip grid then
 resampled — upsampling first turns linear-interp knots into accel impulses
 (20 m/s^2 spikes at idle, pinned sim at the clamp).
@@ -625,7 +625,7 @@ construction) matches dynamics but doubles statics -> rejected.  Candidates:
 damping lower at resonance than implicit model predicts, regression shrinkage
 in the AR(2) fit (gain compensating), capture overlay content.  DECIDER:
 raw-capture window comparison — dominatrix_capture/ALL_deduped_palettes.npy
-+ clip alignment (work_B/which_clip.py needs its /tmp/oracle.npz rebuilt via
++ clip alignment (the clip-alignment oracle needs rebuilding via
 collect_dump_palettes/oracle_setup).  Until then bakes should keep jiggle_pass
 (capture-grade) as default; jiggle_d6 is the file-only fallback candidate to
 replace the _engine_ar2 fresh-install path in jiggle_pass (strictly better:
@@ -765,7 +765,7 @@ for the anisotropic jiggle mode.
    (parse_node_aux type-7 quats, now correct); spring+damp K,D on swing2
    component only; swing1 free (limit 45deg, rarely hit under distance clamp);
    validate vs AR(2) + captures. This may close the x1.7 amplitude gap.
-2. Raw-capture window compare (rebuild work_B alignment oracle) — final
+2. Raw-capture window compare (rebuild the alignment oracle) — final
    arbiter for amplitude + anisotropy.
 3. Then: promote winner into variant_glb --jiggle; swap jiggle_pass fresh-
    install fallback to jiggle_d6.
@@ -1008,7 +1008,7 @@ that are not mesh-object junk or trailing 'Interact'.
    now 71.45/16.06deg == large/small. Thug/Heavies glbs + QA regenerated.
 2. NiteOwl head moving separately = rigid EXTRA_HEADS Head-ride of a cowl
    that carries real Bip01/Neck/clavicle/twist weights. Applied the
-   NAME-PROXY RIDE designed-but-unapplied in work_D/NTO_FACE_FINDINGS.md:
+   NAME-PROXY RIDE (designed-but-unapplied):
    in _face_attach, when align_ref is None, face-rig slots NOT under Head
    whose names exist in the body bind (NAME_MAP Bip01->Bip) are re-slotted
    to per-body-slot proxy joints (same mechanism as the weight-transfer
@@ -1207,7 +1207,7 @@ data tables from a game install and documents each table's provenance:
   (camelCase/underscore sub-tokens — names like 'Speed' only occur as
   substrings). FULLY de novo, works on retail DRM'd KapowMulti.exe: SecuROM
   encrypts .text in place (extra .bind section) but .rdata/.data are
-  byte-identical to the DEDRM exe. Functional check vs canonical 20260708
+  byte-identical to the unpacked exe. Functional check vs canonical 20260708
   pb-family JSONs (297 files): 202 byte-identical, 3 case-only, 92 strictly
   better (more hashes named), 0 regressions.
 - reg_dump.json: reg_scan ported into wlib (Ghidra-free — .rdata string map

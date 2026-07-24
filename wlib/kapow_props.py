@@ -44,15 +44,20 @@ def namedict():
     if _D is None:
         import os
 
-        for cand in (
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), "prop_hash_dict.pkl"),
-            "/tmp/prop_hash_dict.pkl",
-        ):
-            try:
-                _D = pickle.load(open(cand, "rb"))
-                break
-            except:
-                _D = {}
+        import sys
+
+        cand = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prop_hash_dict.pkl")
+        try:
+            with open(cand, "rb") as _fh:
+                _D = pickle.load(_fh)
+        except (OSError, pickle.UnpicklingError, EOFError, ValueError) as _ex:
+            # NEVER fall back to a world-writable path: pickle.load executes code.
+            print(
+                "warning: %s unreadable (%s) -- property keys will render as hex hashes"
+                % (cand, _ex),
+                file=sys.stderr,
+            )
+            _D = {}
     return _D
 
 
@@ -154,6 +159,7 @@ if __name__ == "__main__":
     out = parse(b)
     j = json.dumps(out, indent=1)
     if len(sys.argv) > 2:
-        open(sys.argv[2], "w").write(j)
+        with open(sys.argv[2], "w", encoding="utf-8", newline="\n") as _f:
+            _f.write(j)
     else:
         print(j[:5000])

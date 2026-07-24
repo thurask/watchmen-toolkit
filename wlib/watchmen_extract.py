@@ -16,7 +16,7 @@ Feed it game.naz and it walks the whole chain we reverse-engineered and writes:
     OUT/audio/      <asset>.ogg                              (.mediastream_s = Vorbis)
     OUT/streams/    <asset>.stream                           (other block payloads)
 
-Pipeline (see REVERSE_ENGINEERING_NOTES.md for the gory detail):
+Pipeline (see docs/WATCHMEN_EXTRACTION_MASTER.md for the gory detail):
   NAZ      obfuscated ZIP: filenames rotate-left-2 encrypted, custom EOCD/CD magics.
   BLOCK    <name>.block_h_z (TOC + per-asset header blobs) + <name>.block_s_z
            (per-asset zlib streams). Standalone _h_z/_s_z and .mediastream_s too.
@@ -111,6 +111,7 @@ def loose_entries(root):
     unique across directories and grab_blocks/main pair the halves correctly."""
     root = os.path.abspath(str(root))
     for dirpath, _dirs, files in os.walk(root):
+        _dirs.sort()  # os.walk order is filesystem-dependent; entry order must not be
         for fn in sorted(files):
             if not fn.lower().endswith(LOOSE_SUFFIXES):
                 continue
@@ -130,6 +131,8 @@ def naz_entries(path):
     with open(path, "rb") as f:
         f.seek(0, os.SEEK_END)
         fsize = f.tell()
+        if fsize < _EOCD:
+            raise ValueError("not a NAZ archive (%d bytes, shorter than the EOCD record)" % fsize)
         f.seek(fsize - _EOCD)
         magic, _dk, _dkc, _di, titem, _ds, doffs, _cs = struct.unpack(_EOCD_FMT, f.read(_EOCD))
         if magic != NAZ_HEAD:
@@ -615,7 +618,7 @@ def extract_block(h_data, s_data):
 
     The block-tables region opens with one sentinel flag/pair owned by no asset. This
     resolves 1190/1190 textures across all level blocks with zero content search (was
-    a ±2 search). See TEXTURE_DECODE_RULES.md §5.
+    a ±2 search). See docs/WATCHMEN_EXTRACTION_MASTER.md §6.
     """
     entries, data_start = parse_block_toc(h_data)
     cur = data_start
@@ -1190,9 +1193,8 @@ def _write_spec_txt(header, out_dir):
     try:
         ex, it = extract_specular(header, ">")
         if ex is not None or it is not None:
-            (out_dir / "spec.txt").write_text(
-                "%s %s" % ("" if ex is None else repr(ex), "" if it is None else repr(it))
-            )
+            with open(out_dir / "spec.txt", "w", encoding="utf-8", newline="\n") as _f:
+                _f.write("%s %s" % ("" if ex is None else repr(ex), "" if it is None else repr(it)))
     except Exception:
         pass
 
@@ -1328,9 +1330,8 @@ def carve_texture(stream, header, out_dir, log=None):
     try:
         ex, it = extract_specular(header)
         if ex is not None or it is not None:
-            (out_dir / "spec.txt").write_text(
-                "%s %s" % ("" if ex is None else repr(ex), "" if it is None else repr(it))
-            )
+            with open(out_dir / "spec.txt", "w", encoding="utf-8", newline="\n") as _f:
+                _f.write("%s %s" % ("" if ex is None else repr(ex), "" if it is None else repr(it)))
     except Exception:
         pass
     log(
@@ -1729,7 +1730,7 @@ def build_texture_index(tex_root):
     """basename(lower) -> texture output dir (which holds <j>_<label>_<WxH>_<FMT>.png)."""
     idx = {}
     try:
-        for p in Path(tex_root).rglob("*_diffuse_*.png"):
+        for p in sorted(Path(tex_root).rglob("*_diffuse_*.png")):
             idx.setdefault(p.parent.name.rsplit(".", 1)[0].lower(), p.parent)
     except Exception:
         pass
@@ -1801,7 +1802,7 @@ def _write_obj_mtl(path, name, v, n, uv, tris, subs, mats, tex_index, log):
     multi = len(subs) > 1
     mtl_path = path.with_suffix(".mtl")
     objdir = path.parent
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write("# %s  (%d verts, %d tris, %d submeshes)\n" % (name, len(v), len(tris), len(subs)))
         f.write("mtllib %s\n" % mtl_path.name)
         for p in v:
@@ -1822,14 +1823,8 @@ def _write_obj_mtl(path, name, v, n, uv, tris, subs, mats, tex_index, log):
     # (verified in Blender's importer: 'norm' is IGNORED; map_Bump routes through a
     # Normal Map node). map_Ns lands in Roughness, which is
     # gloss-inverted, but it links the map.
-    LBL = [
-        ("map_Kd", "diffuse"),
-        ("map_Bump -bm 1.000000", "normal"),
-        ("map_Ks", "specular"),
-        ("map_Ns", "glossiness"),
-    ]
     seen = set()
-    with open(mtl_path, "w") as mf:
+    with open(mtl_path, "w", encoding="utf-8", newline="\n") as mf:
         mf.write("# materials for %s (textures linked from the textures/ dump)\n" % name)
         for raw in mats:
             mm = _san(raw)
@@ -1931,10 +1926,12 @@ def _model_is_body(header):
     NOT be rigged with the shared body skeleton (their joint indices reference their own
     palette, which would otherwise collapse the head into the chest)."""
     try:
-        import decode_skeleton_model as _dsm
+        import parse_model_nodes as _pmn
 
-        nodes, _order = _dsm.decode(header)
-        return any(("Calf" in n) or ("Thigh" in n) for n in nodes)
+        names, _p, _q, _par = _pmn.parse(header)
+        if len(names) <= 1:
+            return True  # nothing decoded -> assume body, never silently unrig
+        return any(("Calf" in n) or ("Thigh" in n) for n in names)
     except Exception:
         return True  # default: treat as body (prior behaviour)
 
@@ -2683,8 +2680,17 @@ def decode_console_audio(name, raw, out_dir, meta, vgmstream_cli, log, keep_cont
 # Driver
 # ===========================================================================
 def safe(base, name):
+    """Archive entry name -> a path guaranteed to stay under `base`.
+
+    Entry names are attacker-controlled (rot-2 obfuscated, not authenticated), so
+    strip '..'/absolute anchors AND ':' -- pathlib treats 'C:/x' as a new anchor
+    on Windows and would otherwise escape `base` entirely."""
     parts = [p for p in name.replace("\\", "/").split("/") if p not in ("", ".", "..")]
-    return base.joinpath(*parts)
+    parts = [p.replace(":", "_") for p in parts]
+    out = base.joinpath(*parts) if parts else base / "_unnamed"
+    if os.path.commonpath([os.path.abspath(base), os.path.abspath(out)]) != os.path.abspath(base):
+        raise ValueError("unsafe archive entry name %r" % name)
+    return out
 
 
 def _clamp16(x):
@@ -2843,7 +2849,7 @@ def _kapow_json():
         try:
             import sys as _sys, os as _os
 
-            _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+            _sys.path.append(_os.path.dirname(_os.path.abspath(__file__)))
             import kapow_json as _kj
 
             _KJ["mod"] = _kj
@@ -3025,9 +3031,13 @@ def main(argv):
                             if d:
                                 import json as _json
 
-                                (_ep.parent / (_ep.name + ".json")).write_text(
-                                    _json.dumps(d, indent=1)
-                                )
+                                with open(
+                                    _ep.parent / (_ep.name + ".json"),
+                                    "w",
+                                    encoding="utf-8",
+                                    newline="\n",
+                                ) as _f:
+                                    _f.write(_json.dumps(d, indent=1))
                     except Exception as ex:
                         log("      ! json %s: %s" % (name, ex))
             # SFX / voice 'sound' assets keep their PCM INLINE in the header
@@ -3088,7 +3098,7 @@ def main(argv):
     # full texture index so per-submesh materials resolve correctly.
     tex_index = build_texture_index(a.out / "textures")
     # SKELETONS FIRST: decode the base *_Skeleton.model rest poses up front so the rig
-    # binds each character to its own skeleton (file-decoded; see SKELETON_RESTPOSE_SOLVED.md).
+    # binds each character to its own skeleton (file-decoded; see docs/ENGINE_CONSTANTS.md).
     # rig path can bind each character to its skeleton (skeleton assets have a 0-byte
     # stream, so they never enter model_jobs -- collect them straight from the naz).
     if _RIG["on"]:
@@ -3099,7 +3109,10 @@ def main(argv):
             skdir = a.out / "skeletons"
             skdir.mkdir(parents=True, exist_ok=True)
             for _fam, _s in _sk.items():
-                _json.dump(_s, open(skdir / ("skeleton_%s.json" % _fam), "w"), indent=1)
+                with open(
+                    skdir / ("skeleton_%s.json" % _fam), "w", encoding="utf-8", newline="\n"
+                ) as _f:
+                    _json.dump(_s, _f, indent=1)
             _RIG["skeletons"] = _sk
             log("\nSKELETONS: %d base skeletons decoded from file -> %s" % (len(_sk), skdir))
             for _fam, _s in sorted(_sk.items()):

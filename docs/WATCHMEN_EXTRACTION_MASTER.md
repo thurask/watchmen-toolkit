@@ -6,8 +6,7 @@ extractor that turns `game.naz` into proper **models, textures, and sounds**
 memory, or NinjaRipper. Engine = **Kapow** (Deadline Games, codename WM07), a
 32-bit D3D9 title.
 
-> If you only read one doc, read this. Subsystem deep-dives live in
-> `claude\work_B\*.md`; this file links to them.
+> If you only read one doc, read this. `docs/INDEX.md` lists the others.
 
 ---
 ## 0. Quick status board
@@ -18,19 +17,19 @@ memory, or NinjaRipper. Engine = **Kapow** (Deadline Games, codename WM07), a
 | block → asset (header+stream) | ✅ solved & verified | `extract_block(header, RAW block_s_z)` |
 | Asset property-bag header format | ✅ characterized | typed, name-HASHED records (config) |
 | **Texture header → name/format/layers** | ✅ **SOLVED & verified** | `parse_texture_header()`; 100% exact name+format+layers, all 186 |
-| **Models — geometry → OBJ/FBX/STL** | ✅ **deterministic, multi-submesh** (640/642) | `naz_mesh_extract.py`; header submesh descriptors + IB-validated carve; OBJ submesh groups; see `MESH_FORMAT_NOTES.md` |
+| **Models — geometry → OBJ/FBX/STL** | ✅ **deterministic, multi-submesh** (640/642) | `wlib/watchmen_extract.py`; header submesh descriptors + IB-validated carve; OBJ submesh groups; see §5 below |
 | **Models — collision mesh / full byte-faithful parse** | ◻️ mapped, not extracted | ~19% of stream is collision volumes (excluded from render); skeleton parse pending |
-| **Models — skin weights** | ✅ **decoded** (4×u8 idx @+44, 4×half wt @+48, Σ=1) | rigged FBX still needs skeleton+keyframes from the `.ani` asset; see `MESH_FORMAT_NOTES.md` |
-| **Animation / skeleton (`.animation`)** | ⚠️ **mapped** — skeleton extracted (428/428), keyframe format decoded | bone names+fps+frames parse; compact quat/trans tracks mapped; full rigged FBX = assembly step; see `MESH_FORMAT_NOTES.md` |
-| **Per-variant character glbs** | ✅ 25 glbs, ALL user-QA'd (2026-07-13): header-exact fps, finger-shear dense bakes, d6 jiggle default, face attaches incl. NiteOwl cowl + Heavies_Head_1, BipNN name fixes | `watchmen.py characters 20260708 20260708/characters`; current state + engine truths in `claude/work_E/ENGINE_CONSTANTS.md` |
-| **Toolkit layout + one-command run** | ✅ `wlib/` next to `watchmen.py` (canonical lib); `python3 watchmen.py all game.naz OUT` = extract → binds → character glbs | see `claude/work_D/CLEANROOM.md` §Toolkit layout |
-| **Fresh-install clean-room run** | ✅ **verified** (2026-07-08c) | binds bit-identical + character glb numerically identical from game.naz alone; `watchmen.py extract/binds`; see `claude/work_D/CLEANROOM.md` |
-| **Character BIND (rest pose → skinning palettes)** | ✅ **SOLVED, FILE-ONLY, engine-exact** (2026-07-08, all 7 skeletons) | node records store [pos][quat XYZW] BEFORE the name (old parser off-by-one); bind Rb = conj-quat FK, tb = FK(Rb, node locals); palette order = bone list rotated by one. `claude/work_B/build_bind_file.py`, `wl.BINDS`, see `claude/work_D/FILE_BIND_SOLVED.md` |
+| **Models — skin weights** | ✅ **decoded** (4×u8 idx @+44, 4×half wt @+48, Σ=1) | rigged FBX still needs skeleton+keyframes from the `.ani` asset; see §5 below |
+| **Animation / skeleton (`.animation`)** | ⚠️ **mapped** — skeleton extracted (428/428), keyframe format decoded | bone names+fps+frames parse; compact quat/trans tracks mapped; full rigged FBX = assembly step; see `ENGINE_CONSTANTS.md` |
+| **Per-variant character glbs** | ✅ 25 glbs, ALL user-QA'd (2026-07-13): header-exact fps, finger-shear dense bakes, d6 jiggle default, face attaches incl. NiteOwl cowl + Heavies_Head_1, BipNN name fixes | `watchmen.py characters 20260708 20260708/characters`; current state + engine truths in `docs/ENGINE_CONSTANTS.md` |
+| **Toolkit layout + one-command run** | ✅ `wlib/` next to `watchmen.py` (canonical lib); `python3 watchmen.py all game.naz OUT` = extract → binds → character glbs | see the README §Quick start |
+| **Fresh-install clean-room run** | ✅ **verified** (2026-07-08c) | binds bit-identical + character glb numerically identical from game.naz alone; `watchmen.py extract/binds` |
+| **Character BIND (rest pose → skinning palettes)** | ✅ **SOLVED, FILE-ONLY, engine-exact** (2026-07-08, all 7 skeletons) | node records store [pos][quat XYZW] BEFORE the name (old parser off-by-one); bind Rb = conj-quat FK, tb = FK(Rb, node locals); palette order = bone list rotated by one. `wlib/build_bind_file.py`, `wl.ensure_binds()`, see `docs/ENGINE_CONSTANTS.md` |
 | Vertex normal packing | ✅ solved | HALF4 (3×f16) at vertex+12 |
 | **Textures — format enum** | ✅ solved (Ghidra) | enum→D3DFORMAT table @0xc799e0 |
-| **Texture → stream binding** | ✅ **SOLVED, deterministic** (1190/1190, no search) | (off,sz) is a per-asset TRAILER; +1 shift. See `TEXTURE_DECODE_RULES.md` §5 |
-| **Textures — pixel decode** | ✅ **COMPLETE — 1190/1190** stream-exact | `plan_texture_layers()` tiles every stream as single / cube×6 / animN; multi-layer diffuse+BC5 normal+spec all decode; see `TEXTURE_DECODE_RULES.md` §7 |
-| **Audio — SFX (`sound`)** | ✅ **COMPLETE — 848/848** → WAV | `naz_sound_extract.py`; format tag @+10 selects MS-ADPCM (98%) / PCM (2%); mono+stereo; see `SOUND_FORMAT_NOTES.md` |
+| **Texture → stream binding** | ✅ **SOLVED, deterministic** (1190/1190, no search) | (off,sz) is a per-asset TRAILER; +1 shift. See §6 below |
+| **Textures — pixel decode** | ✅ **COMPLETE — 1190/1190** stream-exact | `plan_texture_layers()` tiles every stream as single / cube×6 / animN; multi-layer diffuse+BC5 normal+spec all decode; see §6 below |
+| **Audio — SFX (`sound`)** | ✅ **COMPLETE — 848/848** → WAV | `wlib/watchmen_extract.py`; format tag @+10 selects MS-ADPCM (98%) / PCM (2%); mono+stereo; see §7 below |
 | **Audio — music (`.mediastream_s`)** | ✅ **13/13 → Ogg Vorbis** | `naz_sound_extract.py game.naz` / `watchmen_extract.py` |
 | **Determinism** | textures+archive ✅ verified reproducible; meshes+SFX empirical/blocked | textures: identical manifest + byte-identical PNG across runs |
 | Full-binary decompile corpus | ✅ available | `ghidra_kapow_out\` (14,910 funcs) |
@@ -81,38 +80,28 @@ already byte-order aware, so these carry over.**
 ---
 ## 1. File map
 
-**Binaries / data (user's machine)**
-- `D:\HeyClaude_WatchmenPart2\game.naz` — source archive (937 MB).
-- `D:\HeyClaude_WatchmenPart2\Data\Engine\KapowMultiDEDRM.exe` — **decrypted** exe;
-  ALWAYS analyze this one. The Steam `KapowMulti.exe` has an encrypted `.text`
-  (entropy 8.00, `.bind` protector) — useless for RE.
-- `D:\HeyClaude_WatchmenPart2\claude\work_A\bordello.block_h_z` / `bordello.block_s_z`
-  — one pre-extracted level's header-block + stream-block (the standing test case).
-- `D:\HeyClaude_WatchmenPart2\KapowMulti.DMP` — optional GPU process dump
-  (ground-truth oracle only; the goal is dump-FREE).
-- `D:\HeyClaude_WatchmenPart2\msdocs\win32\desktop-src\direct3d9\` — local mirror of
-  the MS Direct3D9 docs (D3DFORMAT, DXT/BC, surface/mip semantics) for reference.
+**Inputs (on your machine)** — nothing here ships with the toolkit; every path
+is relative to your own game install and working directory.
 
-**Decompile corpus (the key RE asset)** — `D:\HeyClaude_WatchmenPart2\ghidra_kapow_out\`
-- `index.tsv` — 14,910 funcs: `address  name  size  n_callers  n_callees  strings`.
-- `strings.tsv` — 27,433 strings: `address  value`.
-- `decomp\part_0001.c .. part_0038.c` — every function decompiled (400/shard), each
-  headed by `// FUNC name @addr` + `callers:` + `callees:` + `strings:`.
-- `manifest.txt` — address range per shard.
+- `game.naz` — the source archive (~937 MB on PC).
+- `Data/Engine/KapowMulti*.exe` — the game executable. Only
+  `watchmen gendata regdump` reads it, and only usefully when its `.text`
+  section is not encrypted; the retail build is SecuROM-packed in place and this
+  toolkit neither unpacks it nor helps you obtain one that is unpacked. The
+  string sections (`.rdata`/`.data`) *are* readable in the retail build, which is
+  why `gendata strings` works on it.
+- a pre-extracted `<level>.block_h_z` / `.block_s_z` pair — handy as a standing
+  test case while working on the block layer.
+- the Microsoft Direct3D 9 reference (D3DFORMAT, DXT/BC, surface and mip
+  semantics) — consulted for the texture work.
 
-**Code + docs** — `D:\HeyClaude_WatchmenPart2\claude\work_B\`
-- `watchmen_extract.py` — master extractor (naz/block/model/texture/audio).
-- `naz_textures.py` — texture extractor (header descriptor + length model).
-- `nr_to_obj.py` — NinjaRipper `.nr`→OBJ (fallback path for env meshes only).
-- `KapowDecompAll.java` — Ghidra: decompile WHOLE binary → produced `ghidra_kapow_out`.
-- `KapowDecompExport.java` — Ghidra: decompile one subsystem (seeded by addr/string).
-- `kapow_dis.py` — objdump-based annotated disassembler (exe path as argv).
-- Docs: `NEXT_SESSION_TEXTURES.md` (texture resume), `ENGINE_TEXTURE_LOADER_FINDINGS.md`,
-  `TEXTURE_FORMAT_SOLVED.md`, `PROPERTY_HEADER_FORMAT.md`,
-  `BLOCK_TO_ASSET_VERIFICATION.md`, `NAZ_VERIFICATION.md`, `STRIDE16_DECODE_STATUS.md`,
-  `WHAT_TO_DUMP_x64dbg.md`, `LOCAL_GHIDRA_FINDINGS.md`, `ASSET_PIPELINE_MAP.md`,
-  `NORMAL_FORMAT_SOLVED.md`.
+**Reverse-engineering corpus** — a decompilation of the executable (function
+index, string table, per-function decompiled C). Function addresses quoted
+throughout this document refer to it. It is research input, not a shipped
+artifact.
 
+**Code + docs** — this repository: `wlib/` (library), `watchmen.py` (CLI),
+`docs/` (this record).
 ---
 ## 2. The `.naz` archive  (✅ verified vs engine + round-trip)
 - `.naz` is an **obfuscated ZIP**:
@@ -121,7 +110,7 @@ already byte-order aware, so these carry over.**
   - NAZ central-dir fields are shifted **8 bytes** vs standard ZIP (engine does
     `if (NAZ) ptr -= 8`).
 - Inside, level data is packaged as **blocks**: a `block_h_z` (all per-asset HEADERS)
-  and a `block_s_z` (all per-asset STREAMS). See `NAZ_VERIFICATION.md`.
+  and a `block_s_z` (all per-asset STREAMS). See `KAPOW_NAZ_FORMAT.md`.
 
 ## 3. Block format  (✅ verified, 2291 assets, 0 mismatch)
 - `block_h_z` decompresses (or is read raw — it parses either way) to the header
@@ -134,7 +123,7 @@ already byte-order aware, so these carry over.**
 - **Correct entry point:** `watchmen_extract.extract_block(decompressed_header_block,
   RAW block_s_z)`. ⚠️ Do **not** `zlib.decompress` the whole `block_s_z` first — that
   returns only the first substream and silently truncates everything (the bug that
-  caused much earlier confusion). See `BLOCK_TO_ASSET_VERIFICATION.md`.
+  caused much earlier confusion). See `KAPOW_NAZ_FORMAT.md`.
 - Header→stream pairing is correct (proven: FemaleSkinBody_Black → stream offset 0 →
   inflates to 87400 B == the running game's GPU copy, byte-for-byte).
 
@@ -151,7 +140,7 @@ a scalar). **Property names are name-HASHED at runtime** (no plaintext), and val
 are config (LOD distances, scales, flags) — NOT geometry. The header is read
 **sequentially as a stream** by the engine (see §8 primitives), so sub-structures
 (like the texture image descriptor) sit at positions determined by the preceding
-records. Full notes: `PROPERTY_HEADER_FORMAT.md`.
+records. Full notes: §4 below.
 
 ---
 ## 5. MODELS  (float-VB ✅ · stride-16 ⚠️)
@@ -160,7 +149,7 @@ records. Full notes: `PROPERTY_HEADER_FORMAT.md`.
   Stream primitives: `ReadU32 = 0x435459`, `ReadByte = 0x4353E9`. CVarList = 24-bit
   count + 8-bit flags (the `& 0xFFFFFF` seen everywhere).
 - **Vertex normal = HALF4** (3× float16 + pad) at `vertex+12`, little-endian.
-  Validated (unit_box 24/24; body 0.976). See `NORMAL_FORMAT_SOLVED.md`.
+  Validated (unit_box 24/24; body 0.976).
 - **Two vertex formats:**
   - *Compact float VB* (stride 44/56) → **fully decodes to OBJ** today
     (`watchmen_extract.decode_model`, IB-validated VB pick + tri gate).
@@ -168,17 +157,17 @@ records. Full notes: `PROPERTY_HEADER_FORMAT.md`.
     packed normal/uv in trailing int16s. **Not fully decodable from `.naz` yet**: the
     extracted asset is missing the **index buffer** and the **bbox** (the engine
     dequant runs at GPU-upload time via a runtime vtable). Point-cloud shape is
-    recoverable; a usable mesh is not. NinjaRipper (`nr_to_obj.py`) is the only
+    recoverable; a usable mesh is not. NinjaRipper capture is the only
     complete path for these right now. **Next:** read the exact
     `ModelResDerivedIO::Read` record layout in `ghidra_kapow_out\` to find whether
     the IB/bbox are in the stream just outside the current slice. See
-    `STRIDE16_DECODE_STATUS.md`, `WHAT_TO_DUMP_x64dbg.md`.
+    §5 below.
 
 ## 6. TEXTURES  (format ✅ · extractor ~39/186 ⚠️)
 **Texel data:** raw DXT/BC mip chain, top level first, **no per-stream header**
 (starts directly with DXT block bytes; verified byte-exact vs GPU).
 
-**Format enum table** — `KapowMultiDEDRM.exe @ VA 0xc799e0` (`formatTable[enum]`):
+**Format enum table** — executable `@ VA 0xc799e0` (`formatTable[enum]`):
 ```
 0 X8R8G8B8(4bpp)  1 A8R8G8B8(4bpp)  2 A8R8G8B8  3 L8(1bpp)  4 L8
 5 DXT1(8B/blk)    6 DXT3(16B/blk)   7 DXT5(16B/blk)   9 ATI2/BC5(16B/blk, normals)
@@ -237,12 +226,11 @@ recovered from the **stream length**:
   `45b961,45bc5f,5291f9,45413e,4540d7` + string anchor `"texturebuffer_dx9"`),
   **or** the `KapowMulti.DMP` as a per-layer dims oracle.
 
-### Extractor (`naz_textures.py`, rewritten 2026-06-24)
+### Extractor (texture path in `wlib/watchmen_extract.py`, rewritten 2026-06-24)
 Uses `parse_texture_header` → always writes a `<name>.txt` sidecar with exact
 name/format/layers, decodes single-image + cubemaps to PNG, best-effort carves
-multi-image (shared-size + coherence). Output sample in `claude\work_B\tex_out_v2\`.
-Engine evidence: `ENGINE_TEXTURE_LOADER_FINDINGS.md`, `TEXTURE_FORMAT_SOLVED.md`,
-`NEXT_SESSION_TEXTURES.md`.
+multi-image (shared-size + coherence). 
+Engine evidence: §14 below and the texture section of this document.
 
 ## 7. AUDIO  (◻️ partial)
 libVorbis + Bink + libpng/zlib present. `watchmen_extract.decode_audio` exists
@@ -338,7 +326,7 @@ authored dims, but the stream stores a runtime-reduced copy and multi-layer mate
 (≈60% of textures) don't split at simple pow2 mip-chain boundaries. Two ways through:
 
 A targeted re-decompile (`seeded.c`) **confirmed the architecture** (see
-`claude\work_B\SEEDED_DECOMPILE_FINDINGS.md`): a TextureAsset holds an image array at
+`docs/ENGINE_CONSTANTS.md`): a TextureAsset holds an image array at
 `+0x90` (count `*(this+0x94)&0xFFFFFF`, **16 B/image = `[u32 size][void* data]…`**);
 `FUN_0048e78f` `memcpy`s each image by that explicit **size** ⇒ the concatenated
 stream is split by per-image sizes that are *stored metadata*, not derivable from the
@@ -363,7 +351,7 @@ has no valid 3-chain partition). Mip-drop `FUN_005291f9` and the cube path
 ---
 ## 10. How to run things
 - Extract textures from a block:
-  `python naz_textures.py <bordello.block_h_z> <bordello.block_s_z> -o out`
+  `python3 -m watchmen extract game.naz OUT`  (or the block pair directly, see §3)
   (keep `watchmen_extract.py` alongside; correct ones land in `out\`, low-confidence
   in `out\uncertain\`).
 - Decompile a subsystem (local Ghidra, AFTER auto-analysis): Script Manager →
@@ -380,7 +368,9 @@ parser**. This is the loop that produced every recent win and is how to finish.
 - Sandbox **mount intermittently serves truncated/corrupted file copies** to bash
   (host/editor files are fine). If a script errors on a line that looks correct, it's
   the mount — retry, or run locally.
-- Always use `KapowMultiDEDRM.exe`, never the encrypted Steam build.
+- Analysis of engine CODE requires an executable whose `.text` is not
+  encrypted; the retail build's is SecuROM-packed in place. The toolkit does
+  not unpack it and does not need it for anything except `gendata regdump`.
 - `block_s_z` = concatenated zlib substreams; never bulk-decompress it (see §3).
 - Property names are runtime-hashed — locate loaders by call/primitive patterns, not
   by grepping names.

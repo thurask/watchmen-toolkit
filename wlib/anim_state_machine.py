@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Engine-faithful interpreter for Watchmen AnimationClass state machines.
 
-Sources (all reversed from KapowMultiDEDRM.exe, see
-claude/work_E/ENGINE_CONSTANTS.md section 2026-07-09m):
+Sources (all reversed from the game executable, see
+docs/ENGINE_CONSTANTS.md section 2026-07-09m):
   command_get_valid_state   0x5f076f  round-robin state choice in a group
   StateGroupCriteriaMet     0x5c6002  single criteria AND criteria-list
   GetValidStateGroupTrans.  0x5c6140  transition selection order + fallback

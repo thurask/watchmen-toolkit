@@ -334,12 +334,12 @@ the top stored mip for maximum resolution.
 4. Write each PNG under the asset's embedded source path to rebuild the original
    `/data/art/...` tree.
 
-This is exactly what `naz_texture_extract.py` (in `claude/work_B/`) implements, and
+This is exactly what the texture path in `wlib/watchmen_extract.py` implements, and
 it needs nothing but the block files and Python + Pillow + numpy.
 
 ---
 
-## 6. Engine function reference (Ghidra, `KapowMultiDEDRM.exe`)
+## 6. Engine function reference (Ghidra, game executable)
 
 | address | role |
 |---|---|
@@ -405,7 +405,7 @@ architectural pieces) but includes noise/garbage triangles, so it is not yet
 production-clean.
 
 
-Extractor: `naz_mesh_extract.py` (stdlib-only) binds with the same +1 trailer rule,
+Extractor: the model path in `wlib/watchmen_extract.py` binds with the same +1 trailer rule,
 extracts position/normal/UV + triangles, and writes **OBJ, FBX (ASCII 7.4), or STL
 (binary)** — `--format obj,fbx,stl`. Verified: all three agree vertex/triangle counts,
 STL byte-exact, FBX polygon encoding valid; wireframes render as coherent shapes

@@ -125,7 +125,7 @@ def fragment_json(d, bo="<"):
         off = m.start()
         # avoid duplicating records the walk already captured (same string start)
         if any(abs(off - (so + 8)) < 3 for so in seen_off):
-            pass
+            continue
         txt = m.group()[:-1].decode("latin1")
         t = txt.lower()
         if t.endswith(".model"):
@@ -223,7 +223,7 @@ def to_json(name_lower, data, order=None):
     if name_lower.endswith(".fragment"):
         import sys as _sys
 
-        _sys.setrecursionlimit(100000)
+        _sys.setrecursionlimit(max(_sys.getrecursionlimit(), 8000))
         import kapow_fragment as _kf
 
         bo = order or _kf.detect_order(data)
@@ -262,6 +262,7 @@ if __name__ == "__main__":
     d = to_json(sys.argv[1].lower(), b)
     out = json.dumps(d, indent=1)
     if len(sys.argv) > 2:
-        open(sys.argv[2], "w").write(out)
+        with open(sys.argv[2], "w", encoding="utf-8", newline="\n") as _f:
+            _f.write(out)
     else:
         print(out[:4000])

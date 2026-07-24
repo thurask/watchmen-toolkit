@@ -12,7 +12,7 @@ Engine-exact ANIMATED per-character glbs are produced by the `watchmen.py charac
 pipeline (file-only binds + baked clips), not here.
 
 Skin channel (verified): BLENDINDICES = D3DCOLOR ubyte4 @ +44 read BGRA (bytes 2,1,0,3);
-BLENDWEIGHT = float16 x4 @ +48. Animation tracks: per-bone local quaternions (WXYZ, /10000)
+BLENDWEIGHT = float16 x4 @ +48. Animation tracks: per-bone local quaternions (XYZW in-file, /10000 (reordered to WXYZ on read))
 and translations (/1000); rotation-only clips (offsets come from the skeleton).
 """
 
@@ -77,11 +77,14 @@ def decode_skin(stream, vbo, nv, stride, order="<"):
 
 
 # ---------------- coordinate convention (engine <-> glb) ----------------
-_C = np.array([[1, 0, 0], [0, 0, 1], [0, -1.0, 0]])
-_C4 = np.eye(4)
-_C4[:3, :3] = _C
-_C4i = np.eye(4)
-_C4i[:3, :3] = _C.T
+# 2026-07-24 AXIS: the Kapow engine is already Y-up, so glTF needs no axis
+# conversion.  This module used to rotate POSITION (and conjugate the FK world
+# matrices) by a Z-up->Y-up matrix.  Unlike variant_glb -- where an exact
+# inverse was folded into the skin matrices and cancelled -- nothing here
+# cancelled it, so every model this writes came out rotated 90 degrees about X
+# (static props/heads flat on their back; rigged bodies likewise).  Measured on
+# shipped character output: skinned frame-0 bbox 1.75 m tall along Y, while raw
+# POSITION measured 1.80 m along Z.  See variant_glb.py for the full evidence.
 
 
 def _qmat(q):  # wxyz -> 3x3
@@ -194,7 +197,6 @@ def decode_animation(anim_header_bytes, tpl, fps=24.0, max_frames=120):
     """FK a .animation on the skeleton template -> per-bone local TRS tracks in glb space.
     Returns (name_unused, times, per_bone_T (F,B,3), per_bone_Q (F,B,4 xyzw)) or None."""
     n, names, par, rest_t, rest_q, ibm = _skel_arrays(tpl)
-    ni = {names[i]: i for i in range(n)}
     # engine-space rest world (FK with offsets); offsets come from template rest_t in glb -> engine
     glb_restW = np.zeros((n, 4, 4))
     order = sorted(range(n), key=lambda i: _depth(par, i))
@@ -204,7 +206,7 @@ def decode_animation(anim_header_bytes, tpl, fps=24.0, max_frames=120):
         L[:3, 3] = rest_t[i]
         Wp = glb_restW[par[i]] if par[i] >= 0 else np.eye(4)
         glb_restW[i] = Wp @ L
-    engRestW = np.array([_C4i @ glb_restW[b] @ _C4 for b in range(n)])
+    engRestW = glb_restW  # engine == glb frame (both Y-up); no conversion
     offset = np.zeros((n, 3))
     engRestLocR = np.zeros((n, 3, 3))
     for i in range(n):
@@ -235,7 +237,7 @@ def decode_animation(anim_header_bytes, tpl, fps=24.0, max_frames=120):
             L[:3, 3] = offset[i]
             Wp = eW[par[i]] if par[i] >= 0 else np.eye(4)
             eW[i] = Wp @ L
-        gW = [_C4 @ eW[b] @ _C4i for b in range(n)]
+        gW = eW  # engine == glb frame (both Y-up); no conversion
         for b in range(n):
             Wp = gW[par[b]] if par[b] >= 0 else np.eye(4)
             t, q, s = _decomp(np.linalg.inv(Wp) @ gW[b])
@@ -297,7 +299,7 @@ def build_rigged_glb(
 
     n = tpl["bone_count"]
     V = np.asarray(V, np.float64)
-    Vg = (_C @ V.T).T.astype(np.float32)  # engine bind -> glb
+    Vg = np.ascontiguousarray(V, np.float32)  # engine frame == glb frame
     j = {
         "asset": {"version": "2.0", "generator": "watchmen_extract"},
         "scene": 0,
@@ -455,7 +457,14 @@ def build_rigged_glb(
         for clip in clips or []:
             times = np.asarray(clip["times"], np.float32)
             F = len(times)
-            ta = ac(av(times.tobytes()), 5126, F, "SCALAR", [0.0], [float(times[-1])])
+            ta = ac(
+                av(times.tobytes()),
+                5126,
+                F,
+                "SCALAR",
+                [float(times.min())],
+                [float(times.max())],
+            )
             sm = []
             chn = []
             for b in range(n):
@@ -479,8 +488,9 @@ def build_rigged_glb(
                     sm.append({"input": ta, "output": vo, "interpolation": "LINEAR"})
                     chn.append({"sampler": len(sm) - 1, "target": {"node": bn[b], "path": path}})
             j["animations"].append({"name": clip["name"], "samplers": sm, "channels": chn})
-    if not j["animations"]:
-        del j["animations"]
+    for _k in ("animations", "skins", "images", "textures", "materials", "samplers"):
+        if not j.get(_k):
+            j.pop(_k, None)
     j["buffers"].append({"byteLength": len(BIN)})
     jb = json.dumps(j, separators=(",", ":")).encode()
     while len(jb) % 4:

@@ -18,7 +18,11 @@ from a template bind (palette order is a per-skeleton empirical convention).
 
 import sys, numpy as np
 
-sys.path.insert(0, __file__.rsplit("/", 1)[0])
+import os as _os
+
+_D = _os.path.dirname(_os.path.abspath(__file__))
+if _D not in sys.path:
+    sys.path.append(_D)  # append, never insert(0): flat module names must not shadow the stdlib
 from parse_model_nodes import parse
 
 

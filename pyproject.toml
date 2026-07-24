@@ -4,10 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "watchmen-kapow-toolkit"
-version = "1.0.0"
+version = "1.1.0"
 description = "Asset extraction toolkit for Watchmen: The End Is Nigh Parts 1 & 2 (Kapow engine) — .naz archives, textures, models, audio, fragments, and engine-exact character animation on PC, Xbox 360, and PS3."
 readme = "README.md"
 license = {text = "MIT"}
+# TODO before publishing: fill these in.
+authors = [{name = "FILL IN"}]
 requires-python = ">=3.8"
 keywords = ["reverse-engineering", "game-assets", "kapow", "watchmen", "naz", "glb"]
 classifiers = [
@@ -17,13 +19,19 @@ classifiers = [
     "Topic :: System :: Archiving",
 ]
 dependencies = [
-    "numpy",
-    "Pillow",
+    "numpy>=1.20",
+    "Pillow>=9",
 ]
 
+# TODO before publishing: point these at the repo.
+# [project.urls]
+# Homepage = "https://github.com/OWNER/watchmen-kapow-toolkit"
+# Repository = "https://github.com/OWNER/watchmen-kapow-toolkit"
+# Issues = "https://github.com/OWNER/watchmen-kapow-toolkit/issues"
+
 [project.optional-dependencies]
-dev = ["black", "pyflakes"]
-# for `watchmen gendata regdump` (rebuilding reg_dump.json from a DRM-free exe)
+dev = ["black", "pyflakes", "pytest"]
+# for `watchmen gendata regdump` (needs an exe whose .text is not encrypted)
 regdump = ["capstone"]
 
 [project.scripts]
@@ -38,3 +46,6 @@ wlib = ["*.pkl", "*.npz", "*.json"]
 
 [tool.black]
 line-length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """parse_model_nodes.py — ENGINE-EXACT skeleton rest pose from a ModelRes header.
 
-Engine ground truth (FUN_00545927 = Node::Deserialize, KapowMultiDEDRM.exe):
+Engine ground truth (FUN_00545927 = Node::Deserialize, game executable):
 each node record is
     [pos f32x3][quat f32x4 XYZW][u32 namelen][name..\0][u32 f1][u32 parent][aux ...]
 The old decode_skeleton_model.py attributed the 28-byte transform to the PREVIOUS
@@ -56,17 +56,16 @@ def parse(mb, order=None):
     # node-0 anchor: count u32 sits 4+12+16+4+1 bytes before first named node?  Instead:
     # first named node's record starts at occ[0][0]-28; node0's record is the 33 bytes
     # before that: [pos 12][quat 16][len=1][\0][u32][u32 -1]... locate by parent -1 check.
-    nodes = []
+    # The header's node COUNT sits just before node 0's transform.  We recover it
+    # so a record dropped by the validity filter below can be DETECTED: parent
+    # values index the file's node array, so a silently dropped node shifts every
+    # later parent by one and corrupts the whole hierarchy without any error.
     first = occ[0][0] - 28
-    # node0: transform ends at rec0_end; rec0 = [pos][quat][1]["\0"][u32][u32]
-    n0 = first - 0x15  # 12+16+4+1+4+4 = 41 = 0x29? conservative: find count field
-    # count u32 immediately precedes node0 pos
-    # search back for plausible count (20..200)
     cn = None
     for back in range(first - 41 - 8, first - 41 + 9):
-        if back < 0:
+        if back < 0 or back + 4 > len(mb):
             continue
-        c = struct.unpack_from("<I", mb, back)[0]
+        c = struct.unpack_from(order + "I", mb, back)[0]
         if 10 <= c <= 500 and len(occ) + 1 in (c, c + 1):
             cn = (back, c)
             break
@@ -77,7 +76,11 @@ def parse(mb, order=None):
     pos = [np.zeros(3)]
     quat = [np.array([0, 0, 0, 1.0])]
     parent = [-1]
+    dropped = []
     for o, nm in occ:
+        if o < 28 or o + 4 > len(mb):
+            dropped.append(nm)
+            continue
         p = np.frombuffer(mb, dtype=f4, count=3, offset=o - 28).astype(np.float64)
         q = np.frombuffer(mb, dtype=f4, count=4, offset=o - 16).astype(
             np.float64
@@ -88,17 +91,58 @@ def parse(mb, order=None):
             or not np.isfinite(p).all()
             or np.abs(p).max() > 100
         ):
+            dropped.append(nm)
             continue
         nl = struct.unpack_from(order + "I", mb, o)[0]
+        if o + 4 + nl + 8 > len(mb):
+            dropped.append(nm)
+            continue
         f1, par = struct.unpack_from(order + "Ii", mb, o + 4 + nl)
         names.append(nm)
         pos.append(p)
         quat.append(q)
         parent.append(par)
-    # parent values index the true node array (0 = root)
+    # parent values index the true node array (0 = root).  If the file told us how
+    # many nodes it has and we kept a different number, the indices below no longer
+    # line up -- fail loudly rather than emit a plausible but wrong hierarchy.
     n = len(names)
+    if cn is not None and n != cn[1] and (n - 1) != cn[1]:
+        raise ValueError(
+            "node count mismatch: header says %d, parsed %d (dropped %r) -- "
+            "parent indices would be misaligned" % (cn[1], n, dropped[:8])
+        )
     parent = [pa if -1 <= pa < n else -1 for pa in parent]
     return names, np.array(pos), np.array(quat), np.array(parent)
+
+
+def qmat_wxyz(q):
+    """WXYZ quaternion -> 3x3 rotation matrix."""
+    w, x, y, z = q
+    nn = (w * w + x * x + y * y + z * z) ** 0.5 or 1.0
+    w, x, y, z = w / nn, x / nn, y / nn, z / nn
+    return np.array(
+        [
+            [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+            [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+            [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
+        ]
+    )
+
+
+def rest_by_name(mb, order=None):
+    """-> {name: {'pos': (3,), 'quat_wxyz': (4,)}} for every named node.
+
+    Convenience view over parse() for callers that key by bone name.  Replaces
+    the superseded decode_skeleton_model.decode(), which attributed each 28-byte
+    transform to the PRECEDING name (off-by-one) and dropped the last node."""
+    names, pos, quat, _par = parse(mb, order)
+    out = {}
+    for i, nm in enumerate(names):
+        if i == 0:
+            continue  # synthetic unnamed root
+        q = quat[i]
+        out[nm] = {"pos": pos[i], "quat_wxyz": np.array([q[3], q[0], q[1], q[2]])}
+    return out
 
 
 if __name__ == "__main__":
@@ -157,7 +201,7 @@ def parse_node_aux(mb, start, end):
             return None
         joints = []
         for _ in range(nj):
-            t, z = u32(), u32()
+            t, _z = u32(), u32()
             import numpy as _np
 
             pos = _np.frombuffer(mb, "<f4", 3, p)

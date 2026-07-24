@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """watchmenlib -- one import for everything this project has reverse-engineered.
 
-Facade over the battle-tested modules in claude/work_B (each remains the
+Facade over the battle-tested modules in wlib/ (each remains the
 authority for its domain; this module only organizes access). Works from a
 fresh install: only game files + these modules + the solved-constant npz/pkl
 files shipped next to them are needed.
@@ -18,8 +18,7 @@ import os, sys
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
-    sys.path.insert(0, _HERE)
-sys.setrecursionlimit(100000)
+    sys.path.append(_HERE)  # append, never insert: must not shadow stdlib
 
 import watchmen_extract as _we  # naz walk, block extract, model decode
 import export_female_anims as _efa  # grab_blocks + clip helpers
@@ -29,33 +28,23 @@ import kapow_props as _kp  # property hash + prop-bag JSON
 import kapow_json as _kj  # per-asset-type JSON emitters
 import kapow_fragment as _kf  # LOSSLESS fragment parser (2026-07-07)
 
-_default_bind = os.path.abspath(
-    os.path.join(_HERE, "..", "dominatrix_capture", "bind_female_file_v1.npz")
-)
-if "--bind" not in sys.argv:
-    sys.argv = [sys.argv[0] if sys.argv else "watchmenlib", "--bind", _default_bind, "--conj"]
 import bake_v4 as _bake_mod  # engine-exact clip -> palette baker
 import variant_glb as _vg  # character-variant GLB builder
 
 # ---- data: solved constants ------------------------------------------------
-_CAP = os.path.abspath(os.path.join(_HERE, "..", "dominatrix_capture"))
 # 2026-07-08: binds are now FILE-ONLY + engine-exact, built straight from each
-# skeleton's ModelRes node array (claude/work_B/build_bind_file.py):
+# skeleton's ModelRes node array (wlib/build_bind_file.py):
 #   Rb = FK of the node quats CONJUGATED (palette gauge; == capture-solved v14b
 #        to 0.00deg on all non-twist bones, and engine-exact on twists too),
 #   tloc = verbatim node locals, tb = FK(Rb, tloc)  (palette joint invariant
 #   med 0.0000 on female + gimp captures; rsh == v10 quality).
 # Capture-solved binds (bind_v14b_final / bind_gimp_v9 / bind_rsh_v10) are kept
-# as validation references only -- see ENGINE_RESTPOSE_TRAIL.md.
-BINDS = {
-    "Female_Skeleton": os.path.join(_CAP, "bind_female_file_v1.npz"),
-    "Large_Gimp_Skeleton": os.path.join(_CAP, "bind_gimp_file_v1.npz"),
-    "Rorschach": os.path.join(_CAP, "bind_rsh_file_v1.npz"),
-    "NiteOwl": os.path.join(_CAP, "bind_nto_file_v1.npz"),
-    "Medium_Skeleton": os.path.join(_CAP, "bind_medium_file_v1.npz"),
-    "Large_Skeleton": os.path.join(_CAP, "bind_large_file_v1.npz"),
-    "Small_Skeleton": os.path.join(_CAP, "bind_small_file_v1.npz"),
-}
+# as validation references only -- see docs/ENGINE_CONSTANTS.md.
+# 2026-07-24: the old module-level BINDS table pointed at a developer-machine
+# sibling directory that never shipped; post-install every entry resolved to a
+# nonexistent path inside site-packages.  Build the binds instead -- one call,
+# from the game files, engine-exact:
+#     binds = wl.ensure_binds('game.naz', 'OUT/binds')   # {'female': path, ...}
 
 
 def bind_from_skeleton_header(
@@ -114,7 +103,11 @@ def ensure_binds(naz="game.naz", outdir=None, required=None, extract_dir=None):
     truly needs 'female')."""
     import build_bind_file as _bbf, tempfile, sys as _sys, glob as _glob
 
-    outdir = outdir or _CAP
+    if not outdir:
+        raise ValueError(
+            "ensure_binds(naz, outdir): outdir is required -- it is where the built "
+            "bind npz files go, e.g. wl.ensure_binds('game.naz', 'OUT/binds')"
+        )
     os.makedirs(outdir, exist_ok=True)
     want = {k: os.path.join(outdir, "bind_%s_file_v1.npz" % k) for k in _SKEL_ASSETS}
     have = {k: v for k, v in want.items() if os.path.exists(v)}
@@ -234,14 +227,10 @@ def decode_clip(anim_bytes):
 
 def bake(clipname, bind=None, upsample=2, bank=None):
     """Engine-exact palettes: conjugate convention, absolute root.
-    Returns (palettes (F,NB,3,4), duration_s)."""
-    import importlib
 
-    sys.argv = ["bake", "--bind", bind or _default_bind, "--conj"]
-    importlib.reload(_bake_mod)
-    if bank is not None:
-        _bake_mod._bank_lookup = lambda nm: bank.get(nm)
-    return _bake_mod.bake(clipname, upsample)
+    bind: path to a bind npz, e.g. wl.ensure_binds(naz, outdir)['female'].
+    Returns (palettes (F,NB,3,4), duration_s)."""
+    return _bake_mod.bake(clipname, upsample, bind=bind, conj=True, bank=bank)
 
 
 def build_variant_glb(fragment_json_path, variant, out_glb, **kw):

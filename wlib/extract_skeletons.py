@@ -4,7 +4,7 @@ extract_skeletons.py  --  "skeletons first" pass.
 
 Scans the naz, finds every *_Skeleton.model (ModelRes), decodes each into a rest-pose
 table (name + parent + rest local pos + rest local quat, read from the file header per
-SKELETON_RESTPOSE_SOLVED.md), and writes skeleton_<family>.json. Run BEFORE rigging so
+docs/ENGINE_CONSTANTS.md), and writes skeleton_<family>.json. Run BEFORE rigging so
 each character binds to its base skeleton.
 
 Hierarchy: the per-node explicit parentIndex (header, name_end+4) indexes an engine
@@ -17,7 +17,7 @@ fallback, so the tree is always a single clean root (robust for Small_Skeleton t
 
 import sys, os, json, struct, argparse
 import watchmen_extract as we
-import decode_skeleton_model as dsm
+import parse_model_nodes as pmn
 
 
 def _family(model_name):
@@ -52,14 +52,17 @@ def _ordered_names(header, order=None):
 
 
 def _explicit_parent_names(header):
-    recs = _ordered_names(header)
+    order = "<" if len(_ordered_names(header, "<")) >= len(_ordered_names(header, ">")) else ">"
+    recs = _ordered_names(header, order)
     names = [nm for _, nm in recs]
     rest = [nm for nm in names if nm != "GamePivot"]
     engine_ids = ["GamePivot"] + rest  # id 0 = GamePivot (root)
     out = {}
     for lp, nm in recs:
-        nlen = struct.unpack_from("<I", header, lp)[0]
-        p = struct.unpack_from("<i", header, lp + 4 + nlen + 4)[0]
+        nlen = struct.unpack_from(order + "I", header, lp)[0]
+        if lp + 4 + nlen + 8 > len(header):
+            continue
+        p = struct.unpack_from(order + "i", header, lp + 4 + nlen + 4)[0]
         if 0 <= p < len(engine_ids):
             pnm = engine_ids[p]
             out[nm] = None if pnm == nm else pnm  # GamePivot(p=0)->GamePivot==self->root
@@ -67,30 +70,50 @@ def _explicit_parent_names(header):
 
 
 def skeleton_from_header(header, family):
-    nodes, order = dsm.decode(header)  # clean unit-quat node set
-    oset = set(order)
-    fpar = _explicit_parent_names(header)
-    idx = {n: i for i, n in enumerate(order)}
+    """ModelRes header -> rest-pose table, engine-exact.
+
+    2026-07-24: rebuilt on parse_model_nodes.parse().  This used to call
+    decode_skeleton_model.decode(), which that module's own docstring marks
+    SUPERSEDED for an off-by-one: the 28-byte [pos][quat] transform PRECEDES the
+    name in a node record, so every bone was published carrying its SUCCESSOR's
+    rest transform, the last bone of every skeleton was dropped entirely (the
+    decoder needs a following name record to locate the tail), and `bone_count`
+    was short by one.  Parents were also guessed from biped names instead of
+    read from the record's own parent field.
+
+    parse() reads the transform before the CURRENT name and takes the parent
+    index from the record, so index 0 is the file's unnamed root (the GamePivot
+    slot) and every `parent` is the file's own node index.  Byte order is
+    auto-detected, so console (X360/PS3) headers work too.
+    """
+    names, pos, quat, parent = pmn.parse(header)
     bones = []
-    for n in order:
-        p = fpar.get(n, "__MISSING__")
-        if p == "__MISSING__":
-            p = dsm.biped_parent(n, oset)
-        if p is not None and p not in idx:
-            p = dsm.biped_parent(n, oset)
+    for i, nm in enumerate(names):
+        q = quat[i]
+        pa = int(parent[i])
         bones.append(
             {
-                "name": n,
-                "parent": idx.get(p, -1) if (p in idx) else -1,
-                "rest_pos": [round(float(x), 6) for x in nodes[n]["pos"]],
-                "rest_quat_wxyz": [round(float(x), 6) for x in nodes[n]["quat_wxyz"]],
+                "name": nm,
+                "parent": pa if (0 <= pa < len(names) and pa != i) else -1,
+                "rest_pos": [round(float(x), 6) for x in pos[i]],
+                # file order is XYZW; published as WXYZ for backwards compatibility
+                "rest_quat_wxyz": [
+                    round(float(q[3]), 6),
+                    round(float(q[0]), 6),
+                    round(float(q[1]), 6),
+                    round(float(q[2]), 6),
+                ],
             }
         )
     return {
         "family": family,
-        "bone_count": len(order),
-        "source": "ModelRes header (file)",
-        "note": "rest = node tail [pos vec3][quat vec4 wxyz]; parent = explicit file index (biped fallback)",
+        "bone_count": len(names),
+        "source": "ModelRes header (file), parse_model_nodes",
+        "note": (
+            "node 0 is the file's unnamed root (GamePivot slot); rest = the 28 bytes "
+            "BEFORE each name ([pos vec3][quat vec4 xyzw], published wxyz); parent = "
+            "the record's own parent field, indexing this list"
+        ),
         "bones": bones,
     }
 
@@ -123,7 +146,7 @@ def collect(naz):
             stem = e.name[: -len("_h_z")] if low.endswith("_h_z") else e.name[: -len("_s_z")]
             blocks.setdefault(stem, {})["h" if low.endswith("_h_z") else "s"] = we.naz_read(naz, e)
     out = {}
-    for stem, hs in blocks.items():
+    for stem, hs in sorted(blocks.items()):
         if "h" not in hs:
             continue
         try:
@@ -139,8 +162,8 @@ def collect(naz):
                     sk = skeleton_from_header(header, fam)
                     if sk["bone_count"] >= 20:
                         out[fam] = sk
-                except Exception:
-                    pass
+                except Exception as ex:
+                    print("  skeleton %s: %s" % (fam, ex), file=sys.stderr)
     return out
 
 
@@ -154,7 +177,8 @@ def main(argv):
     index = {}
     for fam, s in sorted(sk.items()):
         path = os.path.join(a.out, "skeleton_%s.json" % fam)
-        json.dump(s, open(path, "w"), indent=1)
+        with open(path, "w", encoding="utf-8", newline="\n") as fh:
+            json.dump(s, fh, indent=1)
         roots, depth = _tree_stats(s)
         index[fam] = {
             "file": os.path.basename(path),
@@ -166,7 +190,8 @@ def main(argv):
             "  skeleton_%-12s %3d bones | roots %d depth %d -> %s"
             % (fam, s["bone_count"], roots, depth, path)
         )
-    json.dump(index, open(os.path.join(a.out, "index.json"), "w"), indent=1)
+    with open(os.path.join(a.out, "index.json"), "w", encoding="utf-8", newline="\n") as fh:
+        json.dump(index, fh, indent=1)
     print("wrote %d skeletons + index.json to %s" % (len(sk), a.out))
 
 

@@ -1,7 +1,7 @@
 # Kapow .fragment.header format (cracked)
 
 The extractor left fragments as "passthrough" (prop_count 0). Reversed the property-bag node tree
-from the binary. `decode_fragment.py` parses it.
+from the binary. `wlib/kapow_fragment.py` parses it (losslessly).
 
 ## Node record
 Each scene-graph node is a variable-length record. The fixed, reliable part is:
@@ -18,9 +18,9 @@ Each scene-graph node is a variable-length record. The fixed, reliable part is:
 `CharacterModelCollection(Node)`, `CharacterHeadModel(Character)`, `CharacterGroup(Folder)`,
 `CharacterRoot(PivotNode)`, `TriggerCondition*`, `TriggerAction*`, `Collision{Capsule,Sphere,Box}Node`.
 
-## What `decode_fragment.py` recovers (now)
+## What the parser recovers
 The TypeName + parentHash/selfHash + depth -> the full **node-type hierarchy**. Run:
-`python3 decode_fragment.py <file>.fragment.header [maxlines]`
+`watchmen fragment <file>.fragment` -> lossless JSON
 Saved dumps: `tree_Enemies.txt` (825 nodes, 56 CharacterGroups / 164 CharacterRoots) and
 `tree_Cameras.txt` (74 camera actions).
 
@@ -29,7 +29,7 @@ A `.fragment.header` is two serializations back to back:
 
 1. **Front schema table (0 .. ~43 KB)** — pure topology. Tightly-packed records
    `[u32 depth][TypeName '\0', padded to 4][u32 parent=0xFFFFFFFF][u32 selfHash]`.
-   Gives the node-TYPE tree (`decode_fragment.py`). No values here.
+   Gives the node-TYPE tree. No values here.
 
 2. **Back instance stream (~43 KB .. EOF)** — the named nodes + their property values.
    Per node:
@@ -44,11 +44,11 @@ A `.fragment.header` is two serializations back to back:
    `9b9b2ff5 2bb48300 7829e877 f20aa272 2708acba 9227257f fd368732 53eb3733 260cadd3 3235f542 0991b0d4`.
    Values are typed and **variable length** (u32 flags, strings, and float vectors), so the
    stream is NOT 4-byte aligned — a string/vector value shifts everything after it. The node's
-   **world translation is a float3 (x,y,z)** sitting in its span; `decode_spawns.py` finds it by a
+   **world translation is a float3 (x,y,z)** sitting in its span; the transform decoder finds it by a
    byte-granular sane-float-triple scan (skips the `(-5.6, *, -5.6)` default-bounds placeholder).
 
 ## Spawn map — RECOVERED (`enemy_spawns.json`)
-`python3 decode_spawns.py Enemies.fragment.header enemy_spawns.json`
+`watchmen fragment Enemies.fragment enemy_spawns.json`
 Pulled **164 enemy spawns with world positions** — which exactly equals the 164 `CharacterRoot`
 pivots in the schema table, and the per-type counts match the name table:
 `dominatrice 92, gimp 36, gimp_with_gagball 23, twilight_lady 13` (double cross-validation).
@@ -84,7 +84,7 @@ The placed-node transform is a clean keyed TRS (no scale). Three consecutive pro
 0xd2e8577f  -> pivot/offset vec3 (always 0,0,0)  [12 bytes]   (not scale)
 ```
 So a placed node is literally `[0x2f0823c4][x y z][0x51172879][qx qy qz qw][0xd2e8577f][0 0 0]`.
-`decode_spawns.py` reads pos+quat directly off these keys (401 transform records in Enemies.fragment).
+the transform decoder reads pos+quat directly off these keys (401 transform records in Enemies.fragment).
 
 ### Rotation validation
 All **164/164 enemy spawns have a pure-Y quaternion** (qx≈qz≈0) — every enemy is placed standing
@@ -101,7 +101,7 @@ plus `SetCamDir` aim markers and an `editorcamera`. These are the literal cinema
 ## Outputs
 - `enemy_spawns.json`  — 164 enemy spawns: name, world pos, quat, yaw (+ all 401 transforms).
 - `camera_transforms.json` — 89 cameras + 207 transforms with pos/quat/yaw.
-- `decode_spawns.py` — keyed transform decoder (works on any Bordello fragment).
+- keyed transform decoder (works on any fragment) — `wlib/kapow_fragment.py`.
 
 ## Still open (lowest value)
 The exact TriggerAction->target-group id wiring (u32 hash references in the property stream resolve via

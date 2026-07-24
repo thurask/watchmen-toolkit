@@ -2,12 +2,16 @@
 # Baker v3 (final): engine-verified decode. quat/10000, POSITION/1000 (Ghidra-confirmed),
 # t0 = position keys + const quat, file hierarchy, root motion relative to frame 0,
 # no slaving (twists are ordinary bones under the true hierarchy).
-# usage: python3 bake_v3.py CLIP OUT.npy [upsample] [--bind /tmp/bind_v7.npz]
+# usage: python3 bake_v4.py CLIP OUT.npy [upsample] --bind BIND.npz
 import sys, struct, numpy as np, watchmen_extract as we, export_female_anims as efa
 
-CONJ = "--conj" in sys.argv
+# 2026-07-24: this module used to read --bind/--conj out of sys.argv AT IMPORT
+# TIME, which forced every caller (and watchmenlib, at import) to rewrite the
+# host program's sys.argv and then importlib.reload() this module.  bake() now
+# takes bind= and conj= directly; argv is parsed only under __main__.
+CONJ = True  # engine-exact palette gauge (conjugated FK); see docs/ENGINE_CONSTANTS.md
 
-BIND = sys.argv[sys.argv.index("--bind") + 1] if "--bind" in sys.argv else "/tmp/bind_v7.npz"
+BIND = None
 # import-safe: a missing bind only matters once bake() is called (fresh-install
 # bootstrap needs to import this module to BUILD the binds first).
 Rb = tb = tloc = par = names = None
@@ -18,6 +22,8 @@ def _load_bind(path=None):
     global BIND, Rb, tb, tloc, par, NS, names
     if path:
         BIND = path
+    if not BIND:
+        raise ValueError("no bind loaded: call bake(clip, bind='.../bind_<skel>_file_v1.npz')")
     bt = np.load(BIND, allow_pickle=True)
     Rb = bt["Rb"]
     tb = bt["tb"]
@@ -25,12 +31,6 @@ def _load_bind(path=None):
     par = bt["par"]
     NS = len(Rb)
     names = [str(n) for n in bt["names"]]
-
-
-try:
-    _load_bind()
-except FileNotFoundError:
-    pass
 
 
 def Rstd(q):
@@ -152,10 +152,30 @@ def _bank_lookup(clipname):
     return None
 
 
-def bake(clipname, upsample=2):
-    if Rb is None:
+def bake(clipname, upsample=2, bind=None, conj=None, bank=None):
+    """Clip name -> (palettes (F,NB,3,4), duration_s), engine-exact.
+
+    bind : path to a bind npz (see build_bind_file / watchmenlib.ensure_binds).
+           Required the first time; cached on the module afterwards.
+    conj : palette gauge; None keeps the current setting (engine default True).
+    bank : optional {clipname: header_bytes_or_path} to look clips up in,
+           instead of walking the naz.
+    """
+    global CONJ
+    if conj is not None:
+        CONJ = bool(conj)
+    if bind:
+        _load_bind(bind)
+    elif Rb is None:
         _load_bind()
-    clip = _bank_lookup(clipname)
+    if bank is not None:
+        _b = bank.get(clipname)
+        if isinstance(_b, str):
+            with open(_b, "rb") as _fh:
+                _b = _fh.read()
+        clip = _b
+    else:
+        clip = _bank_lookup(clipname)
     if clip is None:
         _naz = "01_game.naz" if __import__("os").path.exists("01_game.naz") else "game.naz"
         for st, hs in efa.grab_blocks(_naz).items():
@@ -163,7 +183,7 @@ def bake(clipname, upsample=2):
                 continue
             try:
                 it = list(we.extract_block(hs["h"], hs.get("s")))
-            except:
+            except Exception:
                 continue
             for e, h, s in it:
                 bn = e.name.rsplit("/", 1)[-1].strip()
@@ -172,9 +192,13 @@ def bake(clipname, upsample=2):
                     break
             if clip is not None:
                 break
+    if clip is None:
+        raise KeyError("clip %r not found (not in the bank and not in the naz)" % clipname)
     _ord = _detect_clip_order(clip)
     hdr = np.frombuffer(clip[:8], np.dtype(_ord + "f4"))
     tr = walk(clip, _ord)
+    if not tr:
+        raise ValueError("no animation tracks decoded from clip %r" % clipname)
     nf = max(len(v[0]) for v in tr.values())
     F = (nf - 1) * upsample + 1
     t = np.linspace(0, nf - 1, F)
@@ -257,12 +281,7 @@ def bake(clipname, upsample=2):
             Wt[:, k] = np.einsum("fab,fb->fa", Wr[:, p], off) + Wt[:, p]
     Pr = np.einsum("fkab,kcb->fkac", Wr, Rb)
     Pt = Wt - np.einsum("fkab,kb->fka", Pr, tb)
-    if "--gfix" in sys.argv:
-        G = np.load("/tmp/Gfix.npy")
-        gt = np.load("/tmp/Gfix_t.npy")
-        Pr = np.einsum("ab,fkbc->fkac", G, Pr)
-        Pt = np.einsum("ab,fkb->fka", G, Pt) + gt
-    # HEADER SOLVED (2026-07-09, claude/work_E/ENGINE_CONSTANTS.md): clip header
+    # HEADER SOLVED (2026-07-09, docs/ENGINE_CONSTANTS.md): clip header
     # = [f32 keyRate Hz][f32 duration s][u32 0][u32 keyCount][u32 frameRateScale]
     # keyRate == (keyCount-1)/duration EXACTLY (1163/1163 clips); frameRateScale
     # in {1,2,3} = FULL/HALF/THIRD of the 30fps engine rate (Animation::
@@ -279,8 +298,10 @@ def fps_for(pal_len, dur):
 
 
 if __name__ == "__main__":
+    _bind = sys.argv[sys.argv.index("--bind") + 1] if "--bind" in sys.argv else None
+    _conj = False if "--no-conj" in sys.argv else True
     up = int(sys.argv[3]) if len(sys.argv) > 3 and sys.argv[3].isdigit() else 2
-    pal, dur = bake(sys.argv[1], up)
+    pal, dur = bake(sys.argv[1], up, bind=_bind, conj=_conj)
     np.save(sys.argv[2], pal)
     fps = fps_for(len(pal), dur)
     print("baked %s %s  dur %.2fs  glb fps %.2f" % (sys.argv[1], pal.shape, dur, fps))

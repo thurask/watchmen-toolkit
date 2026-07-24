@@ -35,7 +35,7 @@ Damping-domain note: NxJointLimitSoftDesc damping (0.8) is written torque-
 domain in the desc, but the capture-fit response shows the solver's emergent
 behaviour is k acceleration-domain with damping acting as a ratio zeta ~
 d_file.  Both hypotheses are implemented; 'ratio' is the default and the QA
-comparison (claude/work_E/validate_jiggle_d6.py) supports it.
+comparison against captured palettes supports it.
 
 Usage: from jiggle_d6 import apply_jiggle;  apply_jiggle(P, fps, bind_npz)
 """
@@ -296,7 +296,7 @@ def apply_jiggle(
             continue
         kf, df, lim = W[grp]["k"], W[grp]["d"], W[grp]["limit"]
         if mode in ("engine", "aniso"):
-            K, D = solver_soften(kf, df)
+            K, D = solver_soften(kf, df, dts=0.5 / hz)  # PhysX: 2 substeps per step
         elif mode == "ratio":
             K = kf
             D = 2.0 * df * math.sqrt(K)

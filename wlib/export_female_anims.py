@@ -11,7 +11,7 @@ root (it cancels in local space), so adding clips is just per-bone rotation trac
 
 import struct, json, argparse, numpy as np
 import watchmen_extract as we, rig_glb, extract_skeletons as es
-import decode_skeleton_model as dsm
+import parse_model_nodes as pmn
 
 C = np.array([[1, 0, 0], [0, 0, 1], [0, -1.0, 0]])
 
@@ -171,7 +171,7 @@ def main():
     hdr_names = [nm for _, nm in recs]
     eng = ["GamePivot"] + [nm for nm in hdr_names if nm != "GamePivot"]
     NB = len(eng)
-    nodes, _ = dsm.decode(skelhdr)
+    nodes = pmn.rest_by_name(skelhdr)
     fpar = es._explicit_parent_names(skelhdr)
     n2i = {nm: i for i, nm in enumerate(eng)}
     par = [-1] * NB
@@ -286,7 +286,7 @@ def main():
     Weng = [None] * NB
     for i in order:
         L = np.eye(4)
-        L[:3, :3] = dsm.qmat_wxyz(rq_wxyz[i])
+        L[:3, :3] = pmn.qmat_wxyz(rq_wxyz[i])
         L[:3, 3] = rpos[i]
         Weng[i] = (Weng[par[i]] @ L) if par[i] >= 0 else L
     ibm = np.array([np.linalg.inv(Weng[i]) for i in range(NB)]).astype(np.float32)
