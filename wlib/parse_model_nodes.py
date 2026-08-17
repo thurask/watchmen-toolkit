@@ -174,16 +174,18 @@ if __name__ == "__main__":
 #   [u32 0][u32 0] terminator
 # These joint records are the file-side EmbeddedJointNodes (jiggle/ragdoll
 # D6 joints, see 2026-07-09i/j PhysX findings).
-def parse_node_aux(mb, start, end):
+def parse_node_aux(mb, start, end, order="<"):
     """Parse one node aux region [start,end). Returns dict or None if the
-    region contains mesh data / unknown joint blobs (not fully tiled)."""
+    region contains mesh data / unknown joint blobs (not fully tiled).
+    order: '<' PC (default, previous hardcoded behavior) / '>' X360+PS3
+    (2026-08-17: the reads were LE-only)."""
     import struct as _s
 
     p = start
 
     def u32():
         nonlocal p
-        v = _s.unpack_from("<I", mb, p)[0]
+        v = _s.unpack_from(order + "I", mb, p)[0]
         p += 4
         return v
 
@@ -204,15 +206,15 @@ def parse_node_aux(mb, start, end):
             t, _z = u32(), u32()
             import numpy as _np
 
-            pos = _np.frombuffer(mb, "<f4", 3, p)
+            pos = _np.frombuffer(mb, order + "f4", 3, p)
             p += 12
             # 2026-07-12c FIELD-ORDER FIX: the two scalars precede the quat.
             # True layout: [pos x3][f32 a][f32 a'][quat x4 xyzw] -- verified
             # |q|^2 = 1.0000 on all 24 female-skeleton joints (old order gave
             # non-unit "quats").  a/a' = per-joint scalar pair (limit/offset?).
-            a, a2 = _s.unpack_from("<2f", mb, p)
+            a, a2 = _s.unpack_from(order + "2f", mb, p)
             p += 8
-            quat = _np.frombuffer(mb, "<f4", 4, p)
+            quat = _np.frombuffer(mb, order + "f4", 4, p)
             p += 16
             bl = u32()
             if bl > 4096:

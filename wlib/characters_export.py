@@ -524,6 +524,12 @@ def export(extract_out, outdir, naz="game.naz", budget=None, only=None):
                         else:
                             dur = float(d["dur"])
                             fps = len(d["pal"]) / (dur / 3.0) if dur > 0 else 30
+                        # 2026-08-17: apply the capture-verified runtime
+                        # movement sync (AnimSlot.SetSpeed on locomotion
+                        # cycles) here too -- `watchmen char` (variant_glb.
+                        # build) already did; the bulk path left walk/run at
+                        # authored timing, so the two writers disagreed.
+                        fps *= vg.speed_mult(nm)
                         jf = os.path.join(jdir, nm + ".npz")
                         if os.path.exists(jf):
                             anims.append((nm, np.load(jf)["pal"], fps))

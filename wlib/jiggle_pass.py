@@ -122,7 +122,9 @@ def apply_jiggle(P, fps, bindpath, bones=None, gain=None):
         # back to original grid + apply: B_new = A·R(x)·A^T·B (rotate deviation in parent frame)
         for i, ti in enumerate(t_o):
             j = min(int(ti * 30.0), N - 2)
-            w = ti * 30.0 - j
+            # 2026-08-17: clamp w -- clips faster than the 30fps sim grid
+            # extrapolated past the last sim sample (see jiggle_d6).
+            w = min(ti * 30.0 - j, 1.0)
             xi = (1 - w) * x[j] + w * x[j + 1]
             Ai = A_o[i]
             D = Ai @ _rotv2m(xi) @ Ai.T

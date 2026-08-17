@@ -3,17 +3,18 @@
 export_female_anims.py -- export the Dominatrix body mesh rigged to the file-decoded
 female skeleton, with MANY female .animation clips baked as glTF animations (Blender
 Actions). FK in local bone space: each bone node animates translation=restPos (const) +
-rotation=clip-local-rotation; the engine->glTF Y-up rotation lives only on the Armature
-root (it cancels in local space), so adding clips is just per-bone rotation tracks.
+rotation=clip-local-rotation, so adding clips is just per-bone rotation tracks.
+No axis conversion: the Kapow engine is Y-up like glTF (v1.1.0 finding; this
+writer previously baked a Z-up->Y-up rotation into POSITION *and* put Rx(-90)
+on the Armature root, which compounded instead of cancelling -- removed
+2026-08-17).
 
   python export_female_anims.py game.naz out.glb [--prefix EN4] [--max 60] [--fps 30]
 """
 
-import struct, json, argparse, numpy as np
+import sys, struct, json, argparse, numpy as np
 import watchmen_extract as we, rig_glb, extract_skeletons as es
 import parse_model_nodes as pmn
-
-C = np.array([[1, 0, 0], [0, 0, 1], [0, -1.0, 0]])
 
 
 def grab_blocks(naz):
@@ -149,7 +150,8 @@ def main():
             continue
         try:
             it = list(we.extract_block(hs["h"], hs.get("s")))
-        except:
+        except Exception as ex:  # was a bare except: report, don't swallow (2026-08-17)
+            print("  ! block %s: %s" % (st, ex), file=sys.stderr)
             continue
         for e, h, s in it:
             n = e.name
@@ -166,6 +168,14 @@ def main():
     print(
         "skeleton:", skelhdr is not None, "| body:", mesh is not None, "| female clips:", len(clips)
     )
+    # fail cleanly instead of a TypeError on None (2026-08-17)
+    if skelhdr is None:
+        raise SystemExit(
+            "error: no Female_Skeleton.model in %s -- the female skeleton ships "
+            "with Part 2 only (Part 1 archives do not contain it)" % a.naz
+        )
+    if mesh is None:
+        raise SystemExit("error: %s.model not found in %s" % (a.body, a.naz))
     # file skeleton, engine-ID order (48 bones)
     recs = es._ordered_names(skelhdr)
     hdr_names = [nm for _, nm in recs]
@@ -219,7 +229,9 @@ def main():
         SW.append(sw)
         subs.append((base, len(v), ts, len(T) - ts))
         off = ibo + ib
-    Vg = (C @ np.array(V, float).T).T.astype(np.float32)
+    # engine positions are already Y-up (v1.1.0): no axis conversion, and the
+    # IBMs below are engine-space, so POSITION must be too (2026-08-17)
+    Vg = np.array(V, np.float32)
     SI = np.concatenate(SI).astype(np.uint8)
     SW = np.concatenate(SW).astype(np.float32)
     # glb
@@ -290,9 +302,8 @@ def main():
         L[:3, 3] = rpos[i]
         Weng[i] = (Weng[par[i]] @ L) if par[i] >= 0 else L
     ibm = np.array([np.linalg.inv(Weng[i]) for i in range(NB)]).astype(np.float32)
-    ibmacc = ac(
-        av(np.array([m.T.reshape(16) for m in ibm]).astype(np.float32).tobytes()), 5126, NB, "MAT4"
-    )
+    # (the skin's IBM accessor is written below in SKIN order; a second, eng-order
+    # copy used to be emitted here and left orphaned in every file -- 2026-08-17)
     # mesh primitives
     prims = []
     for base, nv, ts, ntr in subs:
@@ -326,12 +337,11 @@ def main():
     j["meshes"].append({"name": a.body, "primitives": prims})
     mnode = len(j["nodes"])
     j["nodes"].append({"name": a.body + "_mesh", "mesh": 0, "skin": 0})
-    rq = [-0.7071068, 0, 0, 0.7071068]  # Rx(-90) Y-up at root
+    # identity root: engine space IS glTF Y-up, no Rx(-90) (2026-08-17)
     arm = len(j["nodes"])
     j["nodes"].append(
         {
             "name": "Armature",
-            "rotation": rq,
             "children": [bnode[i] for i in range(NB) if par[i] < 0] + [mnode],
         }
     )

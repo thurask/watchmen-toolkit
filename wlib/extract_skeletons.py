@@ -7,12 +7,13 @@ table (name + parent + rest local pos + rest local quat, read from the file head
 docs/ENGINE_CONSTANTS.md), and writes skeleton_<family>.json. Run BEFORE rigging so
 each character binds to its base skeleton.
 
-Hierarchy: the per-node explicit parentIndex (header, name_end+4) indexes an engine
-bone-ID list whose element 0 is the root GamePivot:
-    engine_ids = [GamePivot] + [every other node in header order]
-    parent(node) = engine_ids[parentIndex]   (0 -> GamePivot root)
-Resolved over the clean (transform-bearing) node set; out-of-range -> biped-name
-fallback, so the tree is always a single clean root (robust for Small_Skeleton too).
+Hierarchy (2026-08-17 docstring sync -- the code moved to parse_model_nodes in
+v1.1.0): each node record carries its own parent field, read verbatim by
+parse_model_nodes.parse(); node 0 is the file's unnamed root (the GamePivot
+slot) and every parent is an index into the file's own node list.  Out-of-range
+or self-referencing parents publish as -1 (root); there is no biped-name
+guessing anywhere in this path.  (_explicit_parent_names below still implements
+the older engine-ID name mapping for export_female_anims.)
 """
 
 import sys, os, json, struct, argparse

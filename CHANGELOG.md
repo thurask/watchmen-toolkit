@@ -1,5 +1,94 @@
 # Changelog
 
+## 1.2.0 — 2026-08-17
+
+A second correctness pass. The dominant theme: fixes the bulk `characters`
+path (`char_lib`) collected in July that the single-model paths never
+received. **Output-affecting for console extraction, `watchmen char`, bulk
+walk/run timing, and `export_female_anims`** — details below.
+
+### Output-affecting
+
+- **Console rigged GLBs from the extractor.** `decode_model` auto-detected the
+  byte order but didn't pass it to `decode_skin`, so the PC `stride >= 56`
+  gate rejected every console (stride-44) skinned submesh and `--glb` on an
+  X360/PS3 naz silently produced no skinned GLB at all. The `watchmenlib`
+  facade wrapper dropped the argument too. Both now thread the order through.
+- **`watchmen char` / `wl.build_variant_glb` skinning.** `variant_glb.
+  load_parts` was missing the 2026-07-13 `BipNN`-prefix-insensitive bone-name
+  fallback `char_lib` has, so Thug/Heavies-style name mismatches silently
+  dropped mid-list bones and shifted the rotate-by-one palette (mis-skinned
+  arms/head). Also ported from `char_lib`: byte-order autodetection (the path
+  was little-endian-only), the `_ib_ok` clean-index-buffer guard, and
+  engine-exact `submesh_materials` pairing (positional pairing textures the
+  wrong submeshes when one material covers several). The extractor's OBJ/MTL
+  path got the same `submesh_materials` fix.
+- **Bulk locomotion timing.** `watchmen characters` never applied the
+  capture-verified `SPEED_MULT` runtime sync that `watchmen char` applies, so
+  the two writers disagreed on walk/run clips. The bulk path now applies it.
+- **`export_female_anims`** still carried the pre-1.1.0 Z-up→Y-up conversion —
+  and applied it twice (baked into POSITION *and* on the Armature root), so
+  its output was rotated. No conversion is applied now; output matches the
+  other writers. Also: removed an orphaned duplicate IBM accessor, replaced a
+  bare `except`, and a naz without the female skeleton now fails with a clear
+  message instead of a `TypeError`.
+- **Clip-bank lookups in `variant_glb.build()`** only matched keys named
+  `<clip>.animation`, while `bake_v4` accepts bare names too; a bare-keyed
+  bank silently missed every clip and fell back to 30 fps. Lookups are now
+  tolerant the same way `bake_v4`'s are.
+
+### Correctness
+
+- `bake_v4`: the frame count came from quaternion tracks only; a clip whose
+  longest track is positional had its position keys silently down-sampled.
+- `jiggle_d6`/`jiggle_pass`: the sim→clip resample clamped the index but not
+  the weight, so clips faster than the integration grid extrapolated past the
+  last sim sample (and could overshoot the engine distance clamp). Clamped.
+- `variant_glb`: face-first materials silently lost their specular layer (the
+  face material block was a copy of the body block minus the
+  `KHR_materials_specular` handling); one `try/except` around the face-synth
+  import also swallowed per-pose errors and disabled all auto-pairing on the
+  first bad pose — it now guards only the import and reports failing poses.
+- `skeleton_records` and `parse_model_nodes.parse_node_aux` were
+  little-endian-only; both are byte-order aware now (facade callers get
+  console support with no signature change).
+- X360 texture carve: the tile buffer sized width as `max(w, 32)` where every
+  consumer aligns width up to 32; non-power-of-two widths over 32 blocks got
+  their untiled tail zero-filled (blank PNG bands).
+- `mediastream` vs `MediaStream`: the console-audio metadata pass compared the
+  asset class against two different spellings, so at most one branch could
+  ever match; both comparisons are case-insensitive now.
+- Legacy-carved textures (`diffuse.png`, …) used names the texture index and
+  MTL linker can't see; they now use the standard
+  `<i>_<label>_<WxH>_<FMT>.png` scheme and link into OBJ materials.
+- `kapow_props.parse` bounds-checks payload reads (truncated propbags return
+  partial results with a `warn` entry instead of raising `struct.error`), and
+  the dead `wc + 1 != k` validation actually warns now.
+
+### CLI and library surface
+
+- `hash` and `gendata` dispatch before the facade import: `watchmen hash` no
+  longer imports numpy/Pillow/the data tables, and `watchmen gendata
+  keys-import` — the documented recovery when `kapow_fragment_keys.pkl` is
+  missing — no longer dies on the very import error it exists to fix.
+- `kapow_fragment` raises `ImportError` instead of `SystemExit` when its key
+  table is missing: `SystemExit` derives from `BaseException`, so it escaped
+  every `except Exception` guard (pytest collection died with zero tests run;
+  `import watchmenlib` could kill a host process). The CLI catches it (and
+  `struct.error`) and prints an `error:` line; missing-table exit code is now
+  2, not 1.
+- `--limit N` on the extractor actually stops after N block assets, as its
+  help always claimed.
+- Stale docs/comments swept: the extractor's `OUT/streams/` claim, a dead
+  `_RIG["skeletons"]` store and its misleading comment, a dead `stats`
+  counter, `rig_glb`'s claim that its (legacy, caller-less) animation path
+  decodes translations, `extract_skeletons`' description of the removed
+  biped-name parent fallback, and the removed `sys.argv` snapshot note in
+  `watchmen.py`.
+- The key-count-cap regression test now actually fails when the cap is
+  removed (it fed keys the dimension check rejected anyway, so it pinned
+  nothing).
+
 ## 1.1.0 — 2026-07-24
 
 A correctness pass over the whole toolkit. **Three changes alter output**; the

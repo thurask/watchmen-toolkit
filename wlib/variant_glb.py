@@ -84,8 +84,31 @@ def batch_m2q(M):
 
 def load_parts(mesh_names, palette_names, naz="01_game.naz"):
     NB = len(palette_names)
-    skelset = set(palette_names)
     uslot = {n: i for i, n in enumerate(palette_names)}
+    # 2026-08-17: ported char_lib.load_parts' 2026-07-13 'BipNN '-prefix-
+    # insensitive slot fallback (exact matches always win).  Thug/Heavies
+    # models say 'RUpArmTwist' where the medium bind says 'Bip02 RUpArmTwist';
+    # a silently dropped MID-LIST name shifts the rotate-by-one palette and
+    # mis-skins everything after it.  char_lib had the fix; this path didn't.
+    import re
+
+    _canon = lambda n: re.sub(r"^Bip\d+\s+", "", n)
+    ucanon = {}
+    for i, n in enumerate(palette_names):
+        c = _canon(n)
+        if c not in uslot:
+            ucanon.setdefault(c, i)
+
+    def _slot(x):
+        if x in uslot:
+            return uslot[x]
+        if x in ucanon:
+            return ucanon[x]
+        c = _canon(x)
+        if c in uslot:
+            return uslot[c]
+        return ucanon.get(c)
+
     found = {}
     for st, hs in efa.grab_blocks(naz).items():
         if "h" not in hs:
@@ -107,33 +130,49 @@ def load_parts(mesh_names, palette_names, naz="01_game.naz"):
         mh, ms = cands[0]
         if ms is None:
             continue
-        # per-part skin-index remap (each part mesh has its OWN bone list)
-        plist = [x for _, x in es._ordered_names(mh)]
-        pf = [x for x in plist if x in skelset]
-        ppal = [pf[(k - 1) % len(pf)] for k in range(len(pf))]
-        remap = np.array([uslot.get(n, 0) for n in ppal], dtype=np.int64)
-        descs = we.find_descriptors(mh)
+        # per-part skin-index remap (each part mesh has its OWN bone list).
+        # 2026-08-17: byte order threaded through like char_lib.load_parts --
+        # console (X360/PS3) models are big-endian; compare descriptor COUNTS
+        # (a BE model can throw a stray LE false positive).  This path was
+        # hardcoded LE.
+        order = (
+            ">" if len(we.find_descriptors(mh, ">")) > len(we.find_descriptors(mh, "<")) else "<"
+        )
+        be = order == ">"
+        plist = [x for _, x in es._ordered_names(mh, order)]
+        pf = [x for x in plist if _slot(x) is not None]
+        ppal = [pf[(k - 1) % len(pf)] for k in range(len(pf))]  # engine rotate-by-one
+        remap = np.array([_slot(n) for n in ppal], dtype=np.int64)
+        descs = we.find_descriptors(mh, order)
         mats = we.extract_materials(mh)
+        # 2026-08-17: engine-exact submesh->material pairing (char_lib.py had
+        # the 2026-07-08g fix); positional mats[si] stays as the fallback.
+        smat = we.submesh_materials(mh, order)
         off = 0
         for si, (nv, stride, ib) in enumerate(descs):
             hi = len(ms) - nv * stride - ib
             c = off
             vbo = None
             while c <= min(off + 65536, hi):
-                if we._sane(struct.unpack_from("<f", ms, c)[0]) and we._vb_ok(
-                    ms, c, nv, stride, ib
+                # require a CLEAN index buffer too: a false-positive VB sits
+                # ~4 bytes before the real one, passes _vb_ok, but has a ~50%
+                # repeated-index IB (char_lib 2026-07-15d).
+                if (
+                    we._sane(struct.unpack_from(order + "f", ms, c)[0])
+                    and we._vb_ok(ms, c, nv, stride, ib, order)
+                    and we._ib_ok(ms, c, nv, stride, ib, order)
                 ):
                     vbo = c
                     break
                 c += 1
             if vbo is None:
                 continue
-            v, _, uv = we._decode_sub(ms, vbo, nv, stride)
-            skidx, skw = rig_glb.decode_skin(ms, vbo, nv, stride)
+            v, _, uv = we._decode_sub(ms, vbo, nv, stride, be)
+            skidx, skw = rig_glb.decode_skin(ms, vbo, nv, stride, order)
             ibo = vbo + nv * stride
             T = []
             for t in range(ib // 6):
-                x, y, z = struct.unpack_from("<3H", ms, ibo + t * 6)
+                x, y, z = struct.unpack_from(order + "3H", ms, ibo + t * 6)
                 if x < nv and y < nv and z < nv and len({x, y, z}) == 3:
                     T.append((x, y, z))
             off = ibo + ib
@@ -141,7 +180,11 @@ def load_parts(mesh_names, palette_names, naz="01_game.naz"):
                 continue
             SI = remap[np.clip(np.asarray(skidx, int), 0, len(remap) - 1)]
             SI = np.clip(SI, 0, NB - 1)
-            mat = mats[si] if si < len(mats) else "%s_sub%d" % (nm, si)
+            mat = (
+                mats[smat[si][1]]
+                if si < len(smat) and smat[si][1] < len(mats)
+                else (mats[si] if si < len(mats) else "%s_sub%d" % (nm, si))
+            )
             parts.append(
                 (
                     np.array(v, float),
@@ -561,6 +604,15 @@ def write_glb(parts, manifest, out, bindnpz, textures=None, face=None, attachmen
                 if layers.get("alphaMask"):
                     mat["alphaMode"] = "MASK"
                     mat["alphaCutoff"] = 0.5
+                # 2026-08-17: spec layer was silently dropped on face-first
+                # materials -- mirror the body-prim block above.
+                if "spec" in layers:
+                    mat.setdefault("extensions", {})["KHR_materials_specular"] = {
+                        "specularColorTexture": {"index": _tex2(layers["spec"], "spec")}
+                    }
+                    j.setdefault("extensionsUsed", [])
+                    if "KHR_materials_specular" not in j["extensionsUsed"]:
+                        j["extensionsUsed"].append("KHR_materials_specular")
                 j["materials"].append(mat)
                 mi = _texdone[nm] = len(j["materials"]) - 1
             else:
@@ -650,14 +702,20 @@ def write_glb(parts, manifest, out, bindnpz, textures=None, face=None, attachmen
         _cand = [a for a in face["anims"] if "MouthClosed_EyesOpen" in a[0]] or list(face["anims"])
         _fneut = _locals_for(_cand[0][1][0])
         # per-category pose locals (AUTO-PAIRING: ATT face on attack clips etc.)
+        # 2026-08-17: guard ONLY the import -- the old blanket except also
+        # swallowed _locals_for errors and silently disabled ALL auto-pairing
+        # (and blink categorization) on the first bad pose.
         _fpose = {}
         try:
             import face_synth as _fs
-
-            for _pn, _pp in (face.get("auto_poses") or {}).items():
-                _fpose[_pn] = _locals_for(_pp)
         except Exception:
             _fs = None
+        if _fs is not None:
+            for _pn, _pp in (face.get("auto_poses") or {}).items():
+                try:
+                    _fpose[_pn] = _locals_for(_pp)
+                except Exception as _pe:
+                    print("  ! auto-pose %s failed: %s" % (_pn, _pe))
         # blink data: EyeLid bone locals for neutral vs eyes-closed
         _fblink = None
         _fn2 = [str(x) for x in _fb["names"]]
@@ -777,13 +835,9 @@ def write_glb(parts, manifest, out, bindnpz, textures=None, face=None, attachmen
                     _t += _per
                 _keys.append(_dur)
                 _kt = np.array(_keys, np.float32)
-                _wts = np.zeros(len(_kt))
-                for _i in range(1, len(_kt) - 1, 4):
-                    if _i + 2 < len(_kt):
-                        _wts[_i + 1] = 1.0
-                        _wts[_i + 2] = 1.0 if _i + 3 < len(_kt) - 1 else 0.0
-                # weights pattern per blink: t0=0, t1(close start)=0? keys are
-                # [start, closed, closed, open] -> w=[0,1,1,0]
+                # weights per blink group [start, closed, closed, open] ->
+                # w=[0,1,1,0]  (2026-08-17: removed a dead first computation
+                # this one immediately overwrote)
                 _wts = np.zeros(len(_kt))
                 for _i in range(1, len(_kt) - 4, 4):
                     _wts[_i + 1] = 1.0
@@ -1015,7 +1069,18 @@ def build(
         nm = os.path.basename(f)[:-4]
         fps = 30.0
         if bank:
+            # 2026-08-17: tolerant lookup -- bake_v4 banks key by BARE clip
+            # name ({clipname: header_bytes_or_path}, bake_v4.py:155); the old
+            # nm+".animation"-only lookup silently missed on those and left
+            # every clip at the 30fps fallback (2x slow on FULL-rate clips).
             h = bank.get(nm + ".animation")
+            if h is None:
+                h = bank.get(nm)
+            if h is None:
+                h = bank.get(nm.strip())
+            if isinstance(h, str):
+                with open(h, "rb") as _fh:
+                    h = _fh.read()
             if h is not None:
                 # header = [f32 keyRate Hz][f32 duration s] ... -- hdr[0] is the
                 # RATE, not the duration (bake_v4.py:265).  fps must match

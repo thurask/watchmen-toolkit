@@ -199,7 +199,11 @@ def bake(clipname, upsample=2, bind=None, conj=None, bank=None):
     tr = walk(clip, _ord)
     if not tr:
         raise ValueError("no animation tracks decoded from clip %r" % clipname)
-    nf = max(len(v[0]) for v in tr.values())
+    # 2026-08-17: frame count from ALL key tracks, not quats only -- a type-0
+    # track (const quat + position keys) contributed 1 before, so a clip whose
+    # longest track was positional got its position keys down-sampled (worst
+    # case, all-const rotations: collapsed to a single frame).
+    nf = max(max(len(q), len(p) if p is not None else 1) for q, p in tr.values())
     F = (nf - 1) * upsample + 1
     t = np.linspace(0, nf - 1, F)
     i0 = np.floor(t).astype(int)

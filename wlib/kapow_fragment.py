@@ -28,11 +28,15 @@ try:
     with open(_KP, "rb") as _fh:
         _KD = pickle.load(_fh)
 except OSError as _ex:
-    raise SystemExit(
+    # ImportError, NOT SystemExit (2026-08-17): a library module must not exit
+    # the host process at import time -- SystemExit is a BaseException, so it
+    # blew through every `except Exception` guard (pytest collection died with
+    # zero tests run, and `import watchmenlib` killed interactive hosts).
+    raise ImportError(
         "watchmen: missing data table %s (%s)\n"
         "  reinstall the package, or rebuild it with `watchmen gendata keys-import KEYS.json`"
         % (_KP, _ex)
-    )
+    ) from _ex
 h2t = _KD["keytable"]
 std = _KD["stdkeys"]
 STDTYPES = {

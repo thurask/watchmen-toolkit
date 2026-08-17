@@ -12,8 +12,12 @@ Engine-exact ANIMATED per-character glbs are produced by the `watchmen.py charac
 pipeline (file-only binds + baked clips), not here.
 
 Skin channel (verified): BLENDINDICES = D3DCOLOR ubyte4 @ +44 read BGRA (bytes 2,1,0,3);
-BLENDWEIGHT = float16 x4 @ +48. Animation tracks: per-bone local quaternions (XYZW in-file, /10000 (reordered to WXYZ on read))
-and translations (/1000); rotation-only clips (offsets come from the skeleton).
+BLENDWEIGHT = float16 x4 @ +48. Animation decode (_decode_anim / decode_animation --
+LEGACY, caller-less; engine-exact clips come from bake_v4): per-bone local
+quaternions ONLY (XYZW in-file, /10000, reordered to WXYZ on read); position keys
+are skipped and translations come from the skeleton's rest offsets, so root motion
+is not reproduced on that path (2026-08-17: docstring corrected -- it used to
+claim translations (/1000) were decoded).
 """
 
 import json, struct, math, io

@@ -182,8 +182,9 @@ def model_bone_names(mb):
     return [n for _, n in _es._ordered_names(mb)]
 
 
-def decode_skin(stream, vbo, nv, stride):
-    return _rig.decode_skin(stream, vbo, nv, stride)
+def decode_skin(stream, vbo, nv, stride, order="<"):
+    # order '<' PC / '>' X360+PS3 (console skinned stride is 44, not 56)
+    return _rig.decode_skin(stream, vbo, nv, stride, order)
 
 
 def skeleton_records(mb):

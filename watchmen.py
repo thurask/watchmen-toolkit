@@ -37,17 +37,16 @@ Examples
   python3 watchmen.py char Gimp.fragment.json Gimp2 CHAR_Gimp2.glb
 """
 
-import os, sys, json
+import os, sys, json, struct
 
 # append, never insert(0): wlib holds flat, generically-named modules
 # (char_lib, gen_data, engine_schema, ...) that must not shadow the stdlib.
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "wlib"))
-_ARGV = list(sys.argv)  # watchmenlib rewrites sys.argv for bake_v4
 
 try:
     from wlib import __version__ as VERSION
 except Exception:  # running from a source checkout without the package installed
-    VERSION = "1.0.0"
+    VERSION = "1.2.0"
 
 
 def _wl():
@@ -104,6 +103,22 @@ def main(argv):
         print("usage: watchmen.py %s" % USAGE[cmd][1])
         print("  (%s takes at least %d argument%s)" % (cmd, need, "" if need == 1 else "s"))
         return 2
+
+    # hash + gendata are dispatched BEFORE _wl(): neither needs the facade
+    # (numpy, Pillow, the pickled tables), and `gendata keys-import` is the
+    # documented recovery path when kapow_fragment_keys.pkl is MISSING -- it
+    # must not die on the very import error it exists to fix (2026-08-17;
+    # previously both ran after _wl() and paid/failed the full import).
+    if cmd == "hash":
+        import kapow_props
+
+        # same convention as wl.kapow_hash: the engine hashes UPPERCASE names
+        print("%08x" % kapow_props.kapow_hash(args[0].upper()))
+        return 0
+    if cmd == "gendata":
+        import gen_data
+
+        return gen_data.main(["gen_data"] + args)
 
     wl = _wl()
 
@@ -189,14 +204,6 @@ def main(argv):
             kw["bakedir"] = args[4]
         wl.build_variant_glb(frag, variant, out, **kw)
 
-    elif cmd == "hash":
-        print("%08x" % wl.kapow_hash(args[0]))
-
-    elif cmd == "gendata":
-        import gen_data
-
-        return gen_data.main(["gen_data"] + args)
-
     else:
         print("unknown command %r" % cmd)
         print(__doc__)
@@ -207,12 +214,15 @@ def main(argv):
 def cli():
     """Console-script entry point (``watchmen`` after ``pip install``)."""
     try:
-        sys.exit(main(_ARGV))
+        sys.exit(main(sys.argv))
     except KeyboardInterrupt:
         print("interrupted", file=sys.stderr)
         sys.exit(130)
-    except (OSError, ValueError) as ex:
-        # bad path / wrong file type: an actionable line, not a traceback
+    except (OSError, ValueError, struct.error, ImportError) as ex:
+        # bad path / wrong file type / truncated asset / missing data table:
+        # an actionable line, not a traceback (struct.error + ImportError
+        # added 2026-08-17: truncated propbags raise struct.error, and
+        # kapow_fragment now raises ImportError for a missing key table)
         print("error: %s" % ex, file=sys.stderr)
         sys.exit(2)
 

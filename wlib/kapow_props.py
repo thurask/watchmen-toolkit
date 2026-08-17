@@ -91,6 +91,8 @@ def parse(b, keynames=None, order=None):
     n = len(b)
     blocks = []
     pre = []
+    trunc = 0  # records/blocks whose payload ran past the buffer (2026-08-17)
+    wcmm = 0  # string records whose wordcount disagrees with the dword count k
     while p + 8 <= n:
         r = _rdname(b, p, bo)
         nskip = 0
@@ -102,6 +104,9 @@ def parse(b, keynames=None, order=None):
         if nskip:
             pre = list(struct.unpack_from(bo + "%dI" % nskip, b, p))
         cls, p = r
+        if p + 4 > n:  # 2026-08-17: truncated before schemaCount -- stop cleanly
+            trunc += 1
+            break
         schema = struct.unpack_from(bo + "I", b, p)[0]
         p += 4
         recs = []
@@ -116,11 +121,18 @@ def parse(b, keynames=None, order=None):
             if tn is None and k > 1024:
                 break
             q = p + 16
+            # 2026-08-17: every payload is k dwords ([u32 k][k dwords]); these
+            # buffers are carved heuristically, so a record running past the
+            # end is routine -- stop the walk instead of letting struct.error
+            # escape into the caller's whole extraction pass.
+            if q + 4 * k > n or (tn == "string" and k < 1):
+                trunc += 1
+                break
             val = None
             if tn == "string":
                 wc = struct.unpack_from(bo + "I", b, q)[0]
                 if wc + 1 != k:
-                    pass
+                    wcmm += 1  # counted + reported via out['warn'] (was a no-op)
                 val = b[q + 4 : q + 4 + wc * 4].rstrip(b"\0").decode("latin1")
             elif tn == "number":
                 fs = [struct.unpack_from(bo + "f", b, q + 4 * j)[0] for j in range(k)]
@@ -149,7 +161,17 @@ def parse(b, keynames=None, order=None):
             }
         )
         pre = []
-    return {"blocks": blocks, "trailing_bytes": n - p}
+    out = {"blocks": blocks, "trailing_bytes": n - p}
+    # one summary warning per parse, on the same channel decode_sequence uses
+    # (surfaces in the emitted JSON; per-record stderr would spam bulk runs)
+    warn = []
+    if trunc:
+        warn.append("truncated: %d record(s) ran past the buffer" % trunc)
+    if wcmm:
+        warn.append("string wordcount != k-1 on %d record(s)" % wcmm)
+    if warn:
+        out["warn"] = warn
+    return out
 
 
 if __name__ == "__main__":

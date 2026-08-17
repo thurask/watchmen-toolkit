@@ -9,12 +9,12 @@ Engine quats = conjugate of naive xyzw convention.
 import struct, numpy as np
 
 
-def node_records(h):
+def node_records(h, order="<"):
     occ = []
     i = 0
     N = len(h)
     while i + 4 <= N:
-        n = struct.unpack_from("<I", h, i)[0]
+        n = struct.unpack_from(order + "I", h, i)[0]
         if 2 <= n <= 40 and i + 4 + n <= N:
             s = h[i + 4 : i + 4 + n]
             if (
@@ -30,22 +30,31 @@ def node_records(h):
     return occ
 
 
-def parse(h, maxpos=5.0):
-    occ = [(i, n) for i, n in node_records(h) if "/" not in n and n != "ModelRes"]
+def _detect_order(h):
+    """'<' PC / '>' X360+PS3, same idiom as parse_model_nodes: the u32 namelen
+    only parses small in the header's real byte order (2026-08-17; this module
+    was LE-only, so console models yielded empty/garbage records)."""
+    return "<" if len(node_records(h, "<")) >= len(node_records(h, ">")) else ">"
+
+
+def parse(h, maxpos=5.0, order=None):
+    if order is None:
+        order = _detect_order(h)
+    occ = [(i, n) for i, n in node_records(h, order) if "/" not in n and n != "ModelRes"]
     recs = []
     for k, (lp, nm) in enumerate(occ):
-        namelen = struct.unpack_from("<I", h, lp)[0]
+        namelen = struct.unpack_from(order + "I", h, lp)[0]
         b0 = lp + 4 + namelen
         b1 = occ[k + 1][0] if k + 1 < len(occ) else len(h)
         body = h[b0:b1]
         par = (
-            struct.unpack_from("<i", body, 4)[0] - 1 if len(body) >= 8 else -2
+            struct.unpack_from(order + "i", body, 4)[0] - 1 if len(body) >= 8 else -2
         )  # u32@4 = parent+1 (1-based, 0=root)
         # scan body for 28B [pos f32x3][quat f32x4 unit] entries, byte-granular
         ents = []
         j = 0
         while j + 28 <= len(body):
-            v = struct.unpack_from("<7f", body, j)
+            v = struct.unpack_from(order + "7f", body, j)
             p = np.array(v[:3])
             q = np.array(v[3:])
             n2 = float(q @ q)

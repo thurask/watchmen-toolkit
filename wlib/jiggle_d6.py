@@ -366,7 +366,10 @@ def apply_jiggle(
         # back to clip grid + apply (same convention as jiggle_pass)
         for i, ti in enumerate(t_o):
             j = min(int(ti * hz), N - 2)
-            w = ti * hz - j
+            # 2026-08-17: clamp w -- on clips faster than the sim grid (4x
+            # dense bakes, fps > hz) the tail frames extrapolated past x[N-1]
+            # and could overshoot the engine distance clamp.
+            w = min(ti * hz - j, 1.0)
             xw = (1 - w) * x[j] + w * x[j + 1]
             Ai = A_o[i]
             Dm = Ai @ _rotv2m(xw) @ Ai.T

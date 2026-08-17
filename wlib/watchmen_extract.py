@@ -14,7 +14,7 @@ Feed it game.naz and it walks the whole chain we reverse-engineered and writes:
                     glossiness->map_Ns from the textures/ dump above)
     OUT/audio/      <asset>.wav (SFX/voice, MS-ADPCM/PCM@44100) | .ogg (music)
     OUT/audio/      <asset>.ogg                              (.mediastream_s = Vorbis)
-    OUT/streams/    <asset>.stream                           (other block payloads)
+    OUT/extracted/  <asset> (+ .stream, + .json)             (every raw block asset)
 
 Pipeline (see docs/WATCHMEN_EXTRACTION_MASTER.md for the gory detail):
   NAZ      obfuscated ZIP: filenames rotate-left-2 encrypted, custom EOCD/CD magics.
@@ -1144,7 +1144,10 @@ def carve_texture_console(stream, header, out_dir, log=None):
             blk = 4 if kind == "blk" else 1
             we = max(1, (w + blk - 1) // blk)
             he = max(1, (h + blk - 1) // blk)
-            need = (max(we, 32)) * (((he + 31) & ~31)) * unit
+            # width aligned UP to 32 like every consumer (_xg2d/_x360_layer_bytes);
+            # max(we,32) under-sized the tile buffer for non-pow2 widths > 32
+            # blocks, zero-filling the tail of the untiled layer (2026-08-17).
+            need = ((we + 31) & ~31) * ((he + 31) & ~31) * unit
             buf = _bswap16(stream[off : off + min(need, len(stream) - off)])
             xo, yo, hswap = _x360_packed_offset(kind, unit, w, h, we, he)
             if (xo or yo) and (max(we + xo, 32) * max(he + yo, 32) * unit) <= len(buf):
@@ -1364,13 +1367,18 @@ def _carve_texture_legacy(stream, header, out_dir, log):
             c = _coherence(db)
             if c < 60 and (best_coh is None or c < best_coh):
                 best_coh, chosen = c, (w, h, dfmt, dsize)
+    # File names follow the standard <j>_<label>_<WxH>_<FMT>.png scheme
+    # (2026-08-17): the old diffuse.png/normal.png/specular.png names matched
+    # neither build_texture_index's *_diffuse_*.png rglob nor _find_layer's
+    # *_<label>_*.png globs, so legacy-carved textures could never be linked
+    # from any OBJ/MTL.
     out_dir.mkdir(parents=True, exist_ok=True)
     if chosen is None:
         for w, h in ordered:
             for dfmt in ("DXT1", "DXT5"):
                 db = decode_dxt_base(stream, w, h, dfmt)
                 if db is not None and _coherence(db) < 45:
-                    Image.fromarray(db).save(out_dir / "diffuse.png")
+                    Image.fromarray(db).save(out_dir / ("0_diffuse_%dx%d_%s.png" % (w, h, dfmt)))
                     log(
                         "      %dx%d diffuse=%s normal=NOT-FOUND -> %s/"
                         % (w, h, dfmt, out_dir.name)
@@ -1380,10 +1388,10 @@ def _carve_texture_legacy(stream, header, out_dir, log):
     w, h, dfmt, dsize = chosen
     db = decode_dxt_base(stream, w, h, dfmt)
     if db is not None:
-        Image.fromarray(db).save(out_dir / "diffuse.png")
+        Image.fromarray(db).save(out_dir / ("0_diffuse_%dx%d_%s.png" % (w, h, dfmt)))
     nxy = decode_bc5_base(stream[dsize:], w, h)
     if nxy:
-        normal_to_png(nxy[0], nxy[1], out_dir / "normal.png")
+        normal_to_png(nxy[0], nxy[1], out_dir / ("1_normal_%dx%d_ATI2.png" % (w, h)))
     nsize, _ = mip_chain_size(w, h, 16)
     spec_off, spec_dims, best = dsize + nsize, "", None
     for sw, sh in ((w, h), (w // 2, h // 2)):
@@ -1395,7 +1403,8 @@ def _carve_texture_legacy(stream, header, out_dir, log):
             if best is None or c < best[0]:
                 best = (c, sw, sh, sb)
     if best and best[0] < 45:
-        Image.fromarray(best[3]).save(out_dir / "specular.png")
+        # colour spec layer -> the specMap slot _find_layer/_write_obj_mtl look up
+        Image.fromarray(best[3]).save(out_dir / ("2_specMap_%dx%d_DXT1.png" % (best[1], best[2])))
         spec_dims = "%dx%d" % (best[1], best[2])
     log(
         "      %dx%d diffuse=%s normal=BC5 specular=%s -> %s/"
@@ -1966,9 +1975,10 @@ def decode_model(header, stream, out_path, tex_index=None, log=None, order=None)
     SKIN_W = []
     have_skin = True
     rig = _RIG["on"] and _rig_load()
+    didx = []  # descriptor index per emitted sub (for submesh_materials pairing)
     if descs:
         off = 0
-        for nv, stride, ib in descs:
+        for di, (nv, stride, ib) in enumerate(descs):
             hi = len(stream) - nv * stride - ib
             cand = off
             vbo = None
@@ -1996,7 +2006,10 @@ def decode_model(header, stream, out_path, tex_index=None, log=None, order=None)
             base = len(V)
             verts, norms, uvs = _decode_sub(stream, vbo, nv, stride, be)
             if rig:
-                si, sw = _RIG["mod"].decode_skin(stream, vbo, nv, stride)
+                # pass the detected byte order (2026-08-17): without it decode_skin
+                # used the PC layout, whose stride>=56 gate rejected every console
+                # (stride-44) skinned submesh -> no console glb was ever emitted.
+                si, sw = _RIG["mod"].decode_skin(stream, vbo, nv, stride, order)
                 if si is None:
                     have_skin = False
                 else:
@@ -2018,6 +2031,7 @@ def decode_model(header, stream, out_path, tex_index=None, log=None, order=None)
             else:
                 U.extend(uvs)
             subs.append((base, len(V) - base, tstart, len(T) - tstart, stride))
+            didx.append(di)
             off = ibo + ib
     if not T:
         pick = _pick_vb(stream)
@@ -2041,18 +2055,40 @@ def decode_model(header, stream, out_path, tex_index=None, log=None, order=None)
             if len({idx[i], idx[i + 1], idx[i + 2]}) == 3
         ]
         subs = [(0, len(V), 0, len(T), stride)]
+        didx = []  # no descriptors -> no per-submesh material records
     if not T:
         return False
     mats = extract_materials(header)
-    # material list aligns to submeshes in order; when fewer materials than submeshes
-    # (e.g. Rorschach: 9 textures, 11 submeshes -> 2 LOD/shared), assign what we have
-    # and leave the remainder as fallback rather than discarding the whole mapping.
-    if len(mats) == len(subs):
-        materials = mats
-    elif 0 < len(mats) < len(subs):
-        materials = list(mats) + ["submesh_%d" % k for k in range(len(mats), len(subs))]
-    else:
-        materials = ["submesh_%d" % k for k in range(len(subs))]
+    # Per-submesh materialIndex read from the header records (2026-08-17): positional
+    # pairing is WRONG whenever one material covers several submeshes (see the
+    # submesh_materials docstring; Rorschach trenchcoat) -- same pattern as
+    # char_lib._parts.  Falls back to the old positional logic when the records
+    # are unavailable/unparsable (or the _pick_vb path, which has no descriptors).
+    materials = None
+    if mats and didx and len(didx) == len(subs):
+        try:
+            smat = submesh_materials(header, order)
+        except Exception:
+            smat = []
+        if smat:
+            materials = [
+                (
+                    mats[smat[k][1]]
+                    if k < len(smat) and smat[k][1] < len(mats)
+                    else (mats[k] if k < len(mats) else "submesh_%d" % k)
+                )
+                for k in didx
+            ]
+    if materials is None:
+        # material list aligns to submeshes in order; when fewer materials than
+        # submeshes, assign what we have and leave the remainder as fallback rather
+        # than discarding the whole mapping.
+        if len(mats) == len(subs):
+            materials = mats
+        elif 0 < len(mats) < len(subs):
+            materials = list(mats) + ["submesh_%d" % k for k in range(len(mats), len(subs))]
+        else:
+            materials = ["submesh_%d" % k for k in range(len(subs))]
     _write_obj_mtl(
         out_path,
         out_path.stem,
@@ -2895,7 +2931,9 @@ def main(argv):
         action="store_true",
         help="X360 XMA is ALWAYS kept (default), and .wav is only written when --vgmstream-cli is given. This flag additionally keeps PS3 .mp3 containers alongside their .wav. Valid XMA2/MP3 a working decoder can re-convert (some short X360 XMA2 fail in current vgmstream/ffmpeg but the data is good -- see MASTER §14).",
     )
-    ap.add_argument("--limit", type=int, default=None)
+    ap.add_argument(
+        "--limit", type=int, default=None, metavar="N", help="stop after N block assets (debug)"
+    )
     ap.add_argument("--quiet", action="store_true")
     a = ap.parse_args(argv)
     if not a.naz.exists():
@@ -2923,7 +2961,7 @@ def main(argv):
     blocks = {}
     console_audio = []  # (name, raw) console mediastream_s, decoded post-blocks
     media_meta = {}  # mediastream path (lower, no leading /) -> (ch, rate, samples)
-    stats = dict(files=0, tex=0, mdl=0, aud=0, streams=0)
+    stats = dict(files=0, tex=0, mdl=0, aud=0)
     n_assets = 0
 
     for e in entries:
@@ -2986,6 +3024,8 @@ def main(argv):
                 model_jobs.append((header, stream, safe(a.out / "models", name + ".obj"), None))
             continue
         # real block pair
+        if a.limit is not None and n_assets >= a.limit:
+            break  # --limit N: stop after N block assets (was accepted but ignored)
         log("\nBLOCK %s" % stem)
         try:
             it = list(extract_block(hs["h"], hs.get("s")))
@@ -2993,11 +3033,18 @@ def main(argv):
             log("  ! parse failed: %s" % ex)
             continue
         for e, header, stream in it:
+            if a.limit is not None and n_assets >= a.limit:
+                break
             n_assets += 1
             cls = asset_class(header, BLOCK_ORDER)
             name = e.name
             low = name.lower()
-            if not a.no_audio and cls == "mediastream":
+            # class-name compare is case-insensitive (2026-08-17): the source had
+            # both "mediastream" and "MediaStream" literals; only one spelling can
+            # match the on-disk typename, and a miss here left media_meta empty
+            # (console XMA then wrapped with default 2ch/48000 instead of the real
+            # channel/rate/sample values).
+            if not a.no_audio and cls.lower() == "mediastream":
                 try:
                     mm = media_meta_from_header(header, BLOCK_ORDER)
                     if mm:
@@ -3069,7 +3116,7 @@ def main(argv):
                 model_jobs.append(
                     (header, stream, safe(a.out / "models", name + ".obj"), BLOCK_ORDER)
                 )
-            elif not a.no_audio and (cls == "MediaStream" or ".mediastream" in low):
+            elif not a.no_audio and (cls.lower() == "mediastream" or ".mediastream" in low):
                 try:
                     if decode_audio(stream, safe(a.out / "audio", name + ".ogg"), True, log):
                         stats["aud"] += 1
@@ -3097,10 +3144,11 @@ def main(argv):
     # all blocks parsed -> textures are now on disk; decode models last with the
     # full texture index so per-submesh materials resolve correctly.
     tex_index = build_texture_index(a.out / "textures")
-    # SKELETONS FIRST: decode the base *_Skeleton.model rest poses up front so the rig
-    # binds each character to its own skeleton (file-decoded; see docs/ENGINE_CONSTANTS.md).
-    # rig path can bind each character to its skeleton (skeleton assets have a 0-byte
-    # stream, so they never enter model_jobs -- collect them straight from the naz).
+    # SKELETON REFERENCE DUMP: decode the base *_Skeleton.model rest poses to
+    # OUT/skeletons/*.json (file-decoded; see docs/ENGINE_CONSTANTS.md).  This is
+    # reference output only -- the glb rig takes its joint names/order from each
+    # model's OWN embedded palette in decode_model (skeleton assets have a 0-byte
+    # stream, so they never enter model_jobs; collect them straight from the naz).
     if _RIG["on"]:
         try:
             import extract_skeletons as _es, json as _json
@@ -3113,7 +3161,6 @@ def main(argv):
                     skdir / ("skeleton_%s.json" % _fam), "w", encoding="utf-8", newline="\n"
                 ) as _f:
                     _json.dump(_s, _f, indent=1)
-            _RIG["skeletons"] = _sk
             log("\nSKELETONS: %d base skeletons decoded from file -> %s" % (len(_sk), skdir))
             for _fam, _s in sorted(_sk.items()):
                 log("  skeleton_%-12s %3d bones" % (_fam, _s["bone_count"]))

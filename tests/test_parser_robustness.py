@@ -224,11 +224,28 @@ def test_decode_sequence_degrades_gracefully_when_truncated(cut):
 
 
 def test_decode_sequence_key_count_is_bounded():
-    """An absurd key count must be refused rather than allocated.
+    """A key count above the cap must be refused -- even when every key is valid.
 
-    nkeys comes straight from the file; the parser caps it at 10000 so a
-    corrupt dword cannot turn into a multi-gigabyte loop.
+    nkeys comes straight from the file and the parser caps it at 10000.
+    2026-08-17: the old version of this test used a hostile count followed by
+    zero padding, which the per-key dim check rejected anyway -- it passed with
+    the cap deleted. This version supplies MORE than 10000 well-formed keys, so
+    only the cap itself can be the thing that stops the parse.
     """
+    # boundary companion: exactly 10000 valid keys parse in full, proving the
+    # refusal below is the cap and not the key encoding
+    ok = ds.parse(_sequence_bytes(nobjects=1, nkeys=10000))
+    assert ok["objects"] and ok["objects"][0]["tracks"], "10000 keys must be accepted"
+    assert ok["objects"][0]["tracks"][0]["nkeys"] == 10000
+    assert len(ok["objects"][0]["tracks"][0]["keys"]) == 10000
+
+    # one past the cap, same well-formed key stream: must be refused
+    over = run_bounded(ds.parse, _sequence_bytes(nobjects=1, nkeys=10001))
+    assert "error" not in over, "unexpected %r" % (over.get("error"),)
+    out = over["value"]
+    assert out["objects"] == [] or not out["objects"][0]["tracks"]
+
+    # and an absurd/hostile count must still terminate promptly
     b = struct.pack("<fII", 1.0, 4, 1) + struct.pack("<I", 0)
     b += struct.pack("<I", 1) + struct.pack("<I", 0x1000)
     name = b"Node\0"
