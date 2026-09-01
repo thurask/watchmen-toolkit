@@ -101,6 +101,11 @@ clip-timing arithmetic, and output determinism. It is the executable form of
 the correctness claims below — if you change a decoder, this is what tells you
 whether you changed its output.
 
+`tests/test_v120_regressions.py` pins every fix in the 1.2.0 correctness pass;
+each of its tests was verified to fail on 1.1.0, so the byte-order plumbing,
+skinning-slot fallback, material pairing and CLI/import contracts cannot
+silently regress.
+
 Round-tripping the real corpus (the "906/906 fragments" figure) needs a game
 archive and is not part of the offline suite.
 
@@ -143,7 +148,7 @@ capture-parity default.
   rotation ≤0.5°) and against the decompiled executable's math. The captures
   themselves are research input and are not shipped, so that specific number is
   not reproducible from this repository alone; what *is* checkable here is in
-  `tests/` (see **Tests** below).
+  `tests/` (see **Tests** above).
 - Extraction output is deterministic: repeated runs over the same archive
   produce byte-identical files, on the same platform and across platforms
   (all text output is written UTF-8 with LF endings).

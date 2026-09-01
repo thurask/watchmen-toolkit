@@ -47,7 +47,7 @@ synthesis, weapon attachment, and the per-session changelogs that got there.
 | naz walk, block extract, textures/models/audio | `wlib/watchmen_extract.py` |
 | Fragment parser (lossless) | `wlib/kapow_fragment.py` |
 | Property hash + prop-bag JSON | `wlib/kapow_props.py`, `wlib/kapow_json.py` |
-| Skeleton/mesh decode | `wlib/parse_model_nodes.py` (the node decoder), `wlib/extract_skeletons.py`, `wlib/skeleton_records.py` (PC-only) |
+| Skeleton/mesh decode | `wlib/parse_model_nodes.py` (the node decoder), `wlib/extract_skeletons.py`, `wlib/skeleton_records.py` (byte-order aware since 1.2.0) |
 | File-only binds | `wlib/build_bind_file.py` |
 | Clip → palette baker (engine-exact) | `wlib/bake_v4.py` |
 | Character GLBs | `wlib/variant_glb.py`, `wlib/char_lib.py`, `wlib/characters_export.py`, `wlib/rig_glb.py` |
@@ -58,6 +58,6 @@ synthesis, weapon attachment, and the per-session changelogs that got there.
 | Data-table regeneration | `wlib/gen_data.py` (`watchmen gendata`; provenance of every shipped table in its docstring and README) |
 | Small formats | `wlib/decode_sequence.py` (`.sequence`) |
 | Legacy standalone exporter | `wlib/export_female_anims.py` (also the `grab_blocks` helper everything uses) |
-| Tests (no game files needed) | `tests/` — run `pytest` |
+| Tests (no game files needed) | `tests/` — run `pytest`; `tests/test_v120_regressions.py` pins every 1.2.0 fix (each verified to fail on 1.1.0) |
 
 Changes that affect output are recorded in [`../CHANGELOG.md`](../CHANGELOG.md).

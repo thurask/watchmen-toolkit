@@ -88,6 +88,15 @@ walk/run timing, and `export_female_anims`** — details below.
 - The key-count-cap regression test now actually fails when the cap is
   removed (it fed keys the dimension check rejected anyway, so it pinned
   nothing).
+- Added `tests/test_v120_regressions.py` (34 tests, 2026-09-01): one or more
+  per fix above, each verified to fail on 1.1.0 (28 of the 34 fail there; the
+  rest are reference fixtures). No game files needed. Suite: 222 tests.
+- Verified on real assets (2026-09-01): the X360 Rorschach model now yields a
+  rigged GLB whose joint indices and weights are identical to the PC export and
+  whose positions agree to 0.5 mm (half-float quantisation); on 1.1.0 the same
+  input produced no GLB. The OBJ material list for that model now shows
+  `RorschachTrenchcoat` on all three trenchcoat submeshes instead of the
+  positional shift (`submesh_9`, `submesh_10` fallbacks).
 
 ## 1.1.0 — 2026-07-24
 
