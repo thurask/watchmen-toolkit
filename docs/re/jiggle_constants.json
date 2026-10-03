@@ -1,0 +1,191 @@
+{
+ "setup_fn": "CharacterAddonCtrl 0x6574cd",
+ "joint_config_fn": "CharacterAddonCtrl.initialize_external 0x648858",
+ "update_fn": "CharacterAddonCtrl.command_update_addons 0x6563a0",
+ "addons": [
+  {
+   "idx": 0,
+   "parent": "Spine2",
+   "child": "BreastL",
+   "k_slot": "0x1c",
+   "d_slot": "0x20",
+   "limit_slot": "0x24"
+  },
+  {
+   "idx": 1,
+   "parent": "Spine2",
+   "child": "BreastR",
+   "k_slot": "0x1c",
+   "d_slot": "0x20",
+   "limit_slot": "0x24"
+  },
+  {
+   "idx": 2,
+   "parent": "Spine",
+   "child": "JiggleBelly",
+   "k_slot": "0x28",
+   "d_slot": "0x2c",
+   "limit_slot": "0x30"
+  },
+  {
+   "idx": 3,
+   "parent": "Head",
+   "child": "Hair",
+   "k_slot": "0x34",
+   "d_slot": "0x38",
+   "limit_slot": "0x3c"
+  }
+ ],
+ "bodies": {
+  "anchor_box": {
+   "node": "MockupBox",
+   "size": [
+    0.1,
+    0.1,
+    0.1
+   ],
+   "size_const": "0x9e664c",
+   "mass": 0.1,
+   "movement": "1 (kinematic), follows the parent bone every frame"
+  },
+  "jiggle_box": {
+   "node": "MockupBox",
+   "size": [
+    0.8,
+    0.8,
+    0.8
+   ],
+   "size_const": "0xa06d84",
+   "mass": 0.1,
+   "mass_const": "0x9e664c",
+   "movement": "2 (dynamic), set at 0x648d58"
+  }
+ },
+ "rigidbody_defaults": {
+  "ctor": "0x4fe311",
+  "numSolverIterations": 4,
+  "mass": 100.0,
+  "linearDamping": 0.0,
+  "angularDamping": 1.0,
+  "maxLinearVelocity": 200.0,
+  "maxAngularVelocity": 200.0
+ },
+ "actor_creation": {
+  "fn": "0x506b79",
+  "calls": [
+   "NxActor vtbl+0xcc (0.0, mass)  = updateMassFromShapes(density 0, total mass)",
+   "vtbl+0xd0 linearDamping",
+   "vtbl+0xd8 angularDamping",
+   "vtbl+0xf0 maxAngularVelocity"
+  ]
+ },
+ "d6": {
+  "MainJointType": 0,
+  "Swing1MotionType": 1,
+  "Swing2MotionType": 1,
+  "TwistMotionType": 0,
+  "XMotionType": 0,
+  "YMotionType": 0,
+  "ZMotionType": 0,
+  "Swing1LimitValue_deg": 45.0,
+  "Swing2LimitValue_deg": 0.0,
+  "Swing1LimitSpring": "k",
+  "Swing2LimitSpring": "k",
+  "Swing1LimitDamping": "d",
+  "Swing2LimitDamping": "d",
+  "restitution": 0.0,
+  "limit_value_scale": [
+   "0xc8c574",
+   0.01745329238474369
+  ],
+  "spring_scale": 1.0,
+  "damping_scale": 1.0,
+  "axes": "twist = joint X, swing1 = joint Y, swing2 = joint Z; joint frame = EmbeddedJointNode world frame = anchor box = parent bone"
+ },
+ "timing": {
+  "substep": "1/physicsIntegrationRateInHz (accumulator, FUN_004f4d20 0x4f4d20)",
+  "setTiming": "(substep, maxPhysicsIntegrationTimesteps, fixed) FUN_004f4ddc 0x4f4ddc",
+  "file_values": {
+   "rate_hz": 60,
+   "max_steps": 3
+  }
+ },
+ "gravity": {
+  "default": [
+   0,
+   -9.82,
+   0
+  ],
+  "const": "0xa26418",
+  "file": [
+   0,
+   -14.82,
+   0
+  ],
+  "per_frame_force_on_jiggle_body": "-mass * gravity (0x656fb4-0x65707c, RigidBody::ApplyForce 0x4f6b47 -> NxActor vtbl+0x120 mode 0)"
+ },
+ "writeback": {
+  "fn": "0x6563a0",
+  "bone_local_pos": "jiggle box position relative to anchor box, in anchor frame",
+  "bone_local_quat": "jiggle box orientation relative to anchor box",
+  "clamp": "if |pos - animatedLocalPos| > limit: pos = animated + delta*limit/len; quat = slerp(animatedLocalQuat, quat, limit/len)",
+  "gain": "none",
+  "setter": "FUN_004ba7ad -> FUN_004ba3e1(bone, pos, quat, 0)"
+ },
+ "levers_m": {
+  "BreastL": {
+   "parent_to_bone": 0.1323,
+   "toolkit_r_abs_tb": 0.346
+  },
+  "BreastR": {
+   "parent_to_bone": 0.1317,
+   "toolkit_r_abs_tb": 0.346
+  },
+  "JiggleBelly": {
+   "parent_to_bone": 0.1015,
+   "toolkit_r_abs_tb": 0.1929
+  }
+ },
+ "capture_check": {
+  "BreastL": {
+   "theta_mean_deg": 4.08,
+   "theta_p99_deg": 23.2,
+   "origin_disp_mean_m": 0.0127,
+   "origin_disp_max_m": 0.08,
+   "fitted_pivot_bind": [
+    0.026,
+    0.255,
+    -0.027
+   ],
+   "parent_origin_bind": [
+    0.0,
+    0.275,
+    -0.012
+   ],
+   "bone_origin_bind": [
+    -0.094,
+    0.327,
+    0.065
+   ]
+  },
+  "JiggleBelly": {
+   "theta_mean_deg": 2.06,
+   "origin_disp_max_m": 0.1,
+   "fitted_pivot_bind": [
+    -0.002,
+    0.087,
+    -0.008
+   ],
+   "parent_origin_bind": [
+    0.0,
+    0.092,
+    -0.003
+   ],
+   "bone_origin_bind": [
+    0.0,
+    0.192,
+    -0.015
+   ]
+  }
+ }
+}

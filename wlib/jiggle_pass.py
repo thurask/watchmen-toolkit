@@ -58,13 +58,15 @@ def _rotv2m(v):
     return np.eye(3) + np.sin(a) * K + (1 - np.cos(a)) * K @ K
 
 
-def apply_jiggle(P, fps, bindpath, bones=None, gain=None):
+def apply_jiggle(P, fps, bindpath, bones=None, gain=None, model=None):
+    """model: jiggle_d6 model ('pivot' / 'pinned', None = jiggle_d6 default) used
+    when no capture-fit jiggle_params.npz is present; ignored on the AR(2) path."""
     if not os.path.exists(os.path.join(_PDIR, "jiggle_params.npz")):
         # fresh install: jiggle_d6 (file-only, capture-parity 2026-07-12e)
         # replaces the old _engine_ar2 approximation entirely.
         from jiggle_d6 import apply_jiggle as _d6
 
-        return _d6(P, fps, bindpath, bones=bones, gain=gain)
+        return _d6(P, fps, bindpath, bones=bones, gain=gain, model=model)
     bt = np.load(bindpath, allow_pickle=True)
     Rb = bt["Rb"].astype(np.float64)
     tb = bt["tb"].astype(np.float64)

@@ -3,18 +3,23 @@
 Format (from executable decomp FUN_005473ee/FUN_00545e1b + TOD_tools):
   file = [header (17B, or extended w/ name when flags bit set)] + chunks
   chunk = [u32 size<=0x2800][payload]; payloads concatenate into ONE stream
-  stream = schema records [FFFFFFFF][selfHash][wc][TypeName(...)] ...
-           then instances: [FFFFFFFE|FFFFFFFF][nodeId] then [keyHash][typed value]*
-  keyHash = kapow bit-CRC32(poly 0x04C11DB7) of UPPERCASE property name
-  types: number/integer/truth/color=4B; vector=12B; quaternion=16B;
+  stream = type records [FFFFFFFF][nodeId][wc][TypeName] (script classes as
+           "Class(Native)", native nodes as a bare "Folder"/"Model"/...; they open
+           the stream AND recur between instances -- 0xFFFFFFFF is never followed
+           by properties), and instances [FFFFFFFE][nodeId] then [keyHash][typed value]*
+  keyHash = kapow_props.name_hash(name): bit-CRC32(poly 0x04C11DB7) over bytes & 0xDF
+            (engine FUN_00423ce8; digits fold too, so NOT hash(name.upper()))
+  types: number/integer/truth/color=4B; biginteger=8B; vector=12B; quaternion=16B;
          string=[wc][wc*4]; list(T)=[count][T*count];
          Entity: [tag] tag0/1/2=4B, tag3=[3][nodeId], tag4=[4][a][n][n words],
                  tag5=[5][n][n words]
   key names/types: game database.bin registry (3693) + TOD_tools builtins +
   exe strings; unknown keys are size-inferred with boundary/lookahead resync
   and reported with '?' type suffix.
-Validation: all 906 extracted fragments parse to EOF; all 12777 resource-path
-strings verified present in output; EmbeddedJoint spring constants recovered.
+Validation (2026-10): all 906 extracted fragments parse to EOF (9 of them are
+17-byte header-only files = empty); 22 unknown-key occurrences remain corpus-wide
+(was 580,286 before the name-hash fold fix, built-in property typing and
+type-record handling); all 12777 resource-path strings present in the output.
 """
 
 import struct, pickle, sys, re
@@ -58,6 +63,8 @@ NAMES[0x0991B0D4] = ("key_0991b0d4", "integer")
 for _h, _nt in _KD["promoted"].items():
     NAMES[_h] = _nt
 NAMEABLE = _KD["nameable"]
+# a type record's name: "Class(Native)" or a bare native class ("Folder", "Model")
+NODERE = re.compile(r"^[A-Za-z_][A-Za-z_0-9 ]*(\([A-Za-z_0-9 ]*\))?$")
 TYPERE = re.compile(r"^[A-Za-z_0-9 ]+\([A-Za-z_0-9 ]*\)$")
 
 
@@ -130,6 +137,20 @@ def parse(d, collect_unknown=None, order=None):
         scan += 1
     if p is None:
         p = 0
+        if dc is None and len(d) <= 17:
+            # header-only file (17 bytes, no chunk follows): an EMPTY fragment
+            # (9 SoundEvents/ForceTrigger files in Part 2), not a parse failure
+            return dict(
+                ok=True,
+                fail=None,
+                schema=[],
+                inst=[],
+                unknown={},
+                parsed_frac=1,
+                end=len(d),
+                size=len(d),
+                empty=True,
+            )
     while p + 12 <= len(d) and u(p) == 0xFFFFFFFF:
         wc = u(p + 8)
         if not (1 <= wc <= 40) or p + 12 + wc * 4 > len(d):
@@ -139,6 +160,22 @@ def parse(d, collect_unknown=None, order=None):
             break
         schema.append(("%08x" % u(p + 4), nm))
         p += 12 + wc * 4
+
+    def type_name_at(q):
+        """TypeName of a [wc][name\\0 pad] block at q (exact word count, zero
+        padding, identifier-shaped), else None."""
+        if q + 4 > len(d):
+            return None
+        wc = u(q)
+        if not (1 <= wc <= 40) or q + 4 + wc * 4 > len(d):
+            return None
+        raw = d[q + 4 : q + 4 + wc * 4]
+        nm = raw.split(b"\x00")[0]
+        if wc != len(nm) // 4 + 1 or raw[len(nm) :].strip(b"\x00"):
+            return None
+        nm = nm.decode("latin1")
+        return nm if NODERE.match(nm) else None
+
     inst = []
     cur = None
     hard_fail = None
@@ -159,6 +196,8 @@ def parse(d, collect_unknown=None, order=None):
             return round(f(p), 6), p + 4
         if typ in ("integer", "int", "color"):
             return u(p), p + 4
+        if typ == "biginteger":  # 8 bytes (datatype.cpp FUN_004facb7; pivotSheet_Id)
+            return u(p) | (u(p + 4) << 32), p + 8
         if typ == "truth":
             return bool(u(p)), p + 4
         if typ == "vector":
@@ -210,9 +249,19 @@ def parse(d, collect_unknown=None, order=None):
     while p + 4 <= len(d):
         w = u(p)
         if w in (0xFFFFFFFE, 0xFFFFFFFF):
+            if p + 8 > len(d):
+                hard_fail = (p, "%08x" % w)
+                break
             cur = {"node": "%08x" % u(p + 4), "created": w == 0xFFFFFFFF, "props": []}
             inst.append(cur)
             p += 8
+            if w == 0xFFFFFFFF:
+                # type record in the instance stream: [wc][TypeName, NUL-padded to wc
+                # words].  Reading it as properties desynced every created node.
+                nm = type_name_at(p)
+                if nm is not None:
+                    schema.append((cur["node"], nm))
+                    p += 4 + u(p) * 4
             continue
         ent = NAMES.get(w)
         if ent is None:

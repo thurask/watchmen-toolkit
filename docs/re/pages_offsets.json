@@ -1,0 +1,145 @@
+{
+ "page_struct": {
+  "0x00": "per-layer table {AnimLayer, slot objects, blend node, nodes}",
+  "0x04": "populated layer index list",
+  "0x08": "blend (linear)",
+  "0x0c": "ease seconds",
+  "0x10": "playpos 0..1",
+  "0x14": "rate (playpos/s), rebuilt per frame",
+  "0x18": "sync flag",
+  "0x1c": "state node",
+  "0x20": "delta movement vec3",
+  "0x2c": "delta heading",
+  "0x30": "looping",
+  "0x34": "time played s",
+  "0x38": "playpos at last event check",
+  "0x3c": "behaviour lists"
+ },
+ "pagelist_record": {
+  "0x14": "force-stay timer (m_nforcestaytime of entered state)",
+  "0x18": "end-of-animation flag"
+ },
+ "state_record": {
+  "0x14": "m_toverridestate",
+  "0x18": "m_tiswalkcycle (Sync Playpos)",
+  "0x1c": "m_tisabsoluteanimation",
+  "0x20": "m_tanimationdefinesmovement",
+  "0x24": "m_tanimationdefinesrotation",
+  "0x28": "m_tdisallowoverridelayers",
+  "0x2c": "m_tallowmultipleinstances",
+  "0x30": "m_imasterof",
+  "0x34": "m_tislooping",
+  "0x38": "m_nstartplaypos",
+  "0x3c": "m_neaseinduration",
+  "0x40": "m_tusesoftblend",
+  "0x44": "m_nblendpower",
+  "0x48": "m_nblendinitialpower",
+  "0x4c": "m_efallbackstate",
+  "0x50": "m_nforcestaytime",
+  "0x54": "m_tholdblendvalues",
+  "0x58": "m_tnotransitiontests",
+  "0x5c": "m_tforcemovementcalc",
+  "0x6c": "m_etransitionlist",
+  "0x70": "m_elayerlistlist",
+  "0x74": "m_eeventlist",
+  "0x78": "m_estoredtransitstate",
+  "0x7c": "m_eanimationbehaviorlist",
+  "0x80": "m_eplayposmapper"
+ },
+ "transition_record": {
+  "0x08": "m_eToState",
+  "0x0c": "m_tfallback",
+  "0x10": "m_toverrideeasein",
+  "0x14": "m_neaseinduration",
+  "0x18": "m_toverrideplaypos",
+  "0x1c": "m_nplaypos",
+  "0x20": "m_tsupersyncpos",
+  "0x24-0x60": "8 x (local, remote) sync markers",
+  "0x64": "runtime local marker list (0x381c10c0)",
+  "0x68": "runtime remote marker list (0x1d3171a6)",
+  "0x6c": "first local marker",
+  "0x70": "last local marker"
+ },
+ "slot_record": {
+  "0x28": "m_nweight",
+  "0x2c": "m_nParentBlendPosition",
+  "0x30": "m_noffset",
+  "0x34": "m_tisabsolute",
+  "0x38": "m_nforcestaytime",
+  "0x3c": "m_tallowblendout"
+ },
+ "blend_record": {
+  "0x04": "m_iLayerIndex",
+  "0x14": "m_ilayerweightctrlparam",
+  "0x18": "m_nlayerweightintervalstart",
+  "0x1c": "m_nlayerweightintervalend",
+  "0x20": "m_tlayeradditive",
+  "0x24": "m_tforcedpos",
+  "0x28": "m_nParentBlendPosition",
+  "0x2c": "m_iblendctrlparam",
+  "0x38": "m_nblendintervalstart",
+  "0x3c": "m_nblendintervalend",
+  "0x40": "m_nweight",
+  "0x50": "child slot list"
+ },
+ "event_types": {
+  "PLAY_POS": 0,
+  "ENTER_STATE": 1,
+  "LEAVE_STATE": 2,
+  "TOTAL_PLAY_TIME": 3
+ },
+ "constants": {
+  "0xa45e90": [
+   "double",
+   "max page rate",
+   6.599999904632568
+  ],
+  "0xa45e88": [
+   "double",
+   "overlay fade-out floor",
+   -0.009999999776482582
+  ],
+  "0xa45e98": [
+   "double",
+   "renormalise threshold",
+   0.9998999834060669
+  ],
+  "0xa40400": [
+   "float",
+   "key frac snap low",
+   9.999999747378752e-06
+  ],
+  "0xa406b8": [
+   "double",
+   "key frac snap high",
+   0.99999
+  ],
+  "0x9e5a60": [
+   "double",
+   "position divisor",
+   1000.0
+  ],
+  "0x9eb358": [
+   "double",
+   "quaternion divisor",
+   10000.0
+  ]
+ },
+ "functions": {
+  "SetupNewPage": "0x5b7788",
+  "UpdatePagePlayPos": "0x5b56a9",
+  "UpdatePageBlendsFaster": "0x5b4bd6",
+  "SetAllSlotBlends": "0x5b4ef7",
+  "SynchronizePages": "0x5ac387",
+  "TransitionPlayPos": "0x5ac1aa",
+  "TransitToState": "0x5b4a31",
+  "CheckPlayPosEvents": "0x5b51f3",
+  "DeleteOldPages": "0x5b9e4c",
+  "EvaluateTransitions": "0x5cbbc2",
+  "UpdateSuperSync": "0x5fa582",
+  "key_index": "0x591975",
+  "slot_set_playpos": "0x593d74",
+  "track_has_translation": "0x593034",
+  "slot_accumulate": "0x594cac"
+ }
+}

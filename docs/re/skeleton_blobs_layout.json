@@ -1,0 +1,78 @@
+{
+ "source": "Node::Deserialize 0x545927 (volume lists at 0x545c7f-0x545d94), factory 0x524b23",
+ "node_tail_layout": [
+  "[u32 n0] n0 x volume   (node+0x4c, used by PhysX scene 0)",
+  "[u32 n1] n1 x volume   (node+0x58, used by PhysX scene 1)",
+  "[u32 n2] n2 x 0x28-byte objects (node+0x64; 0 in all 2003 tiled regions)"
+ ],
+ "volume_record": [
+  "u32 type",
+  "u32 base_field_0x18 (0 in all 934 records)",
+  "type-specific data",
+  "f32[3] local position",
+  "f32[4] local orientation quaternion xyzw",
+  "u32 blobLen",
+  "u8[blobLen] blob"
+ ],
+ "types": {
+  "2": {
+   "class": "ConcaveCollisionMesh",
+   "vtable": "0xa2f3d0",
+   "ctor": "0x5242f6",
+   "size": "0x48",
+   "data": "u32 primitiveMode, u32 nVerts, nVerts x f32[3], u32 nIdx, nIdx x u32",
+   "blob": "PhysX cooked triangle mesh -> 0x515a04 -> NxPhysicsSDK vtbl+0x20"
+  },
+  "4": {
+   "class": "ConvexCollisionMesh",
+   "vtable": "0xa2f450",
+   "ctor": "0x52435f",
+   "size": "0x48",
+   "data": "u32 primitiveMode, u32 nVerts, nVerts x f32[3], u32 nIdx, nIdx x u32",
+   "blob": "PhysX cooked convex mesh ('NXS\\x01CVXM') -> 0x515ca9 -> NxPhysicsSDK vtbl+0x48"
+  },
+  "5": {
+   "class": "CollisionBox",
+   "vtable": "0xa2f380",
+   "ctor": "0x522d36",
+   "reader": "0x521396",
+   "size": "0x30",
+   "data": "f32 sizeX, f32 sizeY, f32 sizeZ (full extents)",
+   "blob": "none (ignored)"
+  },
+  "6": {
+   "class": "CollisionSphere",
+   "vtable": "0xa2f3a8",
+   "ctor": "0x522e49",
+   "reader": "0x521c3f",
+   "size": "0x28",
+   "data": "f32 radius",
+   "blob": "none (ignored)"
+  },
+  "7": {
+   "class": "CollisionCapsule",
+   "vtable": "0x9fbd88",
+   "ctor": "0x522f16",
+   "reader": "0x52213d",
+   "size": "0x2c",
+   "data": "f32 diameter, f32 total height along local Y",
+   "blob": "none (ignored)"
+  }
+ },
+ "corpus": {
+  "node_regions_tiled_exactly": 2003,
+  "mismatch": 1,
+  "records": {
+   "list0": {
+    "4": 17,
+    "5": 82,
+    "6": 51,
+    "7": 543
+   },
+   "list1": {
+    "5": 41,
+    "7": 200
+   }
+  }
+ }
+}

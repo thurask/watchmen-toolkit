@@ -19,6 +19,7 @@ the older engine-ID name mapping for export_female_anims.)
 import sys, os, json, struct, argparse
 import watchmen_extract as we
 import parse_model_nodes as pmn
+import skeleton_records as _sr
 
 
 def _family(model_name):
@@ -70,6 +71,57 @@ def _explicit_parent_names(header):
     return out
 
 
+def _r6(v):
+    return [round(float(x), 6) for x in v]
+
+
+def _volume_json(v, scene):
+    """One collision volume (skeleton_records.parse_volume_lists) as plain JSON."""
+    out = {
+        "type": v["kind"] or "type_%d" % v["type"],
+        "scene": scene,  # which of the node's two lists (PhysX scene index)
+        "pos": _r6(v["pos"]),  # centre in the bone's frame
+        "quat_xyzw": _r6(v["quat"]),  # file order, NOT reordered
+    }
+    if v["type"] == 5:
+        out["size"] = _r6(v["size"])
+    elif v["type"] == 6:
+        out["radius"] = round(float(v["radius"]), 6)
+    elif v["type"] == 7:
+        out["diameter"] = round(float(v["diameter"]), 6)
+        out["height"] = round(float(v["height"]), 6)
+    else:
+        out["mode"] = int(v["mode"])
+        out["verts"] = [_r6(p) for p in v["verts"]]
+        out["indices"] = [int(i) for i in v["indices"]]
+        out["cooked_blob_bytes"] = len(v["blob"])
+    return out
+
+
+def collision_volumes(header, names):
+    """{node index: [volume json]} for the nodes of pmn.parse() that carry
+    collision volumes.  `names` is parse()'s name list; records are aligned on
+    the same true-node test parse() applies, and any disagreement yields {}
+    (the volumes are optional, the hierarchy is not)."""
+    try:
+        order = pmn._detect_order(header)
+        recs = [
+            r
+            for r in _sr.parse(header, order=order)
+            if _sr.is_node_record(header, r["offset"], order)
+        ]
+    except Exception:
+        return {}
+    if [r["name"] for r in recs] != list(names[1:]):
+        return {}
+    out = {}
+    for i, r in enumerate(recs, 1):
+        vols = r["volumes"]
+        if vols and (vols[0] or vols[1]):
+            out[i] = [_volume_json(v, s) for s in (0, 1) for v in vols[s]]
+    return out
+
+
 def skeleton_from_header(header, family):
     """ModelRes header -> rest-pose table, engine-exact.
 
@@ -88,6 +140,7 @@ def skeleton_from_header(header, family):
     auto-detected, so console (X360/PS3) headers work too.
     """
     names, pos, quat, parent = pmn.parse(header)
+    vols = collision_volumes(header, names)
     bones = []
     for i, nm in enumerate(names):
         q = quat[i]
@@ -106,6 +159,9 @@ def skeleton_from_header(header, family):
                 ],
             }
         )
+        if i in vols:
+            # optional (2026-10): present only on bones that carry volumes
+            bones[-1]["collision_volumes"] = vols[i]
     return {
         "family": family,
         "bone_count": len(names),

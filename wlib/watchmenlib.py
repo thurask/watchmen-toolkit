@@ -218,7 +218,10 @@ def asset_json(nm, data):
 
 
 def kapow_hash(name):
-    return _kp.kapow_hash(name.upper())
+    """Engine hash of a NAME (property key, type, command signature, asset name):
+    bit-CRC 0x04C11DB7 over bytes & 0xDF (FUN_00423ce8).  Case-insensitive; digits
+    and punctuation are folded too, so this is not ``hash(name.upper())``."""
+    return _kp.name_hash(name)
 
 
 # ---- anim ---------------------------------------------------------------------

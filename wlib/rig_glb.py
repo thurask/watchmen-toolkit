@@ -276,6 +276,114 @@ def load_bundled_clip(npz_path):
     }
 
 
+# ---------------- optional vertex attributes ----------------
+def unit_normals(N, tol=1e-6):
+    """(n,3) float32 unit normals, or None when any is non-finite or has no
+    length (glTF NORMAL must be unit length; nothing is invented for a bad one)."""
+    if N is None:
+        return None
+    n = np.asarray(N, np.float64).reshape(-1, 3)
+    ln = np.linalg.norm(n, axis=1)
+    if n.size == 0 or not np.isfinite(n).all() or (ln < tol).any():
+        return None
+    return np.ascontiguousarray(n / ln[:, None], np.float32)
+
+
+def well_formed_tangents(T4, tol=1e-3):
+    """(n,4) float32 glTF TANGENT (xyz unit, w = +-1), or None when any entry is
+    non-finite, not unit length or has another handedness value."""
+    if T4 is None:
+        return None
+    t = np.asarray(T4, np.float32).reshape(-1, 4)
+    if t.size == 0 or not np.isfinite(t).all():
+        return None
+    if (np.abs(np.linalg.norm(t[:, :3].astype(np.float64), axis=1) - 1.0) > tol).any():
+        return None
+    if not np.isin(t[:, 3], (-1.0, 1.0)).all():
+        return None
+    return np.ascontiguousarray(t)
+
+
+def orthogonal_tangents(N, T4, tol=1e-6):
+    """Gram-Schmidt of TANGENT xyz against unit normals (w unchanged: the sign of
+    cross(n, t) . b does not depend on t's component along n).  None when a
+    tangent is parallel to its normal.  The game's tangents are raw dP/du, not
+    orthogonalised: |n.t| > 0.1 on 29 % of the skinned corpus's vertices."""
+    n = np.asarray(N, np.float64)
+    t = np.asarray(T4, np.float64)
+    x = t[:, :3] - n * (n * t[:, :3]).sum(1, keepdims=True)
+    ln = np.linalg.norm(x, axis=1)
+    if (ln < tol).any():
+        return None
+    return np.concatenate([x / ln[:, None], t[:, 3:4]], 1).astype(np.float32)
+
+
+def winding_reversed(P, N, tri):
+    """Do the triangles wind against their vertex normals?  True when, for most
+    triangles, cross(p1 - p0, p2 - p0) points away from the summed vertex normals.
+    The engine's triangles do (Direct3D: clockwise is the front face), and glTF's
+    front face is the counter-clockwise one, so a primitive that carries NORMAL
+    has to be written with its winding flipped or double-sided materials light it
+    from the inside (the back face's normal is reversed before lighting)."""
+    t = np.asarray(tri, np.int64).reshape(-1, 3)
+    if not len(t):
+        return False
+    p = np.asarray(P, np.float64)
+    n = np.asarray(N, np.float64)
+    fn = np.cross(p[t[:, 1]] - p[t[:, 0]], p[t[:, 2]] - p[t[:, 0]])
+    s = (fn * (n[t[:, 0]] + n[t[:, 1]] + n[t[:, 2]])).sum(1)
+    return int((s < 0).sum()) > int((s > 0).sum())
+
+
+def mesh_vertex_attributes(header, stream, subs, lod=0):
+    """NORMAL / COLOR_0 / TANGENT source data for build_rigged_glb, in the vertex
+    order of decode_model's `subs` [(base, nverts, tstart, ntris, stride)].
+
+    -> {"normals": (N,3) f32, "colors": (N,4) u8 RGBA | None, "tangents": (N,4)
+    f32 | None, "has_color": [bool per submesh]} or None when the model is not
+    decoded header-driven (console / Part 1 / scan fallback) or its render
+    buffers do not line up with `subs`.
+
+    Colour is the vertex's D3DCOLOR (stored B,G,R,A); a submesh whose mesh buffer
+    has the has_color flag clear holds the writer's default (opaque white), so
+    `colors` is None unless at least one submesh is flagged.  TANGENT xyz is the
+    stored tangent (dP/du) normalised, w the sign of the stored bitangent against
+    cross(normal, tangent) (watchmen_extract.gltf_tangents); a vertex whose stored
+    tangent has no length makes `tangents` None for the whole model."""
+    try:
+        import watchmen_extract as we
+    except ImportError:
+        import os, sys
+
+        here = os.path.dirname(os.path.abspath(__file__))
+        if here not in sys.path:
+            sys.path.append(here)  # append, never insert(0)
+        import watchmen_extract as we
+
+    mesh = we.decode_model_mesh(header, stream, lod)
+    if mesh is None:
+        return None
+    bufs = [b for b in we.select_model_buffers(mesh["model"], lod) if b["format"] in (5, 6)]
+    sm = [m for m in mesh["submeshes"] if m["format"] in (5, 6)]
+    if len(sm) != len(subs) or len(bufs) != len(sm):
+        return None
+    if any(len(m["positions"]) != s[1] for m, s in zip(sm, subs)):
+        return None
+    if not sm or any("tangent" not in m or m["normals"] is None for m in sm):
+        return None
+    normals = np.concatenate([np.asarray(m["normals"], np.float32).reshape(-1, 3) for m in sm])
+    has_color = [bool(b.get("has_color")) for b in bufs]
+    colors = np.concatenate([m["color"] for m in sm]) if any(has_color) else None
+    raw_t = np.concatenate([m["tangent"] for m in sm])
+    raw_b = np.concatenate([m["bitangent"] for m in sm])
+    tangents = None
+    if np.isfinite(raw_t).all() and (np.linalg.norm(raw_t, axis=1) > 1e-6).all():
+        un = unit_normals(normals)
+        if un is not None:
+            tangents = we.gltf_tangents(un, raw_t, raw_b)
+    return {"normals": normals, "colors": colors, "tangents": tangents, "has_color": has_color}
+
+
 # ---------------- glb assembly ----------------
 def build_rigged_glb(
     out_path,
@@ -293,12 +401,38 @@ def build_rigged_glb(
     log,
     tex_size=512,
     static=False,
+    normals=None,
+    colors=None,
+    tangents=None,
+    write_normals=True,
+    write_colors=True,
+    write_tangents=True,
+    fix_winding=True,
+    orthogonalize_tangents=False,
 ):
     """Carved submeshes -> one rigged + textured + animated .glb (FLAT exact rig:
     48 bones, inverseBind = identity, per-bone WORLD transform from the bundled clip
     with Y-up baked in -- the validated exact path). subs = list of
     (base, nverts, tstart, ntris, stride); materials[i] = texture basename; clips =
-    list of dicts from load_bundled_clip. Needs Pillow for textures."""
+    list of dicts from load_bundled_clip. Needs Pillow for textures.
+
+    `N` is accepted and ignored, as in 1.2.0 (callers that passed normals there
+    got none written, and still get the same file).
+
+    Optional per-vertex attributes, each written per primitive only when its data
+    is present and well-formed (mesh_vertex_attributes supplies all three):
+      normals   -> NORMAL   VEC3 float, normalised (skipped if any normal is bad)
+      tangents  -> TANGENT  VEC4 float, xyz unit + w = +-1; needs NORMAL (glTF
+                   ignores tangents without normals).  Written as stored;
+                   orthogonalize_tangents=True makes them perpendicular to the
+                   normal first (orthogonal_tangents)
+      colors    -> COLOR_0  VEC4 unsigned byte, normalized
+    A primitive that gets NORMAL is written with its triangle winding flipped when
+    the triangles wind against the normals (winding_reversed; fix_winding=False
+    keeps the file order).  Primitives without NORMAL keep their indices.
+    write_normals / write_colors / write_tangents = False switch one off; with
+    all three off (or no data passed) the file is byte-identical to what this
+    function wrote before these attributes existed."""
     from PIL import Image
 
     n = tpl["bone_count"]
@@ -333,8 +467,10 @@ def build_rigged_glb(
         j["bufferViews"].append(bv)
         return len(j["bufferViews"]) - 1
 
-    def ac(bv, ct, c, t, mn=None, mx=None):
+    def ac(bv, ct, c, t, mn=None, mx=None, normalized=False):
         A = {"bufferView": bv, "componentType": ct, "count": c, "type": t}
+        if normalized:
+            A["normalized"] = True
         if mn is not None:
             A["min"] = mn
             A["max"] = mx
@@ -422,15 +558,35 @@ def build_rigged_glb(
                 Pp.max(0).tolist(),
             )
         }
+        Np = None
+        if write_normals and normals is not None:
+            Np = unit_normals(normals[base : base + nverts])
+        if Np is not None and len(Np) == nverts:
+            attrs["NORMAL"] = ac(av(Np.tobytes(), 34962), 5126, nverts, "VEC3")
+            Tp = None
+            if write_tangents and tangents is not None:
+                Tp = well_formed_tangents(tangents[base : base + nverts])
+                if Tp is not None and orthogonalize_tangents:
+                    Tp = well_formed_tangents(orthogonal_tangents(Np, Tp))
+            if Tp is not None and len(Tp) == nverts:
+                attrs["TANGENT"] = ac(av(Tp.tobytes(), 34962), 5126, nverts, "VEC4")
         if U is not None:
             UVp = np.ascontiguousarray(np.asarray(U[base : base + nverts], np.float32))
             attrs["TEXCOORD_0"] = ac(av(UVp.tobytes(), 34962), 5126, nverts, "VEC2")
+        if write_colors and colors is not None:
+            Cp = np.ascontiguousarray(np.asarray(colors[base : base + nverts]))
+            if Cp.dtype == np.uint8 and Cp.shape == (nverts, 4):
+                attrs["COLOR_0"] = ac(
+                    av(Cp.tobytes(), 34962), 5121, nverts, "VEC4", normalized=True
+                )
         if have_skin:
             Ip = np.ascontiguousarray(SKIN_I[vidx])
             Wp = np.ascontiguousarray(SKIN_W[vidx]).astype(np.float32)
             attrs["JOINTS_0"] = ac(av(Ip.tobytes(), 34962), 5121, nverts, "VEC4")
             attrs["WEIGHTS_0"] = ac(av(Wp.tobytes(), 34962), 5126, nverts, "VEC4")
         tri = Tn[tstart : tstart + ntris] - base
+        if fix_winding and "NORMAL" in attrs and winding_reversed(Pp, Np, tri):
+            tri = np.asarray(tri).reshape(-1, 3)[:, [0, 2, 1]]
         ia = ac(av(np.ascontiguousarray(tri).tobytes(), 34963), 5125, tri.size, "SCALAR")
         prims.append(
             {

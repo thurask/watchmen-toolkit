@@ -15,14 +15,30 @@ Commands
                                  console audio is written as .xma/.mp3)
   binds NAZ OUT_DIR              Build engine-exact FILE-ONLY binds for all skeletons
   charlibs EXTRACT_OUT OUT_DIR   Textured+animated character-library glbs (needs extract+binds)
+  animmeta EXTRACT_OUT OUT.json [BINDS_DIR]
+                                 The game's own animation metadata as JSON (format
+                                 "watchmen-anim-meta/2"): every state's clips, loop,
+                                 criteria and events (trigger kind, seconds or play
+                                 position), transitions with their sync markers,
+                                 which clip pairs with which (counters, finishers,
+                                 throws), where the partner stands and when it is
+                                 anchored and released, and the engine's enum tables.
+                                 `characters` writes the same table to
+                                 OUT_DIR/anim_meta.json and embeds it per clip.
   faces EXTRACT_OUT OUT_DIR      Cutscene-head glbs: engine-exact face binds + the 24
                                  facial expression POSES (game has no keyframed face anims)
-  characters EXTRACT_OUT OUT_DIR [NAZ]  Folder per character, one glb per fragment
-                                 variant, EVERY animation of its skeleton (resumable)
+  characters EXTRACT_OUT OUT_DIR [NAZ] [--jiggle-model pinned|pivot]
+                                 Folder per character, one glb per fragment
+                                 variant, EVERY animation of its skeleton (resumable).
+                                 Jiggle bones are baked with the `pinned` model
+                                 (default, as 1.2.0) or the engine-geometry `pivot`
+                                 model; each has its own cache directory.
   fragment FILE [OUT.json]       Lossless .fragment -> JSON
   bake CLIPNAME BIND.npz OUT.npy Engine-exact palettes for one clip
-  char FRAG.json VARIANT OUT.glb [BINDDIR [BAKEDIR]]
+  char FRAG.json VARIANT OUT.glb [BINDDIR [BAKEDIR]] [--jiggle-model pinned|pivot]
                                  Character variant -> GLB with all its clips
+                                 (--jiggle-model also bakes the jiggle bones,
+                                 which `char` otherwise leaves as authored)
   hash NAME                      Kapow property-key hash of a name
   --version                      Print the toolkit version and exit
   gendata SUBCMD ...             Regenerate wlib's data tables from a game
@@ -46,7 +62,7 @@ sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "wlib")
 try:
     from wlib import __version__ as VERSION
 except Exception:  # running from a source checkout without the package installed
-    VERSION = "1.2.0"
+    VERSION = "1.3.0"
 
 
 def _wl():
@@ -69,13 +85,21 @@ USAGE = {
     "binds": (2, "binds NAZ OUT_DIR"),
     "charlibs": (2, "charlibs EXTRACT_OUT OUT_DIR [NAZ]"),
     "faces": (2, "faces EXTRACT_OUT OUT_DIR"),
-    "characters": (2, "characters EXTRACT_OUT OUT_DIR [NAZ]"),
+    "animmeta": (2, "animmeta EXTRACT_OUT OUT.json [BINDS_DIR]"),
+    "characters": (2, "characters EXTRACT_OUT OUT_DIR [NAZ] [--jiggle-model pinned|pivot]"),
     "fragment": (1, "fragment FILE [OUT.json]"),
     "bake": (3, "bake CLIPNAME BIND.npz OUT.npy"),
-    "char": (3, "char FRAG.json VARIANT OUT.glb [BINDDIR [BAKEDIR]]"),
+    "char": (
+        3,
+        "char FRAG.json VARIANT OUT.glb [BINDDIR [BAKEDIR]] [--jiggle-model pinned|pivot]",
+    ),
     "hash": (1, "hash NAME"),
     "gendata": (1, "gendata strings|regdump|propnames|keys-export|keys-import|check ..."),
 }
+
+
+JIGGLE_COMMANDS = ("characters", "char")
+JIGGLE_MODELS = ("pinned", "pivot")  # jiggle_d6.MODELS; "pinned" is the default
 
 
 def main(argv):
@@ -98,6 +122,19 @@ def main(argv):
             return _we.main(["--help"])
         print("usage: watchmen.py %s" % USAGE[cmd][1])
         return 0
+    jiggle_model = None
+    if "--jiggle-model" in args:
+        i = args.index("--jiggle-model")
+        value = args[i + 1] if i + 1 < len(args) else None
+        if cmd not in JIGGLE_COMMANDS or value not in JIGGLE_MODELS:
+            if cmd not in JIGGLE_COMMANDS:
+                print("error: --jiggle-model applies to: %s" % ", ".join(JIGGLE_COMMANDS))
+            else:
+                print("error: --jiggle-model takes one of: %s" % ", ".join(JIGGLE_MODELS))
+            print("usage: watchmen.py %s" % USAGE[cmd][1])
+            return 2
+        jiggle_model = value
+        args = args[:i] + args[i + 2 :]
     need = USAGE[cmd][0]
     if len(args) < need:
         print("usage: watchmen.py %s" % USAGE[cmd][1])
@@ -112,8 +149,8 @@ def main(argv):
     if cmd == "hash":
         import kapow_props
 
-        # same convention as wl.kapow_hash: the engine hashes UPPERCASE names
-        print("%08x" % kapow_props.kapow_hash(args[0].upper()))
+        # same convention as wl.kapow_hash: bytes & 0xDF, engine FUN_00423ce8
+        print("%08x" % kapow_props.name_hash(args[0]))
         return 0
     if cmd == "gendata":
         import gen_data
@@ -145,7 +182,7 @@ def main(argv):
         naz = args[2] if len(args) > 2 else "game.naz"
         import characters_export
 
-        pending = characters_export.export(exout, outdir, naz)
+        pending = characters_export.export(exout, outdir, naz, jiggle_model=jiggle_model)
         pending = pending if isinstance(pending, int) else len(pending or ())
         print(
             "pending bakes: %d%s"
@@ -156,6 +193,13 @@ def main(argv):
         import face_export
 
         face_export.export(args[0], args[1])
+
+    elif cmd == "animmeta":
+        import anim_meta
+
+        binds = args[2] if len(args) > 2 else os.path.join(args[0], "binds")
+        meta = anim_meta.write(args[0], args[1], binds=binds if os.path.isdir(binds) else None)
+        print("wrote %s: %s" % (args[1], anim_meta.summary(meta)))
 
     elif cmd == "charlibs":
         exout, outdir = args[0], args[1]
@@ -202,6 +246,8 @@ def main(argv):
             kw["binddir"] = args[3]
         if len(args) > 4:
             kw["bakedir"] = args[4]
+        if jiggle_model is not None:
+            kw.update(jiggle=True, jiggle_model=jiggle_model)
         wl.build_variant_glb(frag, variant, out, **kw)
 
     else:

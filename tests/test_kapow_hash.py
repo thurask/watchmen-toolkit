@@ -112,11 +112,12 @@ def test_golden_values(name, expected):
 def test_lookup_convention_is_case_insensitive():
     """The public lookup (`watchmenlib.kapow_hash`) folds case; the raw one does not.
 
-    The engine hashes UPPERCASED names, so every call site must uppercase
-    first. This pins where that responsibility lives: `watchmenlib.kapow_hash`
-    is the case-insensitive entry point, while `kapow_props.kapow_hash` is the
-    raw primitive -- feeding it a mixed-case name yields a different, useless
-    hash, which is exactly the bug this test exists to catch.
+    The engine hashes names with every byte ANDed with 0xDF (FUN_00423ce8), which
+    for letters is upper-casing. This pins where that responsibility lives:
+    `watchmenlib.kapow_hash` / `kapow_props.name_hash` are the folding entry
+    points, while `kapow_props.kapow_hash` is the raw primitive -- feeding it a
+    mixed-case name yields a different, useless hash. (Digits and punctuation
+    fold too; that part is pinned in tests/test_names.py.)
     """
     for name in ("position", "Position", "POSITION", "pOsItIoN"):
         assert wl.kapow_hash(name) == kp.kapow_hash("POSITION")
@@ -125,7 +126,8 @@ def test_lookup_convention_is_case_insensitive():
 
 
 def test_type_table_is_built_from_uppercased_names():
-    """kapow_props.TYPES must map hash(UPPER(typename)) -> typename.
+    """kapow_props.TYPES must map name_hash(typename) -> typename (for these
+    all-letter names that equals hash(UPPER(typename))).
 
     Type dispatch in parse() keys off this table; if it were built from the
     lowercase names every property value would fall into the raw-hex fallback

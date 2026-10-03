@@ -9,9 +9,19 @@ executable, and verified by extracting and decoding real assets byte-for-byte.
 > **Provenance.** The game runs on **Kapow** (internal codename **WM07**), the
 > in-house engine of *Deadline Games* (Copenhagen). It is a 32-bit Direct3D 9 PC
 > title from 2009, cross-built for X360/PS3 (that heritage leaves fingerprints in
-> the data — endian-swap helpers, per-platform fields). Source-path strings inside
+> the data — endian-swap helpers, per-platform format tables). Source-path strings inside
 > the binary point at `c:\Develop\KapowMulti\delivery\...`, e.g.
 > `kernel/assets/texture/texture.cpp`, which is how individual loaders were named.
+>
+> **Corrected 2026-10-02.** The block header, the directory record, the asset
+> header, the texture descriptor and the ModelRes layout below were re-read from
+> the engine's own loaders (research report: [`re/formats.md`](re/formats.md)).
+> Where an earlier version of this document was wrong, the text is corrected
+> and the correction is marked with that date. The main ones: the fixed header
+> is 400 bytes and the directory starts at 400, not 399; a stream pair belongs
+> to its own record, so there is no "+1 shift"; the six slots of a record are
+> languages, not platforms; the u32 after an asset's type name is the length of
+> its property bag, not a class id.
 
 There are three nested layers. Each section below peels one off:
 
@@ -62,9 +72,9 @@ ZIP — no inflate at the container level.
 
 A level (e.g. `bordello`, `nightclub`, `streetsofriot`, …) ships as **two files**:
 
-- **`<name>.block_h_z`** — the **header file**: a directory (table of contents) of
-  every asset in the level, followed by each asset's **header blob** (its metadata /
-  property bag).
+- **`<name>.block_h_z`** — the **header file**: a fixed header, a directory (table of
+  contents) of every asset in the level, then each asset's **header blob** (its
+  metadata / property bag).
 - **`<name>.block_s_z`** — the **stream file**: a flat pool of every asset's bulk
   **stream blob** (texel data, vertex buffers, audio, …).
 
@@ -75,106 +85,139 @@ only when an asset is actually needed.
 
 Despite the `_z` suffix, **the block files are not zlib-compressed as a whole** —
 their first bytes are not the zlib `0x78` marker. Compression is applied
-*per asset blob* (see layer 3). The first ~330 bytes of `block_h_z` are a
-high-entropy preamble (the original signed/obfuscated header); the loader does not
-need it to walk the directory.
+*per asset blob* (see layer 3).
 
 ### 2.1 `block_h_z` overall layout
 
+*Corrected 2026-10-02.* Earlier versions called the first ~330 bytes an opaque
+high-entropy preamble, placed a "small fixed header at 327" and started the
+directory at 399. The engine reads **exactly 400 bytes in one call**
+(`FUN_004a36d8`, `push 0x190` at 0x4ae315) and the directory follows at 400.
+The high-entropy part is the encrypted fingerprint string.
+
 ```
- offset 0 ────────────── ~330 : opaque preamble (high entropy; not needed for the TOC)
- a small fixed header at 327 (audited 2026-07-09, all 7 levels):
-     @327  u8   2                constant
-     @328  u32  0x593F430A       magic
-     @332  u32  tablesSize       size in bytes of the directory region
-     @336  u32  firstBlobSize    header-blob size of entry 0 (the scene fragment)
-     @340  u32  maxBlobSize      largest header blob (decompression buffer size)
-     @344  u32  fileSize-8       header file size minus the 8 zero tail bytes
-     @348  u32  8                constant
-     @352  u32  numEntries       number of assets in the MAIN directory
-     @356  u32  numLocaleExtra   appended localization records after the main
-                                 directory (mainmenu=1 logo bmp, watchmenpart2=14
-                                 _uk text assets); their streams sit past the
-                                 last referenced offset in block_s_z
-     @360  u32  numFlagged       count of entries with flag==1 (stream pairs)
- the header file ends with 8 zero bytes (thus @344 == fileSize-8)
- offset 399 ──────────────────: DIRECTORY (table of contents), `tablesSize` bytes
- offset 399 + tablesSize + 1 ─: HEADER-BLOB POOL — each asset's header blob,
-                                concatenated in directory order, sized by `data_size`
+ offset 0 ─ 399 : fixed header
+     @0    f32[8]   bounds (two vec4)
+     @32   u32      (not established; no reader found)
+     @36   char[36] GUID text (no reader found)
+     @72   char[255] fingerprint: C string, LFSR-encrypted with the key
+                    "1E564E3B-D243-4ec5-AFB7" (FUN_0049dd0e); shipped blocks decrypt to
+                    "THIS IS THE DEFAULT FINGERPRINT KEY, PLEASE CHANGE IT!"
+     @327  u8       2                 (meaning not established)
+     @328  u32      0x593F430A        never checked by the loader; inferred to be
+                                      the block version signature
+     @332  u32      tablesSize        directory bytes, starting at 400
+     @336  u32      entry0Size        header-blob size of entry 0 (the first blob read)
+     @340  u32      ioBufferSize      max(tablesSize, largest header blob)
+     @344  u32      fragmentOffset    = 400 + tablesSize + Σ blob sizes: a trailing blob
+     @348  u32      fragmentSize      8
+     @352  u32      numEntries        records in the MAIN directory
+     @356  u32      numLocalized      records behind the per-language seek
+                                      (mainmenu = 1 logo bmp, watchmenpart2 = 14
+                                      _uk text assets)
+     @360  u32      numStreams        records with hasStream = 1
+     @364  u32[6]   languageHeaderOffset   file offset of the localized header
+                                      blobs, one per language slot
+     @388  u8       flag (meaning not established); 389–399 zero
+ offset 400 ───────────────: DIRECTORY, `tablesSize` bytes
+ offset 400 + tablesSize ──: HEADER-BLOB POOL — each asset's header blob,
+                             concatenated in directory order
 ```
 
+The former names for @336 / @340 / @344 (`firstBlobSize`, `maxBlobSize`,
+`fileSize-8`) described the same numbers: the file ends with the 8-byte
+trailing blob, so `fragmentOffset == fileSize − 8`.
+
 **In situ (bordello):** `tablesSize=243241`, `numEntries=2291`, directory spans
-`[399, 243641)`, header blobs start at `243641`. The first entry is
+`[400, 243641)`, header blobs start at `243641`. The first entry is
 `/Levels/Game_Levels_Part2/Bordello` (the scene fragment).
+
+`watchmen_extract.parse_block_header(h)` returns these fields;
+`fingerprint_decrypt()` is the cipher.
 
 ### 2.2 The directory record (per asset)
 
-Walking from offset **399**, each of the `numEntries` records is variable-length:
+*Corrected 2026-10-02.* Earlier versions started at 399 and read the record as
+`flag, pair, sizes, hash, name`; the flag and pair are the **tail** of the
+record, and the six copies are per **language**, not per build platform.
+
+Walking from offset **400**, each record is variable-length (engine
+`FUN_004a3525`):
 
 ```
- u8       flag                 1 ⇒ this record carries a stream pair; 0 ⇒ it does not
- if flag == 1:
-   6 × { u32 off; u32 sz }     stream (offset,size) into block_s_z — ONE pair, stored
-                               six times (one per build platform); identical on PC
- 6 × u32   variants            header-blob size, stored six times (per platform);
-                               identical on PC → use any non-zero one as `data_size`
- u32       assetTypeHash        kapow_hash(assetTypeName): sound 0x80aa346d,
-                               Texture 0x7d8d9a63, animation 0x45870ad6,
-                               fragment 0xa048cb21, modelRes 0xf2e47acb,
-                               textRes 0x7d6d720b, PropertySequenceAsset,
-                               ParticleSystemAsset, grass, mediastream,
-                               DetailMeshAsset; 2 unnamed subtypes remain
-                               (0x41764525 models, 0x96ea413f terrain/decal bmps)
+ 6 × u32   size[language]      header-blob size, one per LANGUAGE slot
+ u32       typeHash            name_hash(assetTypeName), see below
  u32       nameLen
  char[nameLen]  name           the asset's virtual path, e.g.
                                "/art/environments/sky/Sky_Moon_02.bmp"
+ u8        hasStream           1 ⇒ a stream pair block follows
+ if hasStream:
+   6 × { u32 off; u32 sz }     stream (offset, size) into block_s_z, one pair per
+                               language slot
 ```
 
-The "six copies" of both the stream pair and the size reflect the engine's
-editor/PC/X360/PS3 multi-platform build; on the shipped PC data all six are equal,
-so you read one and ignore the rest.
+The slot index is the current language (engine `FUN_0045c762`, the index the
+loader logs as "language: %s"). The six slots are equal except on the
+`numLocalized` records that follow the main directory; for those the loader
+seeks to `languageHeaderOffset[language]` before reading their header blobs.
+Which language each slot number means is not established. The extractor uses
+slot 0 by default (`--language 0..5`).
 
-**Counts (bordello):** of 2291 records, **581 have `flag==1`** and 1710 have
-`flag==0`. The header blobs are then read in order: blob *i* is `data_size_i` bytes
-starting where blob *i−1* ended, beginning at `399 + tablesSize + 1`.
+Type hashes (`kapow_props.name_hash` of the type name — the hash folds every
+byte with `& 0xDF`, it does not upper-case):
 
-### 2.3 ⭐ The stream-binding rule (the one non-obvious part)
+| hash | type name |
+|---|---|
+| `0x80aa346d` | `sound` |
+| `0x7d8d9a63` | `Texture` |
+| `0x45870ad6` | `animation` |
+| `0xa048cb21` | `fragment` |
+| `0xf2e47acb` | `modelRes` |
+| `0x7d6d720b` | `textRes` |
+| `0x5cf8a3cf` | `PropertySequenceAsset` |
+| `0x46b6f587` | `ParticleSystemAsset` |
+| `0x86a9d7dd` | `grass` |
+| `0xe1faf50f` | `mediastream` |
+| `0xdeb3f74e` | `DetailMeshAsset` |
+| `0x41764525` | `ModelEffects(ModelRes)` *(named 2026-10-02)* |
+| `0x96ea413f` | `TextureEffects(Texture)` *(named 2026-10-02)* |
+| `0x6532e9b4` | `terrain` |
+| `0xd8c06967` | `pivotbook` |
+| `0x48d86c33` | `aipathdata` |
 
-The naïve reading — "an asset's stream is the pair stored in its own record" — is
-**wrong by one record**, and that off-by-one is the single trickiest thing in the
-format. The truth:
+`ModelEffects(ModelRes)` and `TextureEffects(Texture)` are script classes on
+top of a native asset class. They have no reader of their own: the base
+class's loader runs, with a longer property bag.
 
-> **The `(off,sz)` pair is a *trailer*, written after the asset's name, and it
-> locates the stream of the asset whose record it terminates. A head-first parser
-> (read flag → pair → variants → name) therefore reads each trailer as the *leading*
-> field of the *next* record.**
+**Counts (bordello):** of 2291 records, **581 have `hasStream == 1`** and 1710
+do not. The header blobs are read in order: blob *i* is `size_i` bytes
+starting where blob *i−1* ended, beginning at `400 + tablesSize`.
 
-So if you parse records head-first (as in §2.2), the binding is a **+1 shift**:
+### 2.3 The stream-binding rule
 
-```
- stream(asset i)  =  parsedRecord[i+1].pair      (present iff parsedRecord[i+1].flag == 1)
-```
+*Corrected 2026-10-02.* This section used to describe a "+1 shift": the stream
+of asset *i* was taken from the pair parsed with record *i+1*, and the
+directory was said to open with a sentinel flag. Both were artefacts of
+starting the walk at 399 — byte 399 is a zero pad byte of the fixed header and
+happened to parse as `flag = 0`. Read from 400, with the flag and pairs at the
+end of the record, **an asset's stream is the pair stored in its own record**,
+and there is no sentinel.
 
-The directory opens with one leading flag/pair that belongs to no asset (a
-sentinel). Equivalently: re-align your parser so the flag+pair is the *tail* of each
-record and the off-by-one disappears.
+The two readings bind the same bytes to the same assets, which is why
+extraction was correct before: across all blocks of Part 2 PC (8,696 entries)
+the corrected parser returns the same header and stream for every entry.
+What the old reading could not see were the `numLocalized` records.
 
-**Proof, in situ.** For every pair of consecutive stream-bearing assets, the
-inflated length of the pair stored on record *i+1* equals the *predicted* stream
-length of asset *i*:
+**In situ.** The record's own pair inflates to the stream length the asset's
+header predicts:
 
-| record | asset | predicted stream | pair stored *here* inflates to |
+| record | asset | predicted stream | own pair inflates to |
 |---|---|---|---|
-| 1 | `2d_noise4.bmp` | 174 776 | — |
-| 2 | `Sky_Mansion_01.fragment` | — | **174 776** ← asset 1's stream |
-| 3 | `Sky_SunFlare_01.bmp` | 10 936 | — |
-| 4 | `Sky_Moon_02.bmp` | 87 408 | **10 936** ← asset 3's stream |
-| 5 | `Sky_Mansion_BG_01.bmp` | 11 016 | **87 408** ← asset 4's stream |
+| 1 | `2d_noise4.bmp` | 174 776 | 174 776 |
+| 3 | `Sky_SunFlare_01.bmp` | 10 936 | 10 936 |
+| 4 | `Sky_Moon_02.bmp` | 87 408 | 87 408 |
 
-Applying the +1 shift resolves **1190 / 1190** textures across all level blocks
-with **zero** search and zero ambiguity. (Historically this looked like a "stream
-pool" being consumed out of order; it is not a pool — it is purely the trailer
-off-by-one.)
+and the walk from 400 ends exactly at `400 + tablesSize`.
 
 Each blob (header *or* stream) is then **individually zlib-compressed** when its
 first byte is `0x78` — inflate it; otherwise it is stored raw. (`maybe_inflate`.)
@@ -183,8 +226,8 @@ Engine cross-reference: the asynchronous block loader is `FUN_004a36d8`
 (`loadblock.cpp`, log string *"Allocating 2 buffers for asset block loading"*). It
 streams `block_s_z` in chunks (chunk-size array at loader-context `+0x1C0`, count at
 `+0x1B8 & 0xFFFFFF`) into a ping-pong **double buffer** (`+0x1A4`/`+0x1A8`, indices
-swapped at `+0x1AC`/`+0x1B0`), consuming exactly the `(off,sz)` from the trailer
-above.
+swapped at `+0x1AC`/`+0x1B0`, both allocated with `ioBufferSize`), consuming the
+`(off,sz)` pairs of the records.
 
 ---
 
@@ -195,55 +238,75 @@ way and then carries a type-specific body:
 
 ```
  u32      typeNameLen          e.g. 8
- char[]   typeName             "Texture", "ModelRes", "sound", "ModelEffects", …
- u32      classId / version    0x2D (45) for textures on WM07
- …        type-specific body (a generic property bag, then typed records)
+ char[]   typeName             "Texture", "ModelRes", "sound", "TextureEffects(Texture)", …
+ u32      bagDwords            length of the property bag in 32-bit words
+ …        bagDwords × 4 bytes of property records, then the type-specific body
 ```
+
+*Corrected 2026-10-02.* The u32 after the type name was documented as a
+"classId / version" (`0x2D` for textures, `0x5B` for models). It is the
+dword count of the property bag (engine `FUN_00511f96`): 45 for `Texture`, 91
+for `ModelRes`, 55 for `TextureEffects(Texture)`, 96 for
+`ModelEffects(ModelRes)`. The body starts at
+`4 + typeNameLen + 4 + 4·bagDwords`.
 
 Reading `typeName` is how you classify an asset without guessing. **In situ
 (bordello)** the class histogram is roughly: 843 `sound`, 273 `Texture`, 217
-`ModelRes`, 76 `ModelEffects`, plus particle systems, grass, detail meshes, media
-streams, and ~686 untyped/metadata records.
+`ModelRes`, 76 `ModelEffects(ModelRes)`, plus particle systems, grass, detail
+meshes, media streams, and ~686 untyped/metadata records.
 
 The body is a **sequential serialized stream**: the engine reads it field-by-field
 through typed-read methods (`read u32`, `read float`, `read bool`, …) rather than as
-a fixed-offset struct. This matters for parsing — see §4.3.
+a fixed-offset struct.
 
 ---
 
 ## 4. The Texture asset
 
 A `Texture` header describes a **material**: one or more stacked image layers
-(diffuse, normal, specular, reflection…), each a full mip chain, packed back-to-back
+(diffuse, normal, specular, glossiness…), each a full mip chain, packed back-to-back
 in a single stream.
 
 ### 4.1 Header body
 
+*Corrected 2026-10-02 (engine `FUN_005382aa`, descriptor `FUN_00429e77`).*
+Earlier versions described "one ~30-byte record per stored layer" starting at
+a fixed offset 196, with a stride that drifts.
+
 ```
- (typeName="Texture", classId=0x2D as above)
- N × 20-byte PROPERTY records   a "property bag"; each record begins with the same
-                                per-asset `salt` u32 (the salt repeats, which is how
-                                the record size was proven). 9 records is typical,
-                                so the image array begins at a fixed offset 196.
- IMAGE-DESCRIPTOR ARRAY         one record per stored layer (≈30 bytes; see 4.2)
- u32 pathLen; char[pathLen]     the source path, e.g.
-                                "/data/art/characters/twilightlady/textures/TwilightLadyAcce.bmp"
+ (typeName, bagDwords, property bag as in §3)
+ u32 nFrames; u8 hasAnim
+ per frame:
+   Desc                                  slot 0
+   7 × { u8 present; Desc if present }   slots 1..7
+   u32 pathLen; char path[pathLen]       the source path, e.g.
+                                         "/data/art/characters/twilightlady/textures/TwilightLadyAcce.bmp"
 ```
 
-The trailing source path gives **100 %-correct asset names** and the folder tree to
+The property bag is 20-byte records, each beginning with the same per-asset
+`salt` u32. A plain `Texture` has 9 of them (45 dwords), so its body begins at
+offset 196; a `TextureEffects(Texture)` has 11.
+
+The source path gives **100 %-correct asset names** and the folder tree to
 rebuild on extraction.
 
-### 4.2 The image-descriptor record (per layer)
+### 4.2 The image descriptor (per slot)
 
-Each layer's descriptor is nominally 30 bytes. The fields that matter:
+```
+ Desc (29 bytes): u32 width, u32 height, u32 format, u32 0, u32 type (1 = 2D, 2 = cube),
+                  u8 hasAlpha, u32 mipCount, u32 0
+```
 
-| offset | type | meaning |
-|---|---|---|
-| `+4`  | u32 | authored width  × 256  (read as `value >> 8`) |
-| `+8`  | u32 | authored height × 256  (read as `value >> 8`) |
-| `+13` | u8  | **format enum** (table below) |
-| `+20` | u32 | `256` — a constant that doubles as a record signature |
-| `+26` | u8  | **mip count** = number of mip levels actually stored for this layer |
+The slot index is the layer's role. Seen in Part 2 PC: 0 diffuse, 1 normal
+(`ATI2`), 2 specular (`DXT1`), 3 `DXT1`, 4 `L8`, 7 `L8` (the gloss / specular-power
+map, "specSize"); 5 and 6 are never present. The roles of slots 3 and 4 are
+not established.
+
+The offsets earlier versions gave for a "30-byte record" (`+4` width × 256,
+`+8` height × 256, `+13` format, `+20 == 256`, `+26` mip count) are these same
+fields read through a window that began five bytes early, at `nFrames`: the
+"× 256" is the `hasAnim` byte in front of the width, and the "256 signature" is
+the type field (1) seen one byte early.
 
 **Format enum** (the engine's enum→`D3DFORMAT` table lives at `0x00C799E0`):
 
@@ -257,49 +320,56 @@ Each layer's descriptor is nominally 30 bytes. The fields that matter:
 | 7 | `DXT5` (BC3) | block, 16 B / 4×4 |
 | 9 | `ATI2` / `BC5` | block, 16 B / 4×4 — a two-channel **normal map** |
 
-A typical material packs: layer 0 diffuse (`DXT1`/`DXT5`), layer 1 normal
-(`ATI2`/BC5), layer 2 specular (`DXT1`), optional layer 3 **glossiness** map
-(`L8`/`X8R8G8B8`) — the gloss / specular-power channel (not a reflection mask).
+A typical material packs: slot 0 diffuse (`DXT1`/`DXT5`), slot 1 normal
+(`ATI2`/BC5), slot 2 specular (`DXT1`), optionally slot 7 **glossiness**
+(`L8`) — the gloss / specular-power channel (not a reflection mask).
 
-### 4.3 Why a fixed 30-byte stride is not enough
+### 4.3 Why a fixed 30-byte stride did not work
 
-Because the header body is a *sequential* typed-read stream (§3, engine
-`FUN_005382aa` in `texture.cpp`, which reads an explicit image **count** and resizes
-the image array at object `+0x90` to match), most layers serialize to 30 bytes but
-some carry an extra field. A fixed 30-byte stride therefore **drifts** on a trailing
-(usually the 4th) layer — observed as a ~5-byte slip. Read the first records at
-stride 30 (with a +4-gap fallback), and use the §4.4 oracle to recover anything the
-stride missed. The `+20 == 256` constant is a useful record signature when scanning.
+*Corrected 2026-10-02.* The "drift" earlier versions worked around is the
+presence byte: a present slot costs 1 + 29 bytes, an absent one 1 byte. A
+29-byte descriptor followed by the next slot's presence byte looks like a
+30-byte record until a slot is skipped; the gloss map in slot 7 sits behind the
+presence bytes of the empty slots before it. No extra field exists.
 
-### 4.4 Layer sizing, and the stream-shape oracle
+### 4.4 Layer sizing
 
 Each layer is stored as a mip chain at its **authored base dimensions**, top mip
 first, containing exactly `mipCount` levels:
 
 ```
- chainBytes(layer) = Σ_{k=0..mipCount-1}  blockBytes(w>>k, h>>k)
- blockBytes(w,h) = ceil(w/4)·ceil(h/4)·bpb   (block formats: DXT1=8, DXT5/DXT3/ATI2=16)
-                 = w·h·bpp                    (linear: X8R8G8B8=4, L8=1)
+ chainBytes(layer) = Σ_{k=0..mipCount-1}  levelBytes(w>>k, h>>k)
+ levelBytes(w,h) = ceil(w/4)·ceil(h/4)·bpb          (block formats: DXT1=8, DXT5/DXT3/ATI2=16)
+                 = h · align4(w·bpp)                 (linear: X8R8G8B8=4, L8=1)
 ```
 
-The inflated stream is just `layer0 ‖ layer1 ‖ …` with no per-layer header, so
-`Σ chainBytes` over all layers should equal the stream length. Crucially, **the
-stream length is known exactly** (it comes from the §2.3 binding, read out of
-`block_s_z` — it is *intrinsic to the game data*, not from any external reference).
-That exact length is the oracle that disambiguates the three stream shapes:
+*Corrected 2026-10-02:* **linear formats store every row padded to 4 bytes.**
+That adds 5–7 bytes to an `L8` chain that reaches 2×2 and 1×1; earlier versions
+had `w·h·bpp` and absorbed the difference with a tolerance.
 
-| shape | test | meaning |
+The inflated stream is, for each frame, each present slot's chain in slot order
+(× 6 for a cube), with no per-layer header. The header says which shape it is:
+
+| shape | header | stream |
 |---|---|---|
-| **single** | `Σ == len` | one material: diffuse ‖ normal ‖ spec ‖ … |
-| **cube** | `Σ·6 == len` | a cubemap: 6 faces, each face = the layer set |
-| **anim** | `Σ·N == len` | an N-frame flipbook: each frame = the layer set |
+| **single** | `nFrames == 1`, type 1 | diffuse ‖ normal ‖ spec ‖ … |
+| **cube** | type 2 | 6 faces |
+| **anim** | `nFrames > 1`, `hasAnim` | an N-frame flipbook: each frame = the layer set |
 
-If `Σ < len` (a layer was dropped by stride drift), scan the header for the missing
-descriptor record and accept the set whose total hits `len`. This classifies
-**1190 / 1190** level-block textures (≈1051 single, ≈110 cube, ≈29 anim).
+With the row padding, header and stream length agree exactly on **936 / 936**
+Part 2 PC textures (822 single, 110 cube, 4 anim), so the stream length is no
+longer needed as an oracle to pick the shape. Earlier versions inferred the
+shape from the length (`Σ == len`, `Σ·6 == len`, `Σ·N == len`) and reported
+more flipbooks: 10 two- or three-layer materials with same-size `DXT1` layers
+had been read as N frames.
 
-Cubemaps are confirmed in code: the texture-buffer build `FUN_0045473f` branches on a
-descriptor type tag (`1` = 2D, `2` = cube → `WrappedCreateCubeTexture`).
+The extractor uses the exact plan when it tiles the stream byte-for-byte and
+falls back to the length-based planner otherwise (console files; cube textures
+with more than one layer and flipbooks whose frames differ were never
+observed). The face order inside a PC cube stream was not traced in code.
+
+Cubemaps are confirmed in code: the texture-buffer build `FUN_0045473f` branches on
+the descriptor type (`1` = 2D, `2` = cube → `WrappedCreateCubeTexture`).
 
 ### 4.5 Decoding each layer to pixels
 
@@ -322,19 +392,21 @@ the top stored mip for maximum resolution.
 
 ## 5. Practical recipe (what a clean extractor does)
 
-1. Open `block_h_z`; read `tablesSize @332`, `numEntries @352`; walk the directory
-   from `399` (§2.2). Compute each header blob's offset from the running sum of
-   `data_size`.
-2. For asset *i*, bind its stream with the **+1 trailer shift** (§2.3): take
-   `record[i+1]`'s `(off,sz)` if `record[i+1].flag==1`, read those bytes from
-   `block_s_z`, `maybe_inflate`.
-3. If the header `typeName == "Texture"`: parse the descriptor records (§4.2),
-   plan the stream shape against the stream length (§4.4), carve, and decode each
-   layer / face / frame (§4.5).
+*Corrected 2026-10-02 (steps 1–3).*
+
+1. Open `block_h_z`; read `tablesSize @332`, `numEntries @352`, `numLocalized @356`;
+   walk the directory from `400` (§2.2). Compute each header blob's offset from
+   the running sum of sizes, starting at `400 + tablesSize`; the localized
+   blobs start at `languageHeaderOffset[language]`.
+2. For asset *i*, its stream is the `(off, sz)` pair in **its own record**
+   (§2.3): read those bytes from `block_s_z`, `maybe_inflate`.
+3. If the header's type is `Texture` or `TextureEffects(Texture)`: parse the
+   frames and slot descriptors (§4.1–4.2), compute the chains (§4.4), carve,
+   and decode each layer / face / frame (§4.5).
 4. Write each PNG under the asset's embedded source path to rebuild the original
    `/data/art/...` tree.
 
-This is exactly what the texture path in `wlib/watchmen_extract.py` implements, and
+This is what the texture path in `wlib/watchmen_extract.py` implements, and
 it needs nothing but the block files and Python + Pillow + numpy.
 
 ---
@@ -344,83 +416,123 @@ it needs nothing but the block files and Python + Pillow + numpy.
 | address | role |
 |---|---|
 | `0x00442910` | `FileBuffer` — `.naz` (obfuscated ZIP) mount: EOCD/CD walk, name de-rotation |
-| `0x004A36D8` | `loadblock.cpp` async block loader — double-buffered `block_s_z` streaming |
+| `0x004A36D8` | `loadblock.cpp` async block loader — fixed header, double-buffered streaming |
+| `0x004A3525` | directory walker — one record per call |
+| `0x0049DD0E` | block header consumer — decrypts the fingerprint |
+| `0x0045C762` | current language index (selects the slot) |
+| `0x00423CE8` | name hash — bit-CRC32 over bytes `& 0xDF` |
 | `0x0054BA59` | asset lookup by name (hash table) |
-| `0x005382AA` | `texture.cpp` Texture deserialize — reads image count, fills array `+0x90` |
+| `0x00511F96` | asset header: type string + property bag (dword count) |
+| `0x005382AA` | `texture.cpp` Texture deserialize — frames, 8 slots per frame |
+| `0x00429E77` | texture descriptor (29 bytes) |
 | `0x00538184` | Texture finalize — iterates the image array (`[size, ptr]` per image) |
-| `0x0045473F` | texture-buffer build — branches 2D vs cube on the descriptor type tag |
+| `0x0045473F` | texture-buffer build — branches 2D vs cube on the descriptor type |
 | `0x004540D7` | D3D `CreateTexture` / `CreateCubeTexture` path |
 | `0x00C799E0` | data: format enum → `D3DFORMAT` table |
+| `0x00547006` | `ModelRes::Read` |
+| `0x00545927` | model part / node (`Node::Deserialize`) |
+| `0x00542541` | submesh record |
+| `0x004336EC` | mesh-buffer header |
+| `0x00C791B0` | data: vertex stride per format id |
+
+Most of these open with the `__EH_prolog` call and decompile to a 10-byte stub
+in a default Ghidra analysis; `tools/ghidra/FixEHProlog.java` repairs that.
 
 ---
 
 ## 6b. The ModelRes (mesh) asset
 
+*Rewritten 2026-10-02 from the engine's readers (`ModelRes::Read` `FUN_00547006`
+→ part `FUN_00545927` → submesh `FUN_00542541` → mesh buffer `FUN_004336ec`).*
+Earlier versions described a 7×u32 "geometry descriptor" found by scanning, a
+field `G` read as an element count, an index buffer that "ends at the first
+index ≥ vertexCount", and an open "multi-submesh reality". All of that is
+replaced by the layout below, which reproduces the stream length exactly on
+740 / 740 Part 2 PC models.
+
 A `ModelRes` is a mesh. Like a texture it splits across the two block files: the
-**header blob** carries metadata, the **stream blob** carries the raw geometry.
+**header blob** carries the structure, the **stream blob** the raw geometry.
 
-**Header blob** — same property-bag layout as a texture (typeName `"ModelRes"`,
-classId `0x5B`, then 20-byte salt-prefixed property records), and near its end a
-geometry descriptor that includes the **vertex count** (e.g. CurtainRod_02 = 347 at
-header offset 630), plus submesh/material counts and the bounding box. Engine truth:
-`modelresderivedio.cpp` `FUN_00545927` deserialises it as a sequential typed-read
-stream (read primitive `vtable+0x24` = "read N bytes"): an AABB (vec3 + vec4), nested
-LOD→submesh count-loops (44-byte records), a material list (68-byte records), then the
-geometry buffers — each **length-prefixed** (`u32 size` then that many raw bytes).
+**Header blob** (after the type string and property bag of §3):
 
-**Stream blob** — the interleaved vertex buffer followed by a `u16` triangle-list
-index buffer (then a per-face surface table). The vertex layout (validated on real
-meshes, byte-exact on `unit_box`):
+```
+ u32, bool hasSkeleton, u32, bool hasCloth, [u32 n][n×32 B], [u32 n][n×4 B]
+ vec3 bboxCenter, vec3 bboxHalfExtent
+ u32 nTex  { bool; string path }            texture list
+ u32 nPb   { string path }                  pivotbooks
+ u32 nParts { Part }
+ … physics / ragdoll, optional cloth object, animation-event list (not parsed)
 
-| offset | type | field |
+ Part:    vec3 pos, quat (xyzw), string name, u32, i32 parent
+          u32 nLods { u32 nSub { Submesh } }
+          u32 nGroups { u32 n { bool; u32; MeshBuffer } }      shadow hulls
+          bool; MeshBuffer if set                               per-part proxy slab
+          2 × [ u32 n { collision volume } ]                    see FORMATS_MISC.md
+          u32 n { surface }
+ Submesh: string name, [u32 1][u32 textureIndex], bool, bool inline, u32, bool, bool,
+          MeshBuffer, [u32 size][size bytes]
+ MeshBuffer: vec3 bboxCenter, vec3 bboxHalfExtent, u8 hasColor, u8 hasAlpha, bool extra,
+          u32 flags, u32 vertexCount, u32 FORMAT,  u32 flags, u32 indexBytes, u32
+```
+
+- Every part is a node: `pos` / `quat` are its pivot, `parent` its parent index.
+- `textureIndex` indexes the model's texture list; that is the submesh's
+  material.
+- A part has one or more levels of detail, each a list of submeshes.
+- `FORMAT` is the vertex format id (what earlier versions called `G`).
+- `indexBytes` is a byte count; indices are always `u16` triangle lists.
+
+**Stream blob** — for each MeshBuffer in header order (per part: the submeshes
+of every LOD, then the shadow groups, then the proxy slab):
+
+```
+ vertexCount × stride[FORMAT]    vertex data
+ indexBytes                      u16 indices
+ [u32 n][n × 40 B]               cluster table
+ [u32 n] lists
+ [u8 has][vertexCount × 8 B]
+```
+
+| FORMAT | stride | layout |
 |---|---|---|
-| `+0`  | 3×float32 | position (x, y, z) |
-| `+12` | 3×float16 (HALF4, +1 pad) | normal |
-| `+24` | 2×float16 | UV |
+| 5 rigid | 44 | pos f32×3 @0 · normal half3 @12 · colour BGRA @20 · uv half2 @24 · tangent half3 @28 · bitangent half3 @36 |
+| 6 skinned | 56 | format 5 + joints @44 (idx0..3 = bytes 46, 45, 44, 47) · weights half4 @48 |
+| 9 shadow hull | 20 | pos f32×3 @0 · normal half3 @12 |
+| 10 skinned hull | 32 | format 9 + joints @20 · weights half4 @24 |
 
-Stride is **44** for rigid meshes and **56** for skinned (the extra 12 bytes carry
-bone indices/weights). The index buffer is `u16`, triangle list; it ends at the first
-index ≥ vertexCount (that boundary is the surface table). Endianness/stride are
-recovered by checking that the index buffer actually indexes the vertex buffer.
+Positions are raw floats; there is no quantisation, scale or bias in any
+format. UVs are raw half floats with no scale, bias or V flip. The stride
+table (`0x00C791B0`) has 11 formats; only these four occur in `.model` files
+(Part 2 PC: format 5 ×2370, 6 ×287, 9 ×357, 10 ×104).
 
-**Per-submesh geometry descriptor (header, verified).** Near the relevant point in
-the header each geometry buffer is described by a fixed 7×u32 block:
+Not established: the role of the per-part proxy slab (one coarse rigid buffer
+on 79 parts — on real files a slab inside the visible mesh); whether vertices
+are part-local; several u32 / bool fields of the part and submesh records;
+the unit of the cluster ranges.
 
-    [flagsA] [vertexCount] [G] [flagsB] [indexBufferBytes] [1]   (flagsA==flagsB ∈ {0,8})
+**Extractor.** `watchmen_extract.parse_model_header` and `model_stream_layout`
+implement this layout; `decode_model_mesh` returns everything per submesh
+(name, part, LOD, texture, positions, normals, UVs, triangles, colour, tangent,
+bitangent, joints, weights). `decode_model` writes an **OBJ + MTL** per model
+(and, with `--glb`, a rigged GLB for skinned models), with LOD 0 by default
+(`--model-lod N|all`) and without shadow hulls and proxy slabs. The header
+path is used only when the header parses and the layout consumes the stream
+to the last byte; console files and Part 1 PC headers do not follow this
+layout and take the older descriptor scan, unchanged.
 
-`G` is the vertex-element count and doubles as the rigid/skinned tag: **G=5 ⇒ stride 44
-(rigid), G=6 ⇒ stride 56 (skinned)**. `indexBufferBytes` is authoritative (= triangles×6;
-the empirical "read u16 until ≥ vertexCount" over-reads by a few into the surface table).
-Bigger models carry material/texture name strings right after the descriptor.
-
-**Multi-submesh reality (open).** Most models are NOT a single VB+IB: a `ModelRes`
-holds a *list* of submeshes (e.g. Sky_Mansion ≈ 22, plus ~85 KB of non-render data —
-collision / LOD), each with its own descriptor, and the stream concatenates them with a
-layout that varies per model (the render VB is not always at offset 0). Robustly
-splitting them needs the full sequential header deserializer (`FUN_00545927`) reconstructed
-— the per-submesh descriptor above is the key, but the LOD/submesh/material records
-between the property bag and the descriptors still need their exact byte sizes pinned.
-An empirical "scan every vertex run + its index buffer" recovers most geometry (good on
-architectural pieces) but includes noise/garbage triangles, so it is not yet
-production-clean.
-
-
-Extractor: the model path in `wlib/watchmen_extract.py` binds with the same +1 trailer rule,
-extracts position/normal/UV + triangles, and writes **OBJ, FBX (ASCII 7.4), or STL
-(binary)** — `--format obj,fbx,stl`. Verified: all three agree vertex/triangle counts,
-STL byte-exact, FBX polygon encoding valid; wireframes render as coherent shapes
-(sky dome, curtain rods, chandelier). Still open: explicit submesh/material splitting
-and skin weights (the stride-56 extra bytes) for fully-rigged FBX export.
+*Corrected 2026-10-02:* earlier versions said the extractor also writes FBX
+and STL (`--format obj,fbx,stl`). The shipped extractor has no such option
+and no FBX or STL writer.
 
 ## 7. Status of the wider format
 
 **Textures are fully solved** — naming, deterministic stream binding, and
 byte-exact layer/cube/animation carving all verified end-to-end against real data
-and the engine code. Models (`ModelRes`) decode to geometry (float vertex buffers,
-HALF4 normals) with index-buffer recovery still partial for some baked-environment
-meshes; audio (`MediaStream`, libVorbis/Bink) is partially mapped. Those are the
-next layers to finish; the container and block formats above are common to all of
-them, so they are the stable foundation.
+and the engine code. Models (`ModelRes`) decode from their header on Part 2 PC
+*(corrected 2026-10-02: the "index-buffer recovery still partial for some
+baked-environment meshes" caveat is withdrawn; see §6b)*; audio (`MediaStream`,
+libVorbis/Bink) is covered in `WATCHMEN_EXTRACTION_MASTER.md`. The container
+and block formats above are common to all of them.
 
 *This document describes the shipped data of one specific title and was derived by
 clean-room reverse engineering for interoperability/preservation.*

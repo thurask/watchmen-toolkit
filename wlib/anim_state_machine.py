@@ -1,22 +1,54 @@
 #!/usr/bin/env python3
 """Engine-faithful interpreter for Watchmen AnimationClass state machines.
 
-Sources (all reversed from the game executable, see
-docs/ENGINE_CONSTANTS.md section 2026-07-09m):
+Sources (all read from the game executable; docs/ENGINE_CONSTANTS.md):
   command_get_valid_state   0x5f076f  round-robin state choice in a group
-  StateGroupCriteriaMet     0x5c6002  single criteria AND criteria-list
-  GetValidStateGroupTrans.  0x5c6140  transition selection order + fallback
-  TransitToState            0x5b4a31  ease-in pick (override else state)
+  StateGroupCriteriaMet     0x5c6002  owning groups' criteria AND own criteria list
+  State.get_valid_transition 0x5f7873 / GetValidStateGroupTransition 0x5c6140
+                                      own transitions, then the owning groups';
+                                      m_tfallback must equal the pass
+  TransitionMet             0x5c5ea4  enabled, super-sync window, criteria
+  TransitionPlayPos         0x5ac1aa  override / sync-marker start position
+  TransitToState            0x5b4a31  (state, ease, playpos); walk-cycle carry-over
+  SetupNewPage              0x5b7788  page creation, re-entry, ease rule, one
+                                      random blend node per layer list, events
+  UpdatePageBlendsFaster    0x5b4bd6 / SetAllSlotBlends 0x5b4ef7  weights, page rate
+  SynchronizePages          0x5ac387  common rate of "Sync Playpos" pages
+  UpdatePagePlayPos         0x5b56a9  playpos advance (clamp 6.6/s), loop, blend
+  CheckPlayPosEvents        0x5b51f3  PLAY_POS latch / TOTAL_PLAY_TIME
   page blend curve          0x77ab7b  engine-exact (powf, float32)
-  AnimationCriteriaMet      0x5c5781  criteria semantics (2026-07-09j)
+  AnimationCriteriaMet      0x5c5781  criteria semantics
   EvaluateTransitions       0x5cbbc2  per-stack transition tick + overlay entry
   StateMain/Update          0x5b417b/0x5b4613  TWO page stacks: body pass
                             (flag 0) then overlay pass (flag 1) per frame
   AllowOverlayTransitions   0x5aa33d  runtime gate -> env.allow_overlays
   DeleteOldPages            0x5b9e4c  occluded (blend>=1 above) page removal
+  MathLib.InsideInterval    0x77aa25  INTERVAL [min, max[, LESS_THAN x < max,
+                                      GREATER_THAN_OR_EQUAL x >= min
+  owner searches            AddToClass 0x5ed37a (state -> nearest state group,
+                            class), AddToParentGroup, AddToClosestState
+                            (transition -> state / group),
+                            FindClosestRelevantParent 0x5aaf49 (criteria): the
+                            nearest ancestor that has m_iAnimationSystemType;
+                            folders are passed over, whatever their name
+  Transition.initialize_external 0x5f9b13  a transition to a STATE also carries
+                                      that state's own criteria
+  AnimSlot speedFactor      0x4b30b1  per-slot factor of the page rate (0x5b5175)
 
-Overlay pages (2026-07-13): candidates live in the class root's
-'OverlayStates' folder (e.g. HeadTurn additive look-at layers). When the
+This module is the ONE implementation of these rules; anim_meta.py turns them
+into records (criteria_of, transitions_of, members, transition_criteria,
+criteria_partial, marker_pairs / map_markers / start_playpos, event_timing /
+event_due / event_prelatched, state_speed, resolve_ref).
+
+Not modelled: the slave lock of a dual animation (goto_slave_mode 0x5b32a2
+stores the master's first animation source in the controller's _eslaveof and
+UpdatePagePlayPos 0x5b5756 copies its play position into the partner's top
+page every frame) -- the interpreter runs one character. anim_meta's pair
+timeline uses it.
+
+Overlay pages: the candidates are the class's override list (command_add_state
+0x5a03a8): each "Override State", or the outermost state group that owns it
+(e.g. HeadTurn additive look-at layers). When the
 overlay stack is empty, EvaluateTransitions scans the candidates and pushes
 the first state whose criteria pass (groups: criteria + get_valid_state,
 scan continues; states: criteria only, scan breaks) via SetupNewPage.
@@ -30,11 +62,12 @@ extracted tree.
 
 ANIMATION_CRITERIA enum (exe): VALUE=0 ACTION=1 ENUM=2 EVENT=3 PLAY_TIME=4
 PLAY_POS=5 REVERSE_PLAY_POS=6 OVERLAY_PLAY_POS=7 REVERSE_OVERLAY_PLAY_POS=8
-ANIMATION_PLAY_DONE=9 FORCE_ANIMATION=10 ANY_OF=11 ALL_OF=12
-Interval test m_iintervaltype: 0=INTERVAL(min..max) 1=LESS(<=min?) 2=GREATER(>=min)
+ANIM_PLAY_DONE=9 FORCE_ANIM=10 ANY_OF=11 ALL_OF=12
+Interval test m_iintervaltype: 0=INTERVAL [min,max[  1=LESS_THAN (x < max)
+2=GREATER_THAN_OR_EQUAL (x >= min)
 """
 
-import json, math, os, struct
+import json, math, os, random, struct
 
 # ---------------------------------------------------------------- tree
 
@@ -46,37 +79,20 @@ CLS_SLOT = "AnimationSlotWM"
 CLS_CRIT = "AnimationCriteriaWM"
 CLS_TRANS = "AnimationTransitionWM"
 CLS_EVENT = "AnimationEventWM"
+CLS_FOLDER = "Folder"
 
-# transition sync markers registered without m_* names in the exe;
-# hashes from reg_dump.json (captions "Sync marker N (local/remote)")
-SYNC_LOCAL = [
-    "key_ee2a40a0",
-    "key_ee2a4060",
-    "key_ee2a40e0",
-    "key_ee2a4000",
-    "key_ee2a4080",
-    "key_ee2a4040",
-    "key_ee2a40c0",
-    "key_ee2a4030",
-]
-SYNC_REMOTE = [
-    "key_4cadfb2b",
-    "key_4cadfbeb",
-    "key_4cadfb6b",
-    "key_4cadfb8b",
-    "key_4cadfb0b",
-    "key_4cadfbcb",
-    "key_4cadfb4b",
-    "key_4cadfbbb",
-]
+# transition sync markers: "Sync marker N (local/remote)", record +0x24.. (0x60d619)
+SYNC_LOCAL = ["m_nsupersynclocal%d" % i for i in range(1, 9)]
+SYNC_REMOTE = ["m_nsupersyncremote%d" % i for i in range(1, 9)]
 
 
 class Node:
-    __slots__ = ("id", "cls", "name", "props", "children", "parent")
+    __slots__ = ("id", "cls", "name", "props", "children", "parent", "frag")
 
     def __init__(self, nid, cls, name):
         self.id, self.cls, self.name = nid, cls, name
         self.props, self.children, self.parent = {}, [], None
+        self.frag = None  # asset path, set on the top-level nodes of a spliced fragment
 
     def p(self, key, default=None):
         return self.props.get(key, default)
@@ -109,15 +125,44 @@ def _base_cls(s):
     return s.split("(")[0] if s else s
 
 
-def load_tree(path, resolve_fragments=True, _seen=None):
-    """Build the node tree of one fragment JSON; splice nested fragments."""
-    j = json.load(open(path))
+def _load_fragment_json(path):
+    """Fragment JSON for `path` (a `.fragment.json` or a `.fragment`).
+
+    Prefers parsing the binary `.fragment` next to it: JSON written by an older
+    extractor carries `key_xxxxxxxx` names where the current key table has
+    `m_...` names, and every lookup in this module is by the current names.
+    Falls back to the JSON on disk when the binary is not there.
+    """
+    frag = path[:-5] if path.endswith(".json") else path
+    if os.path.exists(frag):
+        try:
+            import kapow_json as _kj
+
+            with open(frag, "rb") as fh:
+                j = _kj.to_json(frag.lower(), fh.read())
+            if j:
+                return j
+        except ImportError:
+            pass
+    with open(frag + ".json", encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def tree_from_json(j):
+    """(roots, nodes-by-id) of one fragment JSON dict; no sub-fragment splicing."""
+    if not j.get("instances"):
+        # an empty or non-lossless fragment (several SoundEvents fragments are):
+        # nothing to build, and it must not take the whole class tree down.
+        return [], {}
     pre = j["instances"][0]
     cls = {k[4:]: _base_cls(v[0]) for k, v in pre.items() if k.startswith("str_")}
     nodes = {}
     for nf in j["nodes_full"]:
         d = {k: v for k, t, v in nf["props"]}
-        n = Node(nf["id"], cls.get(nf["id"], "?"), d.get("name", ""))
+        # the node's own type first: the preamble table misses a node whose id
+        # collides with another preamble key (one per shipped class fragment)
+        c = _base_cls(nf.get("type")) or cls.get(nf["id"], "?")
+        n = Node(nf["id"], c, d.get("name", ""))
         n.props = d
         nodes[nf["id"]] = n
     roots = []
@@ -131,25 +176,134 @@ def load_tree(path, resolve_fragments=True, _seen=None):
             roots.append(n)
     for n in nodes.values():
         n.children.sort(key=lambda c: c.p("siblingOrder", 0))
+    return roots, nodes
+
+
+def load_tree(path, resolve_fragments=True, _seen=None):
+    """Build the node tree of one fragment; splice nested fragments.
+
+    `path` may name the `.fragment` or its `.fragment.json`.
+
+    A state group that instances a fragment (`assetName`) gets that fragment's
+    top-level nodes as its own children, WHOLE: they are the group's states,
+    sub-groups, transitions and folders (their logicalParent is the fragment's
+    external slot). Each instance is loaded separately, so a fragment used by
+    two groups appears twice; node ids are therefore unique only inside one
+    fragment instance -- resolve references with resolve_ref(). `_seen` is the
+    chain of fragments currently being loaded (cycle guard).
+    """
+    roots, nodes = tree_from_json(_load_fragment_json(path))
     if resolve_fragments:
-        _seen = _seen or set()
-        base = path
+        _seen = tuple(_seen or ())
+        base = path.replace(os.sep, "/")
         while "/extracted/" in base:
             base = os.path.dirname(base)
         for n in list(nodes.values()):
             asset = n.p("assetName")
-            if n.cls == CLS_GROUP and asset and asset not in _seen:
-                _seen.add(asset)
-                sub = os.path.join(base, asset.lstrip("/") + ".json")
-                if os.path.exists(sub):
-                    for r in load_tree(sub, True, _seen):
-                        for c in r.children:  # splice sub-fragment content
-                            c.parent = n
-                            n.children.append(c)
+            if n.cls != CLS_GROUP or not asset or not isinstance(asset, str) or asset in _seen:
+                continue
+            sub = os.path.join(base, asset.lstrip("/"))
+            if os.path.exists(sub) or os.path.exists(sub + ".json"):
+                for r in load_tree(sub, True, _seen + (asset,)):
+                    r.parent, r.frag = n, asset
+                    n.children.append(r)
     return roots
 
 
+def walk(roots):
+    """Every node under `roots` (a node or a list of nodes), parents first."""
+    out, stack = [], list(reversed(roots)) if isinstance(roots, (list, tuple)) else [roots]
+    while stack:
+        n = stack.pop()
+        out.append(n)
+        stack.extend(reversed(n.children))
+    return out
+
+
+def node_index(roots, nodes=None):
+    """{node id: [nodes]} -- a list because ids repeat across fragment instances.
+    `nodes`: an already flattened node list to index instead of walking `roots`."""
+    out = {}
+    for n in walk(roots) if nodes is None else nodes:
+        out.setdefault(n.id, []).append(n)
+    return out
+
+
+def _chain(n):
+    out = []
+    while n is not None:
+        out.append(n)
+        n = n.parent
+    return out
+
+
+def _nearest(node, cands):
+    """Of several nodes with one id, the one sharing the deepest ancestor with `node`."""
+    mine = _chain(node)
+    best, depth = None, None
+    for c in cands:
+        theirs = set(id(x) for x in _chain(c))
+        d = next((i for i, a in enumerate(mine) if id(a) in theirs), len(mine))
+        if depth is None or d < depth:
+            best, depth = c, d
+    return best
+
+
+def fragment_host(node):
+    """The state group that instances the fragment `node` belongs to (None for a
+    node of the top-level fragment)."""
+    for n in _chain(node):
+        if n.frag is not None:
+            return n.parent
+    return None
+
+
+def resolve_ref(node, ref, index):
+    """Target node of an Entity reference stored on `node` (e.g. m_etostate).
+
+    {'ref': id} names a node of the same fragment instance. {'xref': [ids]} is a
+    PATH: the first id is looked up next to the referring node, every further id
+    inside the node found so far (a fragment instance), the last one is the
+    target; leading ids may name nodes outside the loaded tree. {'etag': 2} is
+    the slot a fragment's top-level nodes hang from, i.e. the state group that
+    instances the fragment ({'etag': 1} is "none"). Falls back to
+    the last id that exists anywhere, nearest instance first. None when nothing
+    matches (the reference leaves the loaded tree).
+    """
+    if not isinstance(ref, dict):
+        return None
+    if ref.get("etag") == 2:  # the fragment's own external slot = the node instancing it
+        return fragment_host(node)
+    ids = ref.get("xref") or ([ref["ref"]] if ref.get("ref") is not None else [])
+
+    def at(i):  # a plain {id: node} index is accepted too
+        hit = index.get(i)
+        return hit if isinstance(hit, list) else ([hit] if hit is not None else [])
+
+    cur, ok = None, bool(ids)
+    for i in ids:
+        cands = at(i)
+        if cur is None:
+            cur = _nearest(node, cands) if cands else None
+            continue
+        inside = [c for c in cands if any(a is cur for a in _chain(c)[1:])]
+        if not inside:
+            ok = False
+            break
+        cur = min(inside, key=lambda c: len(_chain(c)))
+    if ok and cur is not None and ids[-1] == cur.id:
+        return cur
+    for i in reversed(ids):
+        if at(i):
+            return _nearest(node, at(i))
+    return None
+
+
 def find_class_root(roots):
+    """The AnimationClassWM node. The hero class fragments have none (their
+    class node lives in the character's own fragment): they get a synthetic,
+    nameless one holding every root, so that all top-level groups are reachable.
+    The roots keep parent None (paths and owner chains are unchanged)."""
     for r in roots:
         stack = [r]
         while stack:
@@ -157,7 +311,11 @@ def find_class_root(roots):
             if n.cls == CLS_CLASS:
                 return n
             stack.extend(n.children)
-    return roots[0]
+    if len(roots) == 1:
+        return roots[0]
+    top = Node(None, CLS_CLASS, "")
+    top.children = list(roots)
+    return top
 
 
 # ------------------------------------------------------- engine math
@@ -180,27 +338,137 @@ def inv_lerp_clamped(x, a, b):
     return (x - a) / (b - a) if b != a else 0.0
 
 
-def sync_remap(playpos, trans):
-    """Piecewise playpos remap over up-to-8 (local, remote) marker pairs.
-    Markers with value < 0 are unset. (2026-07-09j semantics.)"""
+# keys an extractor older than the corrected name hash wrote for the markers
+_SYNC_LOCAL_OLD = ["key_ee2a40" + x for x in ("a0", "60", "e0", "00", "80", "40", "c0", "30")]
+_SYNC_REMOTE_OLD = ["key_4cadfb" + x for x in ("2b", "eb", "6b", "8b", "0b", "cb", "4b", "bb")]
+
+
+def _marker(trans, i, local):
+    v = trans.p((SYNC_LOCAL if local else SYNC_REMOTE)[i])
+    if v is None:
+        v = trans.p((_SYNC_LOCAL_OLD if local else _SYNC_REMOTE_OLD)[i])
+    if isinstance(v, (list, tuple)):  # pre-v1.3 JSON carried some markers as a mistyped list
+        v = v[0] if v else None
+    return float(v) if isinstance(v, (int, float)) else -1.0
+
+
+def marker_pairs(trans):
+    """(local, remote) markers of a transition whatever its "Sync PlayPos?" flag
+    says, as UpdateSuperSync 0x5fa582 builds them: taken in order 1..8, the list
+    STOPS at the first negative local marker (remote is not tested), then it is
+    sorted by local."""
     pairs = []
-    for lk, rk in zip(SYNC_LOCAL, SYNC_REMOTE):
-        l, r = trans.p(lk, -1.0), trans.p(rk, -1.0)
-        if isinstance(l, list):
-            l = l[0]
-        if isinstance(r, list):
-            r = r[0]
-        if isinstance(l, (int, float)) and isinstance(r, (int, float)) and l >= 0.0 and r >= 0.0:
-            pairs.append((float(l), float(r)))
-    if not pairs:
-        return playpos
-    pairs.sort()
-    pts = [(0.0, 0.0)] + pairs + [(1.0, 1.0)]
-    for (l0, r0), (l1, r1) in zip(pts, pts[1:]):
-        if l0 <= playpos <= l1:
-            u = (playpos - l0) / (l1 - l0) if l1 > l0 else 0.0
-            return r0 + u * (r1 - r0)
-    return playpos
+    for i in range(8):
+        l = _marker(trans, i, True)
+        if l < 0.0:
+            break
+        pairs.append((l, _marker(trans, i, False)))
+    pairs.sort(key=lambda lr: lr[0])
+    return pairs
+
+
+def sync_markers(trans):
+    """marker_pairs() of a "Sync PlayPos?" transition; [] when the flag is off."""
+    return marker_pairs(trans) if trans.p("m_tsupersyncpos", False) else []
+
+
+def markers_window(markers):
+    """(min, max) local marker: the play-position window in which a sync
+    transition may fire (TransitionMet 0x5c5ea4, record +0x6c / +0x70)."""
+    return (markers[0][0], markers[-1][0]) if markers else None
+
+
+def sync_window(trans):
+    """markers_window() of a transition; None when it has no markers."""
+    return markers_window(sync_markers(trans))
+
+
+def map_markers(markers, playpos):
+    """Outgoing play position -> start play position of the target over sorted
+    (local, remote) markers (TransitionPlayPos 0x5ac1aa): piecewise linear
+    between neighbouring markers, CLAMPED to the first / last remote marker
+    outside them (no implicit (0,0) / (1,1) points)."""
+    m = markers
+    i = 0
+    while i < len(m) and m[i][0] < playpos:
+        i += 1
+    if i == 0:
+        return m[0][1]
+    if i == len(m):
+        return m[-1][1]
+    (l0, r0), (l1, r1) = m[i - 1], m[i]
+    u = (playpos - l0) / (l1 - l0) if l1 != l0 else 0.0
+    return r0 + (r1 - r0) * min(1.0, max(0.0, u))  # MapIntervalToInterval 0x77a579
+
+
+def sync_remap(playpos, trans):
+    """map_markers() over a transition's markers; playpos unchanged without markers."""
+    m = sync_markers(trans)
+    return map_markers(m, playpos) if m else playpos
+
+
+def transition_playpos(trans, playpos):
+    """TransitionPlayPos 0x5ac1aa: "Override Start PlayPos?" wins, then the sync
+    markers; -1.0 = no opinion (the target's own start position applies)."""
+    if trans.p("m_toverrideplaypos", False):
+        return float(trans.p("m_nplaypos", 0.0) or 0.0)
+    if not trans.p("m_tsupersyncpos", False):
+        return -1.0
+    # "Sync PlayPos?" set but no valid marker: the engine then reads the first
+    # remote marker of an EMPTY list (0x5ac24b) and gates on record +0x6c / +0x70,
+    # which UpdateSuperSync leaves untouched -- not defined.  No shipped
+    # transition is in that state; here it has no opinion and no gate.
+    m = sync_markers(trans)
+    return map_markers(m, playpos) if m else -1.0
+
+
+# Where a state starts, first match wins (TransitToState 0x5b4a31), then the
+# re-entry rule of SetupNewPage 0x5b7788. start_playpos() implements it.
+TRANSITION_START_PRIORITY = [
+    {
+        "rule": "override_playpos",
+        "when": "transition.start.rule == 'override_playpos'",
+        "start": "transition.start.playpos",
+    },
+    {
+        "rule": "sync_markers",
+        "when": "transition.start.rule == 'sync_markers' (and the transition may only fire "
+        "while gate[0] <= outgoing playpos <= gate[1])",
+        "start": "piecewise-linear map local -> remote of the outgoing playpos, clamped to "
+        "the first / last remote marker",
+    },
+    {
+        "rule": "walk_cycle_carry_over",
+        "when": "outgoing state and target state both have walk_cycle",
+        "start": "the outgoing playpos",
+    },
+    {"rule": "target_default", "when": "otherwise", "start": "target state's start_playpos"},
+    {
+        "rule": "reentry",
+        "when": "afterwards: the target is already on the page stack and is a walk_cycle",
+        "start": "that page's current playpos (replaces the value chosen above)",
+    },
+]
+
+
+def start_playpos(state, trans=None, outgoing=None, outgoing_playpos=0.0):
+    """(start play position, sync flag, rule) for entering `state` through
+    `trans` from `outgoing` (the top body state, None when there is none or the
+    target is an overlay state). Rule names are those of
+    TRANSITION_START_PRIORITY; the re-entry rule is applied by SetupNewPage."""
+    start, sync, rule = float(state.p("m_nstartplaypos", 0.0) or 0.0), False, "target_default"
+    if (
+        outgoing is not None
+        and outgoing.p("m_tiswalkcycle", False)
+        and state.p("m_tiswalkcycle", False)
+    ):
+        start, sync, rule = outgoing_playpos, True, "walk_cycle_carry_over"
+    if trans is not None:
+        pp = transition_playpos(trans, outgoing_playpos)
+        if pp >= 0.0:
+            start = pp
+            rule = "override_playpos" if trans.p("m_toverrideplaypos", False) else "sync_markers"
+    return start, sync, rule
 
 
 # ------------------------------------------------------- criteria
@@ -212,11 +480,23 @@ CRIT_PLAY_DONE, CRIT_FORCE_ANIM, CRIT_ANY_OF, CRIT_ALL_OF = 9, 10, 11, 12
 
 
 def interval_met(x, itype, lo, hi):
+    """MathLib.InsideInterval 0x77aa25: INTERVAL 0 = [min, max[ ; LESS_THAN 1 =
+    x < MAX (min is not read); GREATER_THAN_OR_EQUAL 2 = x >= min; else False."""
     if itype == 0:
-        return lo <= x <= hi
+        return lo <= x < hi
     if itype == 1:
-        return x <= lo
-    return x >= lo  # 2 = GREATER (uses min)
+        return x < hi
+    if itype == 2:
+        return x >= lo
+    return False
+
+
+def s32(v):
+    """Enum values are int32; fragments store -1 as 4294967295."""
+    if not isinstance(v, int) or isinstance(v, bool):
+        return v
+    v &= 0xFFFFFFFF
+    return v - (1 << 32) if v >= (1 << 31) else v
 
 
 class Env:
@@ -229,13 +509,67 @@ class Env:
         self.force_anim = None
         self.allow_overlays = True  # AllowOverlayTransitions 0x5aa33d
         self.overlay_page = None  # top overlay page (set by Interpreter)
+        self.speed = 1.0  # class * character * controller speed factors (Update 0x5b4613)
+        self.force_linear = False  # AnimationData "Force Linear Transitions"
+        self.no_override_layer = False  # AnimationData "No Override Layer"
+        # controller m_tforceupdate (+0x2c): while set, "No Transition Tests" states
+        # are evaluated every frame. The engine also sets it itself when a page is
+        # added or still blending; the game sets it from outside (not modelled).
+        self.force_update = False
+
+
+def typed(node):
+    """Does the node carry m_iAnimationSystemType (ANIMATION_SYSTEM_NODE_TYPE:
+    blend, criteria, slot, state, transition, class, event, state group)?
+    Folders and plain nodes do not; the engine's owner searches walk past them."""
+    return bool(node.cls) and node.cls.startswith("Animation")
+
+
+def criterion_owner(c):
+    """(state, group, transition) that an AnimationCriteria belongs to, as
+    FindClosestRelevantParent 0x5aaf49 records them: walking up the typed
+    ancestors, a transition (+0x34) or a state (+0x38) ends the search, the first
+    state group is the owning group (+0x3c[0]). At most one of the three is set."""
+    n = c.parent
+    while n is not None:
+        if n.cls == CLS_TRANS:
+            return None, None, n
+        if n.cls == CLS_STATE:
+            return n, None, None
+        if n.cls == CLS_GROUP:
+            return None, n, None
+        n = n.parent
+    return None, None, None
+
+
+def entry_only_skipped(c, page):
+    """Prologue of AnimationCriteriaMet 0x5c5781: an "entry only" criterion is
+    not tested (counts as met) while the top page's state is the state that owns
+    it or lies inside the state group that owns it. A transition's own criteria
+    have neither owner, so they are always tested."""
+    if page is None or not c.p("m_tentryonly", False):
+        return False
+    st, grp, _tr = criterion_owner(c)
+    if st is not None:
+        return page.state is st
+    if grp is None:
+        return False
+    g = _parent_group(page.state)
+    while g is not None:
+        if g is grp:
+            return True
+        g = _parent_group(g)
+    return False
 
 
 def criteria_met(c, env, page, entry):
-    """AnimationCriteriaMet 0x5c5781 semantics."""
+    """AnimationCriteriaMet 0x5c5781 semantics. entry=True tests "entry only"
+    criteria unconditionally (the engine does so while it evaluates the current
+    state's transitions, state record +0x68); entry=False applies
+    entry_only_skipped()."""
     if not c.p("enabled", True):
         return True
-    if c.p("m_tentryonly", False) and not entry:
+    if not entry and entry_only_skipped(c, page):
         return True
     kind = c.p("m_ianimationcriteria", 0)
     it = c.p("m_iintervaltype", 0)
@@ -246,7 +580,8 @@ def criteria_met(c, env, page, entry):
     elif kind == CRIT_ACTION:
         r = c.p("m_ianimationaction", 0) in env.actions
     elif kind == CRIT_ENUM:
-        r = env.enums.get(c.p("m_ianimationenum", 0)) == c.p("m_ianimationenumvalue", 0)
+        # reads only m_ianimationenum (+0x28) and m_ianimationenumvalue (+0x2c)
+        r = s32(env.enums.get(c.p("m_ianimationenum", 0))) == s32(c.p("m_ianimationenumvalue", 0))
     elif kind == CRIT_EVENT:
         r = c.p("m_ianimationevent", 0) in env.events
     elif kind == CRIT_PLAY_TIME:
@@ -260,11 +595,7 @@ def criteria_met(c, env, page, entry):
     elif kind == CRIT_FORCE_ANIM:
         r = env.force_anim is not None
     elif kind == CRIT_ANY_OF:
-        r = (
-            any(criteria_met(k, env, page, entry) for k in c.kids(CLS_CRIT))
-            if c.kids(CLS_CRIT)
-            else False
-        )
+        r = any(criteria_met(k, env, page, entry) for k in c.kids(CLS_CRIT))
     elif kind == CRIT_ALL_OF:
         r = all(criteria_met(k, env, page, entry) for k in c.kids(CLS_CRIT))
     elif kind == CRIT_OVERLAY_PP:  # 7: top OVERLAY page playpos (09j)
@@ -278,9 +609,62 @@ def criteria_met(c, env, page, entry):
     return (not r) if c.p("m_tnot", False) else r
 
 
+def criteria_partial(c, enums):
+    """Three-valued AnimationCriteriaMet for a known subset of the enum
+    variables (`enums`: {variable: value}) and nothing else known: True / False
+    when the criterion is decided by them, None when it depends on anything
+    else (another variable, a value, an input, the page). Tested as on entry."""
+    if not c.p("enabled", True):
+        return True
+    kind = c.p("m_ianimationcriteria", 0) or 0
+    if kind in (CRIT_ANY_OF, CRIT_ALL_OF):
+        r = [criteria_partial(k, enums) for k in c.kids(CLS_CRIT)]
+        if kind == CRIT_ANY_OF:
+            v = True if True in r else (None if None in r else False)
+        else:
+            v = False if False in r else (None if None in r else True)
+        if v is None:
+            return None
+    elif kind == CRIT_ENUM and (c.p("m_ianimationenum", 0) or 0) in enums:
+        v = s32(enums[c.p("m_ianimationenum", 0) or 0]) == s32(c.p("m_ianimationenumvalue", 0))
+    else:
+        return None
+    return (not v) if c.p("m_tnot", False) else v
+
+
+def owned(node, classes):
+    """Nodes of class `classes` (a name or a tuple) that register with `node`:
+    filed directly under it or under untyped nodes (folders) of it. Criteria,
+    transitions, states and groups all look for their owner by walking up to the
+    nearest ancestor that has m_iAnimationSystemType (FindClosestRelevantParent
+    0x5aaf49, AddToClosestState 0x5ed6xx, AddToClass 0x5ed37a, AddToParentGroup),
+    so a folder's name is irrelevant ("Criterias", "Group Criteria",
+    "GroupTransistions", "TransitionStates", ... all ship)."""
+    if isinstance(classes, str):
+        classes = (classes,)
+    out = []
+    for c in node.children:
+        if c.cls in classes:
+            out.append(c)
+        elif not typed(c):
+            out.extend(owned(c, classes))
+    return out
+
+
+def members(group):
+    """m_estatesandgroupslist of a state group: the states and groups whose
+    nearest state-group ancestor it is. For the class root only its direct
+    children: how the engine picks the first state of a class is not read."""
+    if group.cls == CLS_CLASS:
+        return [k for k in group.children if k.cls in (CLS_STATE, CLS_GROUP)]
+    return owned(group, (CLS_STATE, CLS_GROUP))
+
+
 def _crit_nodes(node):
-    f = node.folder("Criterias")
-    return f.kids(CLS_CRIT) if f else node.kids(CLS_CRIT)
+    return owned(node, CLS_CRIT)
+
+
+criteria_of = _crit_nodes  # the criteria list of a state / group / transition
 
 
 def group_criteria_met(node, env, page, entry):
@@ -290,30 +674,280 @@ def group_criteria_met(node, env, page, entry):
 
 # ------------------------------------------------------- interpreter
 
+MAX_RATE = 6.599999904632568  # double @0xa45e90: playpos units per second (UpdatePagePlayPos)
+FADE_FLOOR = -0.009999999776482582  # double @0xa45e88: overlay fade-out floor
+
+# ANIMATION_EVENT_TYPES (registration 0x5e54e0): the "Trigger" of an event
+EV_PLAY_POS, EV_ENTER_STATE, EV_LEAVE_STATE, EV_TOTAL_PLAY_TIME = 0, 1, 2, 3
+
+
+def event_trigger(ev):
+    return int(ev.p("m_ieventtype", 0) or 0)
+
+
+def event_at(ev):
+    """m_nplaypos: a play position for PLAY_POS, SECONDS of play time for
+    TOTAL_PLAY_TIME, not read for ENTER_STATE / LEAVE_STATE."""
+    return float(ev.p("m_nplaypos", 0.0) or 0.0)
+
+
+def event_prelatched(ev, start):
+    """SetupNewPage 0x5b8f16-0x5b8f31: a PLAY_POS event whose position is <= the
+    play position the page starts at is created already fired; it fires only
+    after a loop wrap (never, on a non-looping state)."""
+    return event_trigger(ev) == EV_PLAY_POS and event_at(ev) <= start
+
+
+def event_due(ev, playpos, time_played):
+    """CheckPlayPosEvents 0x5b51f3: an unfired PLAY_POS event fires when its
+    position <= the page's play position (0x5b55c4), a TOTAL_PLAY_TIME event when
+    its seconds <= the page's time played (0x5b52c1). Both compare with <=."""
+    now = time_played if event_trigger(ev) == EV_TOTAL_PLAY_TIME else playpos
+    return event_at(ev) <= now
+
+
+def event_timing(kind, raw, duration=None, speed=1.0, start=0.0, loop=False):
+    """(playpos, clip_time_s, play_time_s) at which an event of trigger `kind`
+    and stored value `raw` first fires in a state entered at play position
+    `start` (TransitToState 0x5b4a31: the state's m_nstartplaypos unless the
+    transition says otherwise).
+
+    duration  seconds of the state's clip (None = unknown)
+    speed     the state's rate factor: its play position advances by
+              speed / duration per second of play time (slot speedFactor,
+              SetAllSlotBlends 0x5b5193; controller speed factors taken as 1)
+    loop      the state loops (m_tislooping)
+    clip_time_s is the position on the clip's own timeline (playpos * duration),
+    play_time_s the seconds since the state was entered (page +0x34).
+      ENTER_STATE      (start, start * duration, 0)
+      LEAVE_STATE      (None, None, None)
+      PLAY_POS at r    (r, r * duration, (r - start) * duration / speed).  When
+                       r <= start the event is created already fired
+                       (event_prelatched): on a looping state it fires after the
+                       wrap, (1 - start + r) * duration / speed; on a
+                       non-looping state never (play_time_s None)
+      TOTAL_PLAY_TIME  after t seconds: play position start + t * speed /
+                       duration (wrapped on a looping state, None when past the
+                       end of a non-looping one), play_time_s = t"""
+    speed = float(speed) if speed else 1.0
+    start = float(start or 0.0)
+    if kind == EV_ENTER_STATE:
+        return start, (start * duration if duration else None), 0.0
+    if kind == EV_LEAVE_STATE:
+        return None, None, None
+    if kind == EV_TOTAL_PLAY_TIME:
+        if not duration:  # no play position; the clip time only for a start at 0
+            return None, (raw * speed if start == 0.0 else None), raw
+        pp = start + raw * speed / duration
+        if pp > 1.0 + 1e-6:
+            if not loop:
+                return None, None, raw
+            pp = pp % 1.0 or 1.0
+        pp = min(pp, 1.0)
+        return pp, pp * duration, raw
+    clip_t = raw * duration if duration else None
+    if clip_t is None:
+        return raw, None, None
+    if raw > start:
+        return raw, clip_t, (raw - start) * duration / speed
+    if loop:  # pre-latched: fires once the next lap reaches it
+        return raw, clip_t, (1.0 - start + raw) * duration / speed
+    return raw, clip_t, None
+
+
+def _parent_group(node):
+    """m_eanimstategroup: the nearest state-group ancestor of a state / group
+    (AddToClass 0x5ed37a, AddToParentGroup), None when the class is reached
+    first. Folders in between do not matter."""
+    n = node.parent
+    while n is not None:
+        if n.cls == CLS_GROUP:
+            return n
+        if n.cls == CLS_CLASS:
+            return None
+        n = n.parent
+    return None
+
+
+def transition_criteria(t, target=None):
+    """m_ecriterialist of a transition as the engine holds it: its own criteria
+    plus, when the target is a STATE, that state's own criteria -- appended by
+    AnimationTransition.initialize_external 0x5f9b13 (this is what gates the
+    many criteria-less "trans to Dead" transitions)."""
+    out = list(_crit_nodes(t))
+    if target is not None and target.cls == CLS_STATE:
+        out.extend(c for c in _crit_nodes(target) if not any(c is x for x in out))
+    return out
+
+
+def chain_criteria_met(node, env, page, entry):
+    """StateGroupCriteriaMet 0x5c6002 with its recurse flag set: the owning
+    groups' criteria (outermost first) AND the node's own criteria list."""
+    g = _parent_group(node)
+    if g is not None and not chain_criteria_met(g, env, page, entry):
+        return False
+    return group_criteria_met(node, env, page, entry)
+
+
+def _top_blends(state):
+    """Blend nodes that registered themselves with the state (command_add_layer
+    0x5f773f), i.e. not nested inside another blend node."""
+    out = []
+    stack = list((state.folder("Layers") or state).children)
+    while stack:
+        n = stack.pop(0)
+        if n.cls == CLS_BLEND:
+            out.append(n)
+        elif n.cls not in (CLS_STATE, CLS_TRANS, CLS_SLOT):
+            stack[0:0] = n.children
+    return out
+
+
+def layer_lists(state):
+    """m_elayerlistlist: {layer index: [blend nodes]} (command_add_layer appends
+    each blend to the inner list numbered by its m_ilayerindex)."""
+    out = {}
+    for b in _top_blends(state):
+        out.setdefault(int(b.p("m_ilayerindex", 0) or 0), []).append(b)
+    return out
+
+
+def _own_events(node):
+    """Event nodes owned by `node` itself (not by a transition / nested state / blend)."""
+    out = []
+    stack = list(node.children)
+    while stack:
+        n = stack.pop(0)
+        if n.cls == CLS_EVENT:
+            out.append(n)
+        elif n.cls not in (CLS_STATE, CLS_TRANS, CLS_BLEND, CLS_GROUP):
+            stack[0:0] = n.children
+    return out
+
+
+def slot_speed(slot):
+    """AnimSlot `speedFactor` (native property, object +0x64): the per-slot
+    factor in the page rate (SetAllSlotBlends 0x5b5175-0x5b51c7)."""
+    v = slot.p("speedFactor", 1.0)
+    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else 1.0
+
+
+def state_speed(state, main_slot=None):
+    """(rate factor of a state, basis): the speedFactor of the slots of its
+    first layer.  When they differ (blend trees) the rate depends on the blend
+    weights; the value given is then that of `main_slot` (else the first slot)
+    and the basis says so.  (None, None) without slots."""
+    lists = layer_lists(state)
+    if not lists:
+        return None, None
+    slots = lists[min(lists)][0].kids(CLS_SLOT)
+    if not slots:
+        return None, None
+    speeds = [slot_speed(s) for s in slots]
+    if max(speeds) - min(speeds) < 1e-9:
+        return speeds[0], "slot speedFactor"
+    pick = next((i for i, s in enumerate(slots) if s is main_slot), 0)
+    return speeds[pick], "one slot's speedFactor (the first layer's slots differ in speed)"
+
+
+def _slot_duration(slot):
+    try:
+        return float(str(slot.p("m_sduration", "")).split()[0])
+    except (ValueError, IndexError):
+        return 0.0
+
+
+def _soft(state, env=None):
+    """Curve applies only with "Soft Blend To" and without AnimationData
+    "Force Linear Transitions" (UpdatePageBlendsFaster 0x5b4bd6)."""
+    return bool(state.p("m_tusesoftblend", False)) and not (env is not None and env.force_linear)
+
+
+def _curve(state, raw, env=None):
+    if raw <= 0.0:
+        return 0.0
+    if raw >= 1.0:
+        return 1.0
+    if not _soft(state, env):
+        return raw
+    return page_blend_curve(
+        raw, state.p("m_nblendpower", 1.0), state.p("m_nblendinitialpower", 1.0)
+    )
+
+
+def _inv_curve(state, value, env=None):
+    """Inverse of _curve (MathLib.InversePowerSmooth, used by SetupNewPage on re-entry)."""
+    if not _soft(state, env) or value <= 0.0 or value >= 1.0:
+        return min(1.0, max(0.0, value))
+    lo, hi = 0.0, 1.0
+    for _ in range(48):
+        mid = 0.5 * (lo + hi)
+        if _curve(state, mid, env) < value:
+            lo = mid
+        else:
+            hi = mid
+    return 0.5 * (lo + hi)
+
 
 class Page:
-    def __init__(self, state, ease_in, playpos):
+    """One entry of a page list (SetupNewPage 0x5b7788).
+
+    raw    linear blend, page+0x08 (advanced by dt/ease AFTER the frame's weights)
+    shown  the raw value the current frame's weights were built from
+    blend  curve(shown): what slot_weights() uses
+    rate   playpos units per second, page+0x14 (rebuilt every tick)
+    """
+
+    def __init__(self, state, ease_in, playpos, raw=None, sync=False, rng=None, env=None):
         self.state, self.ease_in = state, ease_in
         self.playpos, self.time_played = playpos, 0.0
         self.age, self.done = 0.0, False
         self.duration = _state_duration(state)
+        self.raw = (1.0 if ease_in <= 0.0 else 0.0) if raw is None else raw
+        self.shown = self.raw
+        self.sync, self.rate, self.env = bool(sync), 0.0, env
+        self.end_sent = False
+        # one blend node per layer list, picked at random (FUN_0047aa2e, rand % n)
+        self.layers = []
+        for idx, blends in sorted(layer_lists(state).items()):
+            pick = rng.randrange(len(blends)) if (rng is not None and len(blends) > 1) else 0
+            self.layers.append(blends[pick])
+        # PLAY_POS / TOTAL_PLAY_TIME entries {event, fired, pending} (ctrl+0x6c list)
+        self.events = []
+        for ev in self.event_nodes():
+            if event_trigger(ev) in (EV_PLAY_POS, EV_TOTAL_PLAY_TIME):
+                self.events.append([ev, event_prelatched(ev, playpos), False])
+
+    def event_nodes(self):
+        out = _own_events(self.state)
+        for b in self.layers:
+            out.extend(_own_events(b))
+        return out
 
     @property
     def blend(self):
-        if self.ease_in <= 0.0:
-            return 1.0
-        t = inv_lerp_clamped(self.age, 0.0, self.ease_in)
-        return page_blend_curve(
-            t, self.state.p("m_nblendpower", 1.0), self.state.p("m_nblendinitialpower", 1.0)
-        )
+        return _curve(self.state, self.shown, self.env)
 
     def slots(self):
         out = []
-        lay = self.state.folder("Layers") or self.state
-        for blend in lay.descend(CLS_BLEND):
-            for s in blend.kids(CLS_SLOT):
-                out.append((blend, s))
+        for top in self.layers:
+            for blend in [top] + top.descend(CLS_BLEND):
+                for s in blend.kids(CLS_SLOT):
+                    out.append((blend, s))
         return out
+
+    def slot_playpos(self, blend, slot):
+        """Play position handed to one slot (UpdatePagePlayPos 0x5b61b9):
+        m_noffset + playpos wrapped into 0..1; 1.0 for an additive blend with
+        "Force Playpos=1.0". A state m_eplayposmapper is not applied here."""
+        if blend.p("m_tlayeradditive", False) and blend.p("m_tforcedpos", False):
+            return 1.0
+        v = float(slot.p("m_noffset", 0.0) or 0.0) + self.playpos
+        while v > 1.0:
+            v -= 1.0
+        while v < 0.0:
+            v += 1.0
+        return v
 
 
 def _state_duration(state):
@@ -329,21 +963,45 @@ def _state_duration(state):
 
 
 def _trans_nodes(node):
-    f = node.folder("Transitions")
-    return f.kids(CLS_TRANS) if f else node.kids(CLS_TRANS)
+    return owned(node, CLS_TRANS)
+
+
+transitions_of = _trans_nodes  # the transition list of a state / group / class
+
+
+def state_events(state):
+    """Every event a page of `state` can fire: the state's own and those of all
+    its layer blend nodes (a page uses one blend node per layer list). Events
+    of the state's transitions are NOT included: they fire with the transition."""
+    out = _own_events(state)
+    for b in _top_blends(state):
+        out.extend(_own_events(b))
+    return out
 
 
 class Interpreter:
-    """Replicates state choice + slot start params (goal of task-3)."""
+    """Replicates state choice, page stacks, play position and blend weights.
 
-    def __init__(self, class_root, log=None):
+    seed / rng        the engine picks one blend node per layer list with rand % n;
+                      the choice is drawn from `rng` (default random.Random(seed)).
+    done_fallback     pre-v2 behaviour: also run the fallback step whenever the top
+                      page has finished, even if the state's criteria still hold
+                      (the engine only does so when they fail). Default False.
+    """
+
+    def __init__(self, class_root, log=None, seed=0, rng=None, done_fallback=False):
         self.root = class_root
         self.env = Env()
         self.pages = []  # body page stack (Update flag 0), newest last
         self.opages = []  # OVERLAY page stack (Update flag 1)
         self._act_overlay = False  # which stack the current pass evaluates
-        self.rr_index = {}  # group id -> round-robin cursor
+        self.rr_index = {}  # group node -> round-robin cursor
         self.log = log if log is not None else []
+        self.rng = rng if rng is not None else random.Random(seed)
+        self.done_fallback = done_fallback
+        self.stay = [0.0, 0.0]  # force-stay timer per stack (page list +0x14)
+        self.fired = []  # (event node, value) in firing order; cleared by the caller
+        self._dirty = False  # ctrl+0x2c: a page was set up / is still blending this frame
 
     def _cur(self):
         """Top page of the stack the current pass evaluates (criteria ctx)."""
@@ -352,11 +1010,11 @@ class Interpreter:
 
     # ---- engine: command_get_valid_state 0x5f076f
     def get_valid_state(self, group, entry=True):
-        kids = [k for k in group.children if k.cls in (CLS_STATE, CLS_GROUP)]
+        kids = members(group)
         if not kids:
             return None
         n = len(kids)
-        start = (self.rr_index.get(group.id, -1) + 1) % n
+        start = (self.rr_index.get(group, -1) + 1) % n
         for i in range(n):
             k = kids[(start + i) % n]
             if not k.p("enabled", True):
@@ -366,102 +1024,179 @@ class Interpreter:
             if k.cls == CLS_GROUP:
                 s = self.get_valid_state(k, entry)
                 if s is not None:
-                    self.rr_index[group.id] = (start + i) % n
+                    self.rr_index[group] = (start + i) % n
                     return s
             else:
-                self.rr_index[group.id] = (start + i) % n
+                self.rr_index[group] = (start + i) % n
                 return k
         return None
 
-    # ---- engine: GetValidStateGroupTransition 0x5c6140
-    def get_valid_transition(self, node, entry=False):
-        for t in _trans_nodes(node):
-            if not t.p("enabled", True):
-                continue
-            if not all(criteria_met(c, self.env, self._cur(), entry) for c in t.kids(CLS_CRIT)):
-                continue
-            target = self._resolve_target(t)
-            if target is None:
-                continue
-            if target.cls == CLS_GROUP:
-                if not group_criteria_met(target, self.env, self._cur(), entry):
-                    continue
-                s = self.get_valid_state(target, True)
-                if s is None:
-                    continue
-                return t, s
-            if not group_criteria_met(target, self.env, self._cur(), entry):
-                continue
-            return t, target
-        return None
+    # ---- engine: AnimationLib.TransitionMet 0x5c5ea4
+    def transition_met(self, t, target, entry=False):
+        if not t.p("enabled", True) or not target.p("enabled", True):
+            return False
+        win = sync_window(t)
+        if win is not None:  # super-sync gate: top playpos inside [min, max] local marker
+            cur = self._cur()
+            p = cur.playpos if cur else 0.0
+            if p < win[0] or p > win[1]:
+                return False
+        crits = transition_criteria(t, target)
+        return all(criteria_met(c, self.env, self._cur(), entry) for c in crits)
 
-    def _resolve_target(self, trans):
-        ref = trans.p("m_etostate")
-        if not isinstance(ref, dict):
-            return None
-        ids = ref.get("xref") or [ref.get("ref")]
-        byid = self._index()
-        for i in reversed(ids or []):
-            if i in byid:
-                return byid[i]
-        return None
-
-    def _index(self):
-        if not hasattr(self, "_byid"):
-            self._byid = {}
-            stack = [self.root]
-            while stack:
-                n = stack.pop()
-                self._byid[n.id] = n
-                stack.extend(n.children)
-        return self._byid
-
-    # ---- engine: TransitToState 0x5b4a31 + transition apply 09j
-    def transit(self, state, trans=None, overlay=False):
-        ease = state.p("m_neaseinduration", 0.0)
-        pp = state.p("m_nstartplaypos", 0.0)
-        cur = self._cur()
-        if trans is not None:
-            if trans.p("m_toverrideeasein", False):
-                ease = trans.p("m_neaseinduration", 0.0)
-            if trans.p("m_toverrideplaypos", False):
-                pp = trans.p("m_nplaypos", 0.0)
-            elif trans.p("m_tsupersyncpos", False) and cur:
-                pp = sync_remap(cur.playpos, trans)
-        stack = self.opages if overlay else self.pages
-        stack.append(Page(state, ease, pp))
-        if len(stack) > 8:
-            stack.pop(0)
-        self.log.append(
-            ("otransit" if overlay else "transit", state.name, round(ease, 4), round(pp, 4))
-        )
-
-    def _fallback(self, state):
-        """Fallback path (0x5c6140 tail): fallback-flagged transitions first,
-        then the state's m_efallbackstate / group default."""
-        for t in _trans_nodes(state):
-            if t.p("m_tfallback", False) and t.p("enabled", True):
+    # ---- engine: AnimationState.command_get_valid_transition 0x5f7873 +
+    # AnimationLib.GetValidStateGroupTransition 0x5c6140 (owning groups)
+    def get_valid_transition(self, node, entry=None, fallback=False):
+        """(transition, state) or None. `fallback` selects the pass: the normal
+        pass only sees non-fallback transitions, the fallback pass only
+        "Fallback transition?" ones (m_tfallback must equal the pass).
+        entry: test "entry only" criteria unconditionally; default = in the
+        normal pass only (EvaluateTransitions sets state +0x68 around it)."""
+        if entry is None:
+            entry = not fallback
+        tested = []  # _etestedstates: each target is tried once per evaluation
+        owner, first = node, True
+        while owner is not None:
+            for t in _trans_nodes(owner):
                 target = self._resolve_target(t)
                 if target is None:
                     continue
+                if not first and any(target is x for x in tested):
+                    continue
+                tested.append(target)
+                if bool(t.p("m_tfallback", False)) != bool(fallback):
+                    continue
+                if not self.transition_met(t, target, entry):
+                    continue
                 if target.cls == CLS_GROUP:
-                    s = self.get_valid_state(target, True)
-                    if s is not None:
-                        return t, s
-                else:
-                    return t, target
-        ref = state.p("m_efallbackstate")
-        if isinstance(ref, dict):
-            ids = ref.get("xref") or [ref.get("ref")]
-            byid = self._index()
-            for i in reversed(ids or []):
-                n = byid.get(i)
-                if n is not None and n.cls in (CLS_STATE, CLS_GROUP):
-                    if n.cls == CLS_GROUP:
-                        s = self.get_valid_state(n, True)
-                        return (None, s) if s is not None else None
-                    return None, n
+                    if not chain_criteria_met(target, self.env, self._cur(), entry):
+                        continue
+                    s = self.get_valid_state(target, entry)
+                    if s is None:
+                        continue
+                    return t, s
+                # state target: its own criteria are part of the transition's list
+                # (transition_criteria); here only its owning groups' are tested
+                g = _parent_group(target)
+                if g is not None and not chain_criteria_met(g, self.env, self._cur(), entry):
+                    continue
+                return t, target
+            owner, first = _parent_group(owner), False
         return None
+
+    def _resolve_target(self, trans):
+        return self._ref(trans, "m_etostate")
+
+    def _ref(self, node, key):
+        return resolve_ref(node, node.p(key), self._index())
+
+    def _index(self):
+        if not hasattr(self, "_byid"):
+            self._byid = node_index(self.root)
+        return self._byid
+
+    def _send(self, ev, value):
+        """SendAnimationEvent: recorded in self.fired and the log."""
+        self.fired.append((ev, value))
+        self.log.append(("event", ev.name, ev.p("m_ianimationevent"), round(value, 4)))
+
+    def _leave(self, page):
+        for ev in page.event_nodes():  # LEAVE_STATE events of the page being left
+            if int(ev.p("m_ieventtype", 0) or 0) == EV_LEAVE_STATE:
+                self._send(ev, 1.0)
+
+    # ---- engine: TransitToState 0x5b4a31 + SetupNewPage 0x5b7788
+    def transit(self, state, trans=None, overlay=False):
+        """Enter `state` (optionally through transition `trans`). Returns the new
+        Page, or None when the engine creates none."""
+        overlay = bool(overlay or state.p("m_toverridestate", False))
+        cur = self._cur()
+        ease_arg = -1.0
+        if trans is not None and trans.p("m_toverrideeasein", False):
+            ease_arg = float(trans.p("m_neaseinduration", 0.0) or 0.0)
+        body_top = self.pages[-1] if (self.pages and not overlay) else None
+        start, sync, _rule = start_playpos(
+            state,
+            trans,
+            body_top.state if body_top is not None else None,
+            cur.playpos if cur else 0.0,
+        )
+        return self._setup_page(state, start, sync, ease_arg, overlay)
+
+    def _setup_page(self, state, start, sync, ease_arg, overlay):
+        stack = self.opages if overlay else self.pages
+        multi = bool(state.p("m_tallowmultipleinstances", False))
+        if stack and stack[-1].state is state and not multi:
+            return None  # already on top and not "Allow more than once"
+        if overlay:
+            if self.pages and self.pages[-1].state.p("m_tdisallowoverridelayers", False):
+                return None
+        if stack:
+            self._leave(stack[-1])
+        self.stay[1 if overlay else 0] = float(state.p("m_nforcestaytime", 0.0) or 0.0)
+        raw0, found = 0.0, False
+        if not overlay and not multi:
+            for i, pg in enumerate(stack):  # re-entry of a state lower in the stack
+                if pg.state is not state:
+                    continue
+                found = True
+                w = pg.blend
+                for above in stack[i + 1 :]:
+                    w *= 1.0 - above.blend
+                if state.p("m_tiswalkcycle", False):
+                    start = pg.playpos
+                if w < 1.0:
+                    s = 1.0 / (1.0 - w)
+                    for above in reversed(stack[i + 1 :]):
+                        b = above.blend
+                        above.raw = _inv_curve(above.state, min(1.0, b * s), self.env)
+                        above.shown = above.raw
+                        if above.raw >= 1.0 or (1.0 - b) > 0.9998999834060669:
+                            s = 1.0
+                        else:
+                            s = min(1.0, ((1.0 - b) * s) / b) if b > 0.0 else 1.0
+                    del stack[i]
+                raw0 = _inv_curve(state, w, self.env)
+                break
+        state_ease = float(state.p("m_neaseinduration", 0.0) or 0.0)
+        has_prev = bool(stack) or bool(state.p("m_toverridestate", False))
+        if state_ease <= 0.0 or not has_prev or ease_arg == 0.0:
+            raw, ease = 1.0, 0.0  # instant: the transition's ease override is ignored
+        else:
+            raw = raw0 if found else 0.0
+            ease = ease_arg if ease_arg > 0.0 else state_ease
+        page = Page(state, ease, start, raw=raw, sync=sync, rng=self.rng, env=self.env)
+        stack.append(page)
+        self._dirty = True
+        for ev in page.event_nodes():  # ENTER_STATE events fire at page setup
+            if int(ev.p("m_ieventtype", 0) or 0) == EV_ENTER_STATE:
+                self._send(ev, 0.0)
+        self.log.append(
+            ("otransit" if overlay else "transit", state.name, round(ease, 4), round(start, 4))
+        )
+        return page
+
+    # ---- engine: AnimationState.command_get_fallback_state 0x5f7c4e
+    def _fallback_state(self, state):
+        n = self._ref(state, "m_efallbackstate")
+        if n is None and not state.p("m_toverridestate", False):
+            n = self._ref(self.root, "m_edefaultanimstate")
+        if n is not None and n.cls == CLS_GROUP:
+            n = self.get_valid_state(n, False)
+        if n is None:
+            n = self._ref(self.root, "m_esafetyfallbackanimstate")
+            if n is not None and n.cls == CLS_GROUP:
+                n = self.get_valid_state(n, False)
+        return n if (n is not None and n.cls == CLS_STATE) else None
+
+    def _fallback(self, state):
+        """Fallback pass of EvaluateTransitions: fallback transitions, then the
+        fallback / class default / class safety state. (transition, state) or None."""
+        hit = self.get_valid_transition(state, fallback=True)
+        if hit is not None:
+            return hit
+        n = self._fallback_state(state)
+        return (None, n) if n is not None else None
 
     @property
     def page(self):
@@ -473,8 +1208,19 @@ class Interpreter:
 
     # ---- engine: EvaluateTransitions 0x5cbbc2, empty-overlay-stack branch
     def _overlay_candidates(self):
-        f = self.root.folder("OverlayStates")
-        return [c for c in (f.children if f else []) if c.cls in (CLS_STATE, CLS_GROUP)]
+        """The class's override list (command_add_state 0x5a03a8): for every
+        "Override State" in tree order its outermost state group, or the state
+        itself when no group owns it; each once."""
+        out = []
+        for st in walk(self.root):
+            if st.cls != CLS_STATE or not st.p("m_toverridestate", False):
+                continue
+            top, g = st, _parent_group(st)
+            while g is not None:
+                top, g = g, _parent_group(g)
+            if not any(top is x for x in out):
+                out.append(top)
+        return out
 
     def _try_overlay_entry(self):
         if not self.env.allow_overlays:  # AllowOverlayTransitions 0x5aa33d
@@ -500,50 +1246,175 @@ class Interpreter:
             self.transit(s, None)
         return s
 
+    # ---- engine: EvaluateTransitions 0x5cbbc2, non-empty stack. True = a
+    # transition is wanted but held back by the force-stay timer.
+    def _evaluate(self, pages, overlay):
+        top = pages[-1]
+        state = top.state
+        if not self._dirty and state.p("m_tnotransitiontests", False) and top.playpos < 1.0:
+            return False  # "No Transition Tests": nothing until the clip has ended
+        idx = 1 if overlay else 0
+        hit = self.get_valid_transition(state)
+        if hit is not None:
+            if hit[1] is state and not state.p("m_tallowmultipleinstances", False):
+                return False
+            if self.stay[idx] > 0.0:
+                return True
+            self.transit(hit[1], hit[0], overlay=overlay)
+            for ev in _own_events(hit[0]):  # the transition's own event list
+                self._send(ev, 1.0)
+            return False
+        g = _parent_group(state)
+        stays = (g is None or chain_criteria_met(g, self.env, top, False)) and (
+            group_criteria_met(state, self.env, top, False)
+        )
+        if stays and not (self.done_fallback and top.done):
+            return False
+        if self.stay[idx] > 0.0:
+            return True
+        fb = self._fallback(state)
+        if fb is not None:
+            self.transit(fb[1], fb[0], overlay=overlay)
+        return False
+
+    # ---- engine: UpdatePageBlendsFaster 0x5b4bd6 + SetAllSlotBlends 0x5b4ef7
+    def _page_rate(self, pg):
+        """speed * sum(weight * slot speedFactor / duration) over the slots of the
+        page's FIRST layer."""
+        if not pg.layers:
+            return self.env.speed / pg.duration if pg.duration > 0 else 0.0
+        blend = pg.layers[0]
+        lw = self._layer_weight(blend)
+        if lw <= 0.0:
+            return 0.0  # layer weight 0: SetAllSlotBlends is not called
+        slots = blend.kids(CLS_SLOT)
+        durs = [_slot_duration(s) for s in slots]
+        rate = 0.0
+        if blend.p("m_iblendctrlparam") and len(slots) > 1:
+            posw = self._slot_pos_weights(blend, slots)
+            for i, d in enumerate(durs):
+                if d > 0.0:
+                    rate += posw[i] * slot_speed(slots[i]) / d
+        else:  # weights of an uncontrolled multi-slot blend are not established
+            first = [(d, slot_speed(s)) for d, s in zip(durs, slots) if d > 0.0]
+            d, sp = first[0] if first else (pg.duration, 1.0)
+            rate = sp / d if d > 0 else 0.0
+        return self.env.speed * lw * rate
+
+    # ---- engine: SynchronizePages 0x5ac387
+    @staticmethod
+    def _synchronize(pages):
+        i = len(pages) - 1
+        while i > 0:
+            if not pages[i].sync:
+                i -= 1
+                continue
+            period, rem, j = 0.0, 1.0, i
+            ok = True
+            while True:
+                last = j == 0 or not pages[j].sync
+                w = rem if last else pages[j].raw * rem
+                if pages[j].rate <= 0.0:
+                    ok = False
+                else:
+                    period += w / pages[j].rate
+                rem -= w
+                if last:
+                    break
+                j -= 1
+            if ok and period > 0.0:
+                for k in range(j, i + 1):
+                    pages[k].rate = 1.0 / period
+            i = j - 1
+
+    # ---- engine: CheckPlayPosEvents 0x5b51f3 (normal play)
+    def _check_events(self, pg):
+        for ent in pg.events:
+            ev, fired, pending = ent
+            if not fired and event_due(ev, pg.playpos, pg.time_played):  # latch
+                self._send(ev, pg.blend)
+                ent[1] = True
+            if pending:  # skipped by a loop wrap: fires on the next check
+                self._send(ev, pg.blend)
+                ent[2] = False
+
     # ---- engine: StateMain 0x5b417b = Update(0, body) then Update(1, overlay);
-    # Update 0x5b4613 order: EvaluateTransitions FIRST (last frame's playpos),
-    # page blends, DeleteOldPages, then UpdatePagePlayPos advances.
+    # Update 0x5b4613 order: EvaluateTransitions (last frame's playpos), force-stay
+    # timer, page weights, DeleteOldPages, SynchronizePages, UpdatePagePlayPos.
     def tick(self, dt):
+        self._dirty = bool(self.env.force_update)
         for overlay in (False, True):
             self._act_overlay = overlay
             pages = self.opages if overlay else self.pages
+            idx = 1 if overlay else 0
             self.env.overlay_page = self.opages[-1] if self.opages else None
-            # EvaluateTransitions 0x5cbbc2
+            wanted = False
             if not pages:
                 if overlay:
                     self._try_overlay_entry()
             else:
-                top = pages[-1]
-                if not top.state.p("m_tnotransitiontests", False):
-                    hit, node = None, top.state
-                    while hit is None and node is not None:  # state, ancestors
-                        hit = self.get_valid_transition(node)
-                        node = node.parent if node.cls in (CLS_STATE, CLS_GROUP) else None
-                    if hit is None and top.done:
-                        hit = self._fallback(top.state)
-                    if hit is not None:
-                        if 0.0 < top.age < top.ease_in:
-                            pass  # defer: crossfade running (0x5cbbc2 out=1)
-                        else:
-                            self.transit(hit[1], hit[0], overlay=overlay)
-            # UpdatePagePlayPos 0x5b56a9 (after evaluation)
+                wanted = self._evaluate(pages, overlay)
+            self.stay[idx] = (self.stay[idx] - dt) if wanted else 0.0
+            # weights of this frame are built from the blend BEFORE it advances
             for pg in pages:
-                pg.age += dt
-                pg.time_played += dt
-                if pg.duration > 0:
-                    pg.playpos += dt / pg.duration
-                if pg.playpos >= 1.0:
-                    if pg.state.p("m_tislooping", False):
-                        pg.playpos %= 1.0
-                    else:
-                        pg.playpos, pg.done = 1.0, True
-            # DeleteOldPages 0x5b9e4c: drop pages occluded by a fully
-            # blended-in page above them
+                pg.shown = pg.raw
+                pg.rate = self._page_rate(pg)
+            # DeleteOldPages 0x5b9e4c: pages under the highest fully blended page,
+            # and pages faded below 0
             i = len(pages) - 1
-            while i > 0 and pages[i].blend < 1.0:
+            while i > 0 and pages[i].raw < 1.0:
                 i -= 1
             if i > 0:
                 del pages[:i]
+            pages[:] = [pg for pg in pages if pg.raw >= 0.0]
+            self._synchronize(pages)
+            # UpdatePagePlayPos 0x5b56a9
+            body_top = self.pages[-1] if self.pages else None
+            forced_out = overlay and (
+                self.env.no_override_layer
+                or (body_top is not None and body_top.state.p("m_tdisallowoverridelayers", False))
+            )
+            for pg in pages:
+                top = pg is pages[-1]
+                looping = bool(pg.state.p("m_tislooping", False))
+                pg.age += dt
+                pg.time_played += dt
+                pg.playpos += min(pg.rate, MAX_RATE) * dt
+                if pg.playpos > 1.0:
+                    if looping:
+                        if top:  # unfired PLAY_POS events fire late, flags reset
+                            for ent in pg.events:
+                                if int(ent[0].p("m_ieventtype", 0) or 0) == EV_PLAY_POS:
+                                    if not ent[1]:
+                                        ent[2] = True
+                                    ent[1] = False
+                        while pg.playpos > 1.0:
+                            pg.playpos -= 1.0
+                    else:
+                        pg.playpos = 1.0
+                        if top and overlay and not pg.end_sent:
+                            self._leave(pg)
+                        if top:
+                            pg.end_sent = True
+                if not looping and pg.playpos >= 1.0:
+                    pg.done = True
+                if top:
+                    self._check_events(pg)
+                # page blend (tail of UpdatePagePlayPos)
+                if pg.raw < 1.0:
+                    self._dirty = True
+                if forced_out:
+                    pg.raw = 0.0 if pg.ease_in <= 0.0 else pg.raw - dt / pg.ease_in
+                elif overlay and top and not looping and pg.playpos >= 1.0:
+                    if pg.ease_in > 0.0:
+                        pg.raw = max(pg.raw - dt / pg.ease_in, FADE_FLOOR)
+                    else:
+                        pg.raw = 1.0
+                elif pg.raw < 1.0 and pg.ease_in > 0.0:
+                    pg.raw += dt / pg.ease_in
+                else:
+                    pg.raw = 1.0
+                pg.raw = min(pg.raw, 1.0)
         self._act_overlay = False
         self.env.events.clear()  # one-frame events (ClearOneFrameEvents)
 
@@ -639,6 +1510,7 @@ def main():
     ap.add_argument("--list", action="store_true", help="dump groups/states/transitions and exit")
     ap.add_argument("--ticks", type=int, default=120)
     ap.add_argument("--dt", type=float, default=1 / 30)
+    ap.add_argument("--seed", type=int, default=0, help="seed of the layer-variant choice")
     ap.add_argument("--enum", action="append", default=[], help="idx=value criteria enum input")
     ap.add_argument(
         "--value",
@@ -661,7 +1533,7 @@ def main():
 
         walk(root)
         return
-    it = Interpreter(root)
+    it = Interpreter(root, seed=args.seed)
     for spec in args.enum:
         k, v = spec.split("=")
         it.env.enums[int(k)] = int(v)

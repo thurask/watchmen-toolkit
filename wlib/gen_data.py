@@ -4,14 +4,20 @@
 Provenance of the data files shipped in wlib/ (see docs/INDEX.md):
 
   prop_hash_dict.pkl       hash -> name dictionary for the Kapow property hash
-                           (bit-CRC32/0x04C11DB7 over the UPPERCASE name).
+                           (kapow_props.name_hash: bit-CRC32/0x04C11DB7 over
+                           the name's bytes & 0xDF, engine FUN_00423ce8).
                            Source: string harvest over the game EXE + all naz
                            block payloads.  FULLY regenerable de novo — the
                            string sections (.rdata/.data) are identical even in
                            the DRM-packed retail KapowMulti.exe.
-  reg_dump.json            441 engine classes (props/commands/defaults/UI
-                           captions), recovered by scanning registration call
-                           sites in the executable's CODE.  Regenerable with
+  reg_dump.json            441 engine classes (5,090 property and 6,630 command
+                           registrations with defaults/UI captions/handler
+                           slots; format "kapow-reg-dump/2"), recovered by a
+                           register-tracking sweep of the registration
+                           functions in the executable's CODE.  Property names
+                           and command signatures are merged from
+                           kapow_fragment_keys.pkl / command_signatures.json
+                           (each verified by re-hashing).  Regenerable with
                            `gen_data regdump`, but ONLY from an executable whose
                            .text is not encrypted (retail .text is SecuROM-
                            packed in place; this toolkit does not unpack it) and
@@ -52,7 +58,9 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.append(_HERE)  # append, never insert(0): flat module names must not shadow the stdlib
 
-from kapow_props import kapow_hash
+from kapow_props import kapow_hash, name_hash
+
+_REEXPORTED = (kapow_hash,)  # gen_data.kapow_hash stays importable for older callers
 
 
 # ---- PE helpers -------------------------------------------------------------
@@ -182,7 +190,7 @@ def build_prop_dict(exe_path, sources=()):
             toks |= _tokens(s)
     out = {}
     for s in sorted(strs | toks, key=_name_rank):
-        out.setdefault(kapow_hash(s.upper()), s)
+        out.setdefault(name_hash(s), s)
     return out
 
 
@@ -190,10 +198,135 @@ def build_prop_dict(exe_path, sources=()):
 # Registration-function VAs for the ONE build this was reversed against.  A
 # different executable will have different addresses and produce garbage, so the
 # recovered class count is sanity-checked in build_reg_dump before returning.
+#   CREATE 0x47e126 (name, classId, nativeBase, scriptParent|0, flag, flag)
+#   PROP   0x47fde4 (hash, defaultVA|0, uiVA, flags, classTypeIdx)
+#   CMD    0x47eccc (name, kind, arg3, hash|-1, cmdHandler, stateHandler,
+#                    methodHandler, classTypeIdx)   -> record +0x10.. (FUN_0047eccc)
 CREATE, PROP, CMD = 0x47E126, 0x47FDE4, 0x47ECCC
+SEH_PROLOG = 0x991850  # every registration function starts `mov eax,imm; call 0x991850`
+REG_DUMP_FORMAT = "kapow-reg-dump/2"
+SLOTS = ("command", "state", "method")  # which of CMD args 5/6/7 holds the code pointer
+_SIG_PATH = os.path.join(_HERE, "command_signatures.json")
+_REGS = ("eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi")
 
 
-def build_reg_dump(exe_path):
+def load_command_signatures(path=None):
+    """{hash:int -> hashed string} for commands whose hash is NOT the bare name:
+    ``name(type,type,...)`` (lowercase type names, no spaces, no return type).
+    The strings are research output (not present in the exe); every entry is
+    verified against its hash here, so a corrupted table cannot inject names."""
+    try:
+        with open(path or _SIG_PATH, encoding="utf-8") as fh:
+            raw = json.load(fh)
+    except OSError:
+        return {}
+    out = {}
+    for k, v in raw.get("signatures", {}).items():
+        h = int(k, 16)
+        if name_hash(v) == h:
+            out[h] = v
+    return out
+
+
+def _key_names():
+    """{hash -> name} from the shipped fragment key table (verified by re-hash)."""
+    out = {}
+    try:
+        with open(os.path.join(_HERE, "kapow_fragment_keys.pkl"), "rb") as fh:
+            kd = pickle.load(fh)
+    except (OSError, pickle.UnpicklingError, EOFError, ValueError):
+        return out
+    for tab in ("nameable", "stdkeys", "promoted", "keytable"):  # keytable wins
+        for h, v in kd.get(tab, {}).items():
+            n = v[0] if isinstance(v, (tuple, list)) else v
+            if name_hash(n) == h:
+                out[h] = n
+    return out
+
+
+def _cstr(d, off, maxlen=4096):
+    """NUL-terminated printable-ASCII string at file offset (any length >= 0), else None."""
+    e = d.find(b"\0", off, off + maxlen)
+    if e < 0:
+        return None
+    s = d[off:e]
+    if any(c < 0x20 or c > 0x7E for c in s):
+        return None
+    return s.decode("latin1")
+
+
+def sweep_call_args(md, code, base, start, end, wanted):
+    """Linear sweep of code[start-base:end-base] tracking pushes and constant
+    registers; returns {call_va: [arg1, arg2, ...]} for every call VA in `wanted`
+    (args in call order: last push first).  An arg is an int when it is an
+    immediate or a register whose constant value is known (`xor r,r`,
+    `or r,-1`, `mov r,imm`, `push imm; pop r`), else the operand text."""
+    regs, stack, out = {}, [], {}
+    off = start
+    while off < end:
+        ins = next(md.disasm(code[off - base : off - base + 16], off), None)
+        if ins is None:
+            off += 1
+            regs, stack = {}, []
+            continue
+        m, o = ins.mnemonic, ins.op_str
+        if m == "push":
+            try:
+                v = int(o, 0) & 0xFFFFFFFF
+            except ValueError:
+                v = regs.get(o, o)
+            stack.append(v)
+        elif m == "pop":
+            v = stack.pop() if stack else None
+            if o in _REGS:
+                if isinstance(v, int):
+                    regs[o] = v
+                else:
+                    regs.pop(o, None)
+        elif m == "call":
+            if ins.address in wanted:
+                out[ins.address] = list(reversed(stack))
+            stack = []
+            for r in ("eax", "ecx", "edx"):  # caller-saved
+                regs.pop(r, None)
+        elif m in ("jmp", "ret", "retn"):
+            stack = []
+        else:
+            ops = o.split(", ")
+            dst = ops[0]
+            if dst in _REGS:
+                two = len(ops) == 2
+                if m == "xor" and two and ops[1] == dst:
+                    regs[dst] = 0
+                elif m == "or" and two and ops[1] in ("0xffffffff", "-1"):
+                    regs[dst] = 0xFFFFFFFF
+                elif m == "and" and two and ops[1] == "0":
+                    regs[dst] = 0
+                elif m == "mov" and two:
+                    try:
+                        regs[dst] = int(ops[1], 0) & 0xFFFFFFFF
+                    except ValueError:
+                        if ops[1] in regs:
+                            regs[dst] = regs[ops[1]]
+                        else:
+                            regs.pop(dst, None)
+                elif m in ("inc", "dec") and dst in regs:
+                    regs[dst] = (regs[dst] + (1 if m == "inc" else -1)) & 0xFFFFFFFF
+                elif m not in ("cmp", "test"):
+                    regs.pop(dst, None)
+        off = ins.address + ins.size
+    return out
+
+
+def build_reg_dump(exe_path, signatures=None, key_names=None):
+    """Registration table (format "kapow-reg-dump/2"): list of class dicts
+      {va, name, classId, native_base, parent, base, props[], commands[]}
+      prop    {va, hash, name, default, ui, flags, typeidx}
+      command {va, name, hash, handler, slot, kind, arg3, typeidx, signature}
+    `signatures` / `key_names` default to the shipped tables; names and
+    signatures are only attached when name_hash(string) == hash."""
+    import bisect
+
     import capstone
 
     d = open(exe_path, "rb").read()
@@ -204,100 +337,116 @@ def build_reg_dump(exe_path):
             "provides such a binary nor assists in producing one. The other tables "
             "(prop_hash_dict, kapow_fragment_keys) do not need it." % exe_path
         )
-    secs = {s[0]: s for s in pe_sections(d)}
-    _, tva, _, traw, tsz = secs[".text"]
-    strings = exe_string_map(d)
-    off2va = lambda o: o - traw + tva if traw <= o < traw + tsz else None
-    va2off = lambda v: v - tva + traw
+    secs = pe_sections(d)
+    _, tva, _, traw, tsz = {s[0]: s for s in secs}[".text"]
+    code = d[traw : traw + tsz]
     md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
-    md.skipdata = True
+    if signatures is None:
+        signatures = load_command_signatures()
+    if key_names is None:
+        key_names = _key_names()
+
+    def va2off(va):
+        for _nm, sva, vsz, ro, rsz in secs:
+            if sva <= va < sva + min(vsz, rsz):
+                return va - sva + ro
+        return None
+
+    def sva(x):  # string at a data VA (any length; "" stays "")
+        if not isinstance(x, int) or not (tva + tsz <= x):
+            return None
+        off = va2off(x)
+        return None if off is None else _cstr(d, off)
 
     def call_sites(target):
-        out, i, end = [], traw, traw + tsz - 5
+        out, i = [], 0
         while True:
-            i = d.find(b"\xe8", i, end)
-            if i == -1:
+            i = code.find(b"\xe8", i)
+            if i == -1 or i + 5 > len(code):
                 break
-            rel = struct.unpack_from("<i", d, i + 1)[0]
-            va = off2va(i)
-            if va and va + 5 + rel == target:
-                out.append(va)
+            if tva + i + 5 + struct.unpack_from("<i", code, i + 1)[0] == target:
+                out.append(tva + i)
             i += 1
         return out
 
-    def pushes_before(site_va, window=120):
-        lo = site_va - window
-        for start in range(lo, site_va):
-            insns, ok = [], False
-            for i in md.disasm(d[va2off(start) : va2off(site_va) + 5], start):
-                if i.address == site_va and i.mnemonic == "call":
-                    ok = True
-                    break
-                insns.append(i)
-            if ok and insns:
-                out = []
-                for i in insns:
-                    if i.mnemonic == "push":
-                        t = i.op_str
-                        out.append(
-                            int(t, 16)
-                            if t.startswith("0x")
-                            else (int(t) if t.lstrip("-").isdigit() else t)
-                        )
-                    elif i.mnemonic in ("call", "jmp", "ret"):
-                        out = []  # pushes consumed by an earlier call
-                return out
-        return []
-
     sites = []
     for kind, tgt in (("create", CREATE), ("prop", PROP), ("cmd", CMD)):
-        for va in call_sites(tgt):
-            sites.append((va, kind))
+        sites += [(va, kind) for va in call_sites(tgt)]
     sites.sort()
+    # function starts = SEH prologues (`b8 imm32` immediately before the call)
+    starts = sorted(va - 5 for va in call_sites(SEH_PROLOG) if code[va - tva - 5] == 0xB8)
+    byfn = {}
+    for va, _k in sites:
+        i = bisect.bisect_right(starts, va) - 1
+        if i >= 0:
+            byfn.setdefault(starts[i], []).append(va)
+    args = {}
+    for fn, vas in byfn.items():
+        args.update(sweep_call_args(md, code, tva, fn, max(vas) + 5, set(vas)))
+
+    def isint(x):
+        return isinstance(x, int)
+
     classes, cur = [], None
     for va, kind in sites:
-        imms = [x for x in pushes_before(va) if isinstance(x, int)]
-        sva = strings.get
+        a = args.get(va, [])
         if kind == "create":
-            name = next((sva(x) for x in reversed(imms) if sva(x)), None)
-            others = [sva(x) for x in imms if sva(x)]
-            base = others[0] if len(others) > 1 and others[0] != name else None
-            cid = next((x for x in imms if 0 < x < 0x1000), None)
+            a = a + [None] * (6 - len(a))
+            native, parent = sva(a[2]), sva(a[3])
             cur = {
                 "va": hex(va),
-                "name": name,
-                "base": base,
-                "classId": cid,
+                "name": sva(a[0]),
+                "classId": a[1] if isint(a[1]) else None,
+                "native_base": native,
+                "parent": parent,
+                # legacy key: script parent if any, else a non-Node native base
+                "base": parent or (native if native != "Node" else None),
                 "props": [],
                 "commands": [],
             }
             classes.append(cur)
-        elif kind == "prop" and cur is not None:
-            if len(imms) >= 2:
-                h = imms[-1]
-                dflt = sva(imms[-2])
-                ui = next((sva(x) for x in imms if sva(x) and "caption" in sva(x)), None)
-                if ui is None and len(imms) >= 3:
-                    ui = sva(imms[-3])
-                cur["props"].append({"va": hex(va), "hash": hex(h), "default": dflt, "ui": ui})
-        elif kind == "cmd" and cur is not None:
-            name = next((sva(x) for x in imms if sva(x)), None)
-            handler = hsh = None
-            for x in imms:
-                if 0x401000 <= x < 0x9E5000 and sva(x) is None:
-                    handler = x
+        elif cur is None or len(a) < (5 if kind == "prop" else 8):
+            continue
+        elif kind == "prop":
+            if not isint(a[0]):
+                continue
+            cur["props"].append(
+                {
+                    "va": hex(va),
+                    "hash": hex(a[0]),
+                    "name": key_names.get(a[0]),
+                    "default": sva(a[1]),  # None when 0 is passed (no default)
+                    "ui": sva(a[2]) or None,  # "" -> None: not exposed in the editor
+                    "flags": a[3] if isint(a[3]) else None,
+                    "typeidx": a[4] if isint(a[4]) else None,
+                }
+            )
+        else:
+            name = sva(a[0])
+            hsh = a[3] if isint(a[3]) and a[3] != 0xFFFFFFFF else None
+            slot = handler = None
+            for i in range(3):
+                x = a[4 + i]
+                if isint(x) and tva <= x < tva + tsz:
+                    slot, handler = SLOTS[i], x
                     break
-            cands = [x for x in imms if x > 0x1000000 and x != handler and sva(x) is None]
-            if cands:
-                hsh = cands[0]
-            argc = next((x for x in imms if 0 <= x < 16), None)
+            sig = None
+            if hsh is not None and name is not None:
+                if name_hash(name) == hsh:
+                    sig = name
+                elif signatures.get(hsh, "").startswith(name + "("):
+                    sig = signatures[hsh]
             cur["commands"].append(
                 {
                     "va": hex(va),
                     "name": name,
-                    "hash": hex(hsh) if hsh else None,
-                    "handler": hex(handler) if handler else None,
-                    "argc": argc,
+                    "hash": hex(hsh) if hsh is not None else None,
+                    "handler": hex(handler) if handler is not None else None,
+                    "slot": slot,
+                    "kind": a[1] if isint(a[1]) else None,
+                    "arg3": (a[2] if a[2] != 0xFFFFFFFF else -1) if isint(a[2]) else None,
+                    "typeidx": a[7] if isint(a[7]) else None,
+                    "signature": sig,
                 }
             )
     if len(classes) < 50:
@@ -318,6 +467,7 @@ def derive_prop_names(reg):
             if p["hash"] not in out:  # first registration wins (incl. its Nones)
                 out[p["hash"]] = {
                     "classes": [],
+                    "name": p.get("name"),
                     "ui": p.get("ui"),
                     "default": p.get("default"),
                 }

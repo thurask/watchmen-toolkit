@@ -6,36 +6,36 @@ AR(2) params (jiggle_params.npz) with pure file-side data:
   spring/damping/limit : GameEssentials.fragment PhysicsWorld node
                          (m_n{breast,belly,hair}springconstant/springdamping/
                           distancelimit) + gravity + physicsIntegrationRateInHz.
-  geometry             : bind npz (anchor = parentFrame . tb[bone]; lever r = tb).
+  geometry             : bind npz (pivot = parent bone origin; lever = tloc[bone]).
 
-Engine model (decomp 2026-07-09c + 2026-07-12 session, ENGINE_CONSTANTS.md):
-  - Per jiggle bone a 0.1^3 MockupBox rigid body (RigidBody::SetMass=0x4fe514,
-    called with 0.1 in setup FUN_006574cd) hangs off the parent bone via an
-    NxD6Joint: translation locked -> angular pendulum about the parent anchor
-    at radius |tb|; swing soft-limits carry the spring (Swing1LimitValue=45deg
-    is never reached under the distance clamp -- breast asin(0.08/0.346)=13.4
-    deg -- so the always-engaged (Swing2LimitValue=0) restoring spring
-    dominates and the pendulum is integrated isotropically).
-  - Gravity: PhysicsWorld ctor default (0,-9.82,0) @0xa26418, OVERRIDDEN by
-    GameEssentials.fragment to (0,-14.82,0).  World -Y.
-  - Sim tick: physicsIntegrationRateInHz (60), semi-implicit Euler.
-  - Effective dynamics (capture-fit AR(2) cross-check): x'' = -K x - D x' +
-    r x f - alpha_parent, K = k_file (fit 166-170 vs 200), D = 2*d_file*
-    sqrt(K) (fit 17.9-19.4 vs 22.6).  The r x f (NOT (rhat x f)/|r|) coupling
-    is pinned by the fitted C force-block magnitude ~|r|~0.35 and matches the
-    engine RigidBody's unit-inertia-tensor space (GetUnitInertiaTensorMSG);
-    the fitted C alpha-block diagonal ~ -1 pins the -alpha_parent term.
-  - GAME-side clamp (CharacterAddonCtrl update FUN_006563a0, per-record ebx):
-    delta = bodyPos-anchor [+0x60], len [+0x6c] vs limit [ebx+4]; if over,
-    t = limit/len [+0x70], pos = anchor + delta*t AND quat = slerp(anchorQ,
-    bodyQ, t) via FUN_0041fd54 (verified slerp).  In reduced rotvec state
-    both collapse to x *= t.  Replaces jiggle_pass's tanh soft clamp.
+Two models, selected with apply_jiggle(..., model=):
 
-Damping-domain note: NxJointLimitSoftDesc damping (0.8) is written torque-
-domain in the desc, but the capture-fit response shows the solver's emergent
-behaviour is k acceleration-domain with damping acting as a ratio zeta ~
-d_file.  Both hypotheses are implemented; 'ratio' is the default and the QA
-comparison against captured palettes supports it.
+'pivot' (opt-in, 2026-10; exe re-read + capture re-measurement; the default is
+'pinned', described further down):
+  - Setup 0x6574cd: per addon (Spine2->BreastL/R, Spine->JiggleBelly, Head->Hair)
+    a kinematic 0.1 m anchor box on the PARENT bone and a dynamic 0.8 m box of
+    mass 0.1 on the jiggle bone; RigidBody ctor 0x4fe311 leaves angular damping
+    1.0 and 4 solver iterations.  The D6 joint (0x648858) lives in the anchor
+    box's frame = parent bone frame: X/Y/Z translation and twist (about X)
+    locked, swing about Y/Z on soft limits (spring k, damping d verbatim).
+  - Update 0x6563a0: the body pose relative to the anchor box REPLACES the
+    bone's local position and rotation (no gain); clamp on the bone-origin
+    displacement in metres (pos lerp + quat slerp by limit/len); gravity is
+    cancelled by ApplyForce(-m*g) each frame; the body pose read at a frame is
+    the previous physics result -> one frame of latency.
+  - PhysX step 1/physicsIntegrationRateInHz (FUN_004f4d20), up to 3 per frame.
+  - Swing dynamics x'' = -K x - D x' + (m/I) r x f - alpha_parent, r = the
+    parent->bone offset, I = cube inertia about the pivot, f = -pivot accel.
+    K, D are NOT derivable from the exe (PhysXCore); mode='capture' uses the
+    values measured on the capture palettes, mode='engine' the file k, d
+    through solver_soften at 1/60 s.
+
+'pinned' (the model shipped up to 1.3.x, kept for comparison):
+  - joint pinned at the bone origin, lever r = tb (bone position from the model
+    origin), drive r x (g - a) - alpha with gravity (0,-14.82,0), K/D from
+    solver_soften at 1/120 s (166.3 / 18.8), angle clamp limit/|tb|.  The 1/120
+    "capture-exact" match came from reading the capture at 30 fps; at the
+    clip-matched 55 fps the capture fit is K ~ 570, D ~ 37.5 (breast).
 
 Usage: from jiggle_d6 import apply_jiggle;  apply_jiggle(P, fps, bind_npz)
 """
@@ -146,7 +146,11 @@ _SKEL_ASSETS = {
 
 
 def joint_frames(bindpath, naz="game.naz"):
-    """FILE-SIDE D6 swing axes per jiggle bone, in the parent-local (x) frame.
+    """LEGACY input of the rejected mode='aniso' only.  The "type-7 joint
+    records" read here are the node's collision CAPSULES (skeleton_records
+    module docstring), not D6 joint frames; the real jiggle joint frame is the
+    parent bone frame (0x648858).  Kept so mode='aniso' still runs.
+    Original description: D6 swing axes per jiggle bone, in the parent-local frame.
     Reads EmbeddedJointNode type-7 records from the skeleton .model in the naz
     (parse_node_aux, 2026-07-12c field-order fix: [pos][a][a'][quat]).  Joint
     quats are model-space (conj-FK); mirrored breast pair verified.  Axes:
@@ -229,7 +233,7 @@ def joint_frames(bindpath, naz="game.naz"):
         return {}
 
 
-def apply_jiggle(
+def _apply_jiggle_pinned(
     P,
     fps,
     bindpath,
@@ -377,6 +381,269 @@ def apply_jiggle(
             jw = anch_o[i]
             P[i, k, :, 3] = jw - P[i, k, :, :3] @ tb[k]
     return P.astype(np.float32)
+
+
+# --- engine "pivot" model (2026-10: exe re-read, findings/jiggle.md) ---------
+# Simulated body: the 0.8 m MockupBox of mass 0.1 (setup 0x6574cd: size props
+# f32 @0xa06d84, RigidBody::SetMass 0x4fe514 with f32 @0x9e664c); the 0.1 m box
+# is the kinematic anchor that follows the parent bone.
+BODY_MASS = 0.1
+BODY_SIZE = 0.8
+# RigidBody ctor 0x4fe311: angularDamping [+0xa8] = 1.0 (fld1), solver iterations 4.
+BODY_ANGULAR_DAMPING = 1.0
+
+# Effective swing stiffness / damping (s^-2, s^-1) measured on the capture
+# palettes with the pivot model's own state definition (see jiggle_capture_fit
+# notes in docs): NOT derivable from the exe (PhysXCore soft-limit solver).
+# Time base: capture frame = 1/55 s (clip-matched playback rate).
+_CAPTURE_FIT = {
+    "breast": dict(K=570.0, D=37.5),
+    "belly": dict(K=308.0, D=19.2),
+}
+
+MODELS = ("pivot", "pinned")
+# "pinned" = the model of 1.2.0 (joint pinned at the bone origin, lever |tb|,
+# gravity drive, angle clamp) and the DEFAULT: its output is bit-identical to
+# 1.2.0.  "pivot" follows the engine geometry read from the exe, but its swing
+# constants (mode 'capture') are fitted to captures at an estimated frame rate,
+# so it is opt-in: apply_jiggle(model="pivot"), `--jiggle-model pivot`.
+DEFAULT_MODEL = "pinned"
+DEFAULT_MODE = {"pivot": "capture", "pinned": "engine"}
+
+
+# bump when a model's arithmetic changes in a way its constants do not show
+MODEL_REVISION = {"pinned": 1, "pivot": 1}
+
+
+def resolve_model(model=None, mode=None):
+    """(model, mode) with the defaults filled in; ValueError on an unknown model."""
+    if model is None:
+        model = DEFAULT_MODEL
+    if model not in MODELS:
+        raise ValueError(
+            "unknown jiggle model %r (expected one of %s)" % (model, ", ".join(MODELS))
+        )
+    return model, (DEFAULT_MODE[model] if mode is None else mode)
+
+
+def cache_signature(model=None, mode=None):
+    """Short tag naming everything a baked jiggle depends on besides the clip and
+    the bind: model, constants mode and the constants themselves.  Used in the
+    name of on-disk jiggle caches (characters_export), so palettes baked with one
+    model or one set of constants are never served for another."""
+    import hashlib
+
+    model, mode = resolve_model(model, mode)
+    consts = repr(
+        (
+            sorted((g, sorted(v.items())) for g, v in _CAPTURE_FIT.items()),
+            BODY_MASS,
+            BODY_SIZE,
+            BODY_ANGULAR_DAMPING,
+            MODEL_REVISION[model],
+        )
+    )
+    return "%s-%s-%s" % (model, mode, hashlib.md5(consts.encode()).hexdigest()[:8])
+
+
+def _slerp_m(Ra, Rb_, t):
+    """Rotation-matrix slerp Ra -> Rb_ (shortest path)."""
+    M = Ra.T @ Rb_
+    v = np.array([M[2, 1] - M[1, 2], M[0, 2] - M[2, 0], M[1, 0] - M[0, 1]])
+    c = min(1.0, max(-1.0, (np.trace(M) - 1.0) / 2.0))
+    a = math.acos(c)
+    s = np.linalg.norm(v)
+    if a < 1e-9 or s < 1e-12:
+        return Rb_.copy() if t >= 0.5 else Ra.copy()
+    return Ra @ _rotv2m(v / s * (a * t))
+
+
+def swing_constants(mode, grp, W, model="pivot"):
+    """(K, D) of the swing spring for one addon group.
+    'engine'   -- file k, zeta through solver_soften at the PhysX substep
+                  (pivot: 1/rate_hz, FUN_004f4d20; pinned: historical 0.5/rate_hz)
+    'capture'  -- pivot only: capture-measured effective constants (_CAPTURE_FIT)
+    'ratio'    -- D = 2*d_file*sqrt(K), no softening
+    'absolute' -- D = d_file
+    props[grp] may carry explicit 'K_eff' / 'D_eff' overrides (fitting harness)."""
+    g = W[grp]
+    kf, df = g["k"], g["d"]
+    hz = float(W["rate_hz"])
+    if mode in ("engine", "aniso", "capture"):
+        if model == "pinned":
+            K, D = solver_soften(kf, df, dts=0.5 / hz)
+        elif mode == "capture" and grp in _CAPTURE_FIT:
+            K, D = _CAPTURE_FIT[grp]["K"], _CAPTURE_FIT[grp]["D"]
+        else:
+            K, D = solver_soften(kf, df, dts=1.0 / hz)
+            D += BODY_ANGULAR_DAMPING
+    elif mode == "ratio":
+        K = kf
+        D = 2.0 * df * math.sqrt(K)
+    else:
+        K, D = kf, df
+    return float(g.get("K_eff", K)), float(g.get("D_eff", D))
+
+
+def _lerp_rows(arr, tq, fps):
+    """Linear resample of a per-clip-frame array at times tq (seconds)."""
+    F = len(arr)
+    u = np.clip(np.asarray(tq, np.float64) * fps, 0.0, F - 1.0)
+    i = np.minimum(u.astype(int), F - 2)
+    w = (u - i).reshape((-1,) + (1,) * (arr.ndim - 1))
+    return (1.0 - w) * arr[i] + w * arr[i + 1]
+
+
+def _apply_jiggle_pivot(P, fps, bindpath, bones, gain, mode, props, extract_root, latency):
+    """Engine-geometry model.  Per addon (CharacterAddonCtrl 0x6574cd / 0x648858 /
+    0x6563a0):
+      * the body swings about the PARENT bone origin (joint frame = anchor box =
+        parent bone; X twist locked, Y/Z swing), lever = parent->bone offset;
+      * its pose replaces the bone's local position AND rotation (0x6563a0 ->
+        FUN_004ba7ad), i.e. the palette is rotated about the parent origin;
+      * gravity is cancelled every frame by ApplyForce(-m*g) (0x656fb4-0x65707c);
+      * the clamp is on the bone-ORIGIN displacement in metres, pos lerp +
+        quat slerp by limit/len (0x6563a0, FUN_0041fd54); the body itself is
+        not clamped;
+      * the body pose read at a frame is the previous physics result while the
+        anchor is already at the current parent pose -> one frame of latency
+        (order of 0x6563a0; capture: twist-axis deviation = 1.05 x one-frame
+        parent rotation, R2 0.93)."""
+    bt = np.load(bindpath, allow_pickle=True)
+    Rb = bt["Rb"].astype(np.float64)
+    tb = bt["tb"].astype(np.float64)
+    names = [str(n) for n in bt["names"]]
+    par = bt["par"]
+    tloc = bt["tloc"].astype(np.float64) if "tloc" in bt.files else None
+    W = props or load_world_props(extract_root)
+    hz = float(W["rate_hz"])
+    dt = 1.0 / hz
+    if gain is None:
+        gain = 1.0
+    if latency is None:
+        latency = dt
+    if bones is None:
+        bones = [n for n in names if _group(n)]
+    F = len(P)
+    if F < 4:
+        return P
+    P = np.array(P, dtype=np.float64, copy=True)
+    P0 = P.copy()  # animated input (several jiggle bones may share a parent)
+    dur = F / max(fps, 1e-6)
+    N = max(4, int(round(dur * hz)))
+    t_o = np.arange(F) / fps
+    t_n = np.clip(np.arange(N) / hz, 0, t_o[-1])
+    icm = BODY_MASS * BODY_SIZE * BODY_SIZE / 6.0  # solid cube about its centre
+    for bone in bones:
+        if bone not in names:
+            continue
+        k = names.index(bone)
+        p = par[k]
+        if p < 0:
+            continue
+        grp = _group(bone)
+        if not grp:
+            continue
+        lim = W[grp]["limit"]
+        K, D = swing_constants(mode, grp, W, "pivot")
+        # lever in the parent bone frame (bind npz tloc; == Rb_p^T (tb_k - tb_p))
+        r = tloc[k] if tloc is not None else Rb[p].T @ (tb[k] - tb[p])
+        rlen = float(np.linalg.norm(r))
+        if rlen < 1e-6:
+            continue
+        acc_gain = BODY_MASS / (icm + BODY_MASS * rlen * rlen)  # m / I about the pivot
+        A_o = np.einsum("fab,bc->fac", P0[:, p, :, :3], Rb[p])  # parent bone frame
+        c_o = np.einsum("fab,b->fa", P0[:, p, :, :3], tb[p]) + P0[:, p, :, 3]  # pivot
+        # derivatives on the ORIGINAL clip grid (see the pinned model's note)
+        acc_o = np.zeros_like(c_o)
+        acc_o[1:-1] = (c_o[2:] - 2 * c_o[1:-1] + c_o[:-2]) * fps * fps
+        dA_o = np.zeros_like(A_o)
+        dA_o[1:-1] = (A_o[2:] - A_o[:-2]) * (fps / 2.0)
+        S = np.einsum("fba,fbc->fac", A_o, dA_o)
+        wvel_o = np.stack([S[:, 2, 1], S[:, 0, 2], S[:, 1, 0]], 1)
+        walp_o = np.zeros_like(wvel_o)
+        walp_o[1:-1] = (wvel_o[2:] - wvel_o[:-2]) * (fps / 2.0)
+        # no gravity term: cancelled by the per-frame -m*g force
+        f_o = np.einsum("fba,fb->fa", A_o, -acc_o)
+        drv_o = acc_gain * np.cross(np.broadcast_to(r, f_o.shape), f_o) - walp_o
+        drv_o[:, 0] = 0.0  # TwistMotionType = Locked about joint X (0x51795e)
+        drv = _lerp_rows(drv_o, t_n, fps)
+        x = np.zeros((N, 3))
+        v = np.zeros(3)
+        xi = np.zeros(3)
+        for i in range(1, N):
+            v = v + dt * (drv[i - 1] - K * xi - D * v)
+            xi = xi + dt * v
+            n = np.linalg.norm(xi)
+            if not np.isfinite(n) or n > math.pi:  # numerical guard, not an engine limit
+                xi = np.zeros(3) if not np.isfinite(n) else xi * (math.pi / n)
+                v = np.zeros(3)
+            x[i] = xi
+        x *= gain
+        # write-back: body = lagged anchor swung about the lagged pivot
+        t_l = np.clip(t_o - latency, 0.0, None)
+        xs = _lerp_rows(x, t_l, hz)
+        Pp_l = _lerp_rows(P0[:, p], t_l, fps)
+        for i in range(F):
+            Rp = _orth(Pp_l[i, :, :3])
+            Al = Rp @ Rb[p]
+            cl = Rp @ tb[p] + Pp_l[i, :, 3]
+            Dm = Al @ _rotv2m(xs[i]) @ Al.T
+            Rbody = Dm @ Rp
+            org_body = cl + Dm @ (Rp @ tb[k] + Pp_l[i, :, 3] - cl)
+            Ra = P0[i, k, :, :3]
+            org_anim = Ra @ tb[k] + P0[i, k, :, 3]
+            delta = org_body - org_anim
+            ln = float(np.linalg.norm(delta))
+            if ln > lim:  # 0x6563a0: pos = p0 + delta*t, quat = slerp(q0, q, t)
+                t = lim / ln
+                org_body = org_anim + delta * t
+                Rbody = _slerp_m(_orth(Ra), Rbody, t)
+            P[i, k, :, :3] = Rbody
+            P[i, k, :, 3] = org_body - Rbody @ tb[k]
+    return P.astype(np.float32)
+
+
+def apply_jiggle_legacy(P, fps, bindpath, **kw):
+    """The pre-2026-10 'pinned' model (apply_jiggle(..., model='pinned'))."""
+    kw.pop("model", None)
+    return apply_jiggle(P, fps, bindpath, model="pinned", **kw)
+
+
+def apply_jiggle(
+    P,
+    fps,
+    bindpath,
+    bones=None,
+    gain=None,
+    mode=None,
+    props=None,
+    extract_root=None,
+    frames=None,
+    free_damp=0.05,
+    naz="game.naz",
+    model=None,
+    latency=None,
+):
+    """P: (F,nbones,3,4) world palettes; fps: clip rate; bindpath: bind npz.
+    model: 'pivot'  -- engine geometry (parent-origin pivot, parent->bone lever,
+                       position+rotation write-back, metre clamp, no gravity,
+                       twist locked, one-frame latency); see _apply_jiggle_pivot
+           'pinned' -- previous model (see _apply_jiggle_pinned)
+           None     -- DEFAULT_MODEL
+    mode:  spring constants, see swing_constants ('aniso' is pinned-only);
+           None = DEFAULT_MODE[model].
+    latency: pivot only, seconds the body trails the parent (None = 1/rate_hz,
+             0 disables).
+    gain scales the deviation (default 1)."""
+    model, mode = resolve_model(model, mode)
+    if mode == "capture" and model == "pinned":
+        raise ValueError("mode='capture' constants belong to model='pivot'")
+    if model == "pinned" or mode == "aniso":
+        return _apply_jiggle_pinned(
+            P, fps, bindpath, bones, gain, mode, props, extract_root, frames, free_damp, naz
+        )
+    return _apply_jiggle_pivot(P, fps, bindpath, bones, gain, mode, props, extract_root, latency)
 
 
 if __name__ == "__main__":

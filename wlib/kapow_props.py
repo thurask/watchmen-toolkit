@@ -6,11 +6,17 @@
 #   records (same ownerId dword anchors a block's records):
 #     [u32 ownerId][u32 keyHash][u32 typeHash][u32 k][k dwords payload]
 #     string payload: [u32 wordcount][wordcount*4 chars]  (k = 1+wordcount)
-#   keyHash/typeHash = kapow bit-CRC32(poly 0x04C11DB7) of UPPERCASE name / typename.
+#   keyHash/typeHash = name_hash(name): kapow bit-CRC32(poly 0x04C11DB7) over the name's
+#   bytes each ANDed with 0xDF (engine FUN_00423ce8) -- NOT str.upper(): digits and
+#   punctuation are folded too ('0'..'9' -> 0x10..0x19, '(' -> 0x08, ',' -> 0x0C).
 import struct, json, pickle
 
 
 def kapow_hash(s):
+    """Raw bit-CRC (poly 0x04C11DB7, init 0, bits fed LSB-first, no final xor) over
+    the latin-1 bytes of ``s`` exactly as given -- NO folding.  This is the engine's
+    length-counted hasher (FUN_00423ca1 / FUN_00423d7c).  To hash a NAME (property
+    key, type name, command signature, asset name) use :func:`name_hash`."""
     crc = 0
     for byte in s.encode("latin1"):
         for bit in range(8):
@@ -21,8 +27,21 @@ def kapow_hash(s):
     return crc
 
 
+def name_fold(s):
+    """The engine's name fold: every byte ANDed with 0xDF (``and cl,0xdf`` at
+    0x423cf7 in FUN_00423ce8).  Equal to upper-casing for letters and '_' only."""
+    return bytes(b & 0xDF for b in s.encode("latin1")).decode("latin1")
+
+
+def name_hash(s):
+    """Engine name hash (FUN_00423ce8): :func:`kapow_hash` of the 0xDF-folded name.
+    FUN_00423d30 is the same hash stopped at the first ':' (``name:type`` strings);
+    callers hashing such a string must cut it at the ':' themselves."""
+    return kapow_hash(name_fold(s))
+
+
 TYPES = {
-    kapow_hash(t.upper()): t
+    name_hash(t): t
     for t in (
         "number",
         "integer",

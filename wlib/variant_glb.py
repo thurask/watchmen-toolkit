@@ -254,8 +254,12 @@ def _sanitize_uv_tangents(part, eps=1.5 / 512.0):
     )
 
 
-def write_glb(parts, manifest, out, bindnpz, textures=None, face=None, attachments=None):
-    """textures: optional {material_name: png_bytes | dict} -> embedded maps.
+def write_glb(parts, manifest, out, bindnpz, textures=None, face=None, attachments=None, meta=None):
+    """meta: optional anim_meta.build() table -> per-animation `extras` (events,
+    loop, pair partner + placement).  Bone names/parents and the coordinate
+    conventions are written to `extras` whether or not meta is given.
+
+    textures: optional {material_name: png_bytes | dict} -> embedded maps.
     dict form: {'diffuse':png, 'normal':png, 'mr':png, 'spec':png} (all optional).
     normal = glTF convention (green up); mr = occlusion/roughness/metallic in R/G/B;
     spec -> KHR_materials_specular specularColorTexture."""
@@ -273,16 +277,31 @@ def write_glb(parts, manifest, out, bindnpz, textures=None, face=None, attachmen
         if face is not None and face.get("parts"):
             face = dict(face)
             face["parts"] = _san(face["parts"])
+    import anim_meta as _am
+
     bt = np.load(bindnpz, allow_pickle=True)
     Rb = bt["Rb"]
     tb = bt["tb"]
     NB = len(Rb)
+    # real bone names + parents (palette order) -- written to `extras` so an
+    # importer needs no per-skeleton table to rebuild the hierarchy.
+    _bnames = [str(x) for x in bt["names"]] if "names" in bt else None
+    _bpar = [int(x) for x in bt["par"]] if "par" in bt else None
+    _skel = (
+        _am.skeleton_extras(_bnames, _bpar)
+        if _bnames and _bpar and len(_bnames) == NB and len(_bpar) == NB
+        else None
+    )
     B4 = np.tile(np.eye(4), (NB, 1, 1))
     B4[:, :3, :3] = Rb
     B4[:, :3, 3] = tb
     IBM = np.array([np.linalg.inv(B4[k]) for k in range(NB)])
     j = {
-        "asset": {"version": "2.0", "generator": "watchmen_extract variant_glb"},
+        "asset": {
+            "version": "2.0",
+            "generator": "watchmen_extract variant_glb",
+            "extras": {"watchmen": {"format": _am.FORMAT, "conventions": _am.CONVENTIONS}},
+        },
         "scene": 0,
         "scenes": [{"nodes": []}],
         "nodes": [],
@@ -333,6 +352,8 @@ def write_glb(parts, manifest, out, bindnpz, textures=None, face=None, attachmen
     for k in range(NB):
         nd = {"name": "b%d" % k}
         nd.update(_node_trs(B4[k]))
+        if _skel:
+            nd["extras"] = {"bone": _bnames[k], "parent": _bpar[k]}
         j["nodes"].append(nd)
     ibmacc = ac(
         av(np.array([m.T.reshape(16) for m in IBM], np.float32).tobytes()), 5126, NB, "MAT4"
@@ -412,6 +433,16 @@ def write_glb(parts, manifest, out, bindnpz, textures=None, face=None, attachmen
     mnode = len(j["nodes"])
     j["nodes"].append({"name": "mesh", "mesh": 0, "skin": 0})
     j["skins"].append({"joints": bnode, "inverseBindMatrices": ibmacc})
+    if _skel:
+        j["skins"][0]["extras"] = {"watchmen": _skel}
+
+    def _anim(animname, sm, chn, frames, fps):
+        a = {"name": animname, "samplers": sm, "channels": chn}
+        if meta is not None:
+            ex = _am.clip_extras(meta, animname, fps=fps, frames=frames)
+            if ex is not None:
+                a["extras"] = {"watchmen": ex}
+        return a
 
     def _mkmat(nm):
         """material index for nm using `textures` (same rules as body prims)."""
@@ -893,7 +924,7 @@ def write_glb(parts, manifest, out, bindnpz, textures=None, face=None, attachmen
                         "target": {"node": proxynodes[pi], "path": "translation"},
                     }
                 )
-        j["animations"].append({"name": animname, "samplers": sm, "channels": chn})
+        j["animations"].append(_anim(animname, sm, chn, F, fps))
     if face is not None:
         fb = np.load(face["bind"], allow_pickle=True)
         fRb, ftb = fb["Rb"], fb["tb"]
@@ -1030,8 +1061,11 @@ def build(
     bind=None,
     binddir=None,
     jiggle=False,
+    jiggle_model=None,
 ):
     """One fragment variant -> one GLB carrying every baked clip in `bakedir`.
+    jiggle: bake the jiggle bones; jiggle_model: 'pinned' / 'pivot' (None =
+    jiggle_d6.DEFAULT_MODEL).
 
     bind    : path to the bind npz for this variant's skeleton, or
     binddir : a directory of binds (see `watchmen binds`) to pick it from.
@@ -1091,7 +1125,7 @@ def build(
         fps *= speed_mult(nm)
         if jiggle:
             try:
-                A = apply_jiggle(A, fps, bind)
+                A = apply_jiggle(A, fps, bind, model=jiggle_model)
             except Exception as e:
                 print("  jiggle skip %s: %s" % (nm, e))
         manifest.append((nm, A, fps))
@@ -1107,7 +1141,16 @@ if __name__ == "__main__":
     ap.add_argument("out")
     ap.add_argument("--bank", default="/tmp/clipbank_en4.pkl")
     ap.add_argument("--jiggle", action="store_true")
+    ap.add_argument("--jiggle-model", choices=("pinned", "pivot"), default=None)
     ap.add_argument("--bakedir", default="/tmp/allbake")
     a = ap.parse_args()
     bank = pickle.load(open(a.bank, "rb")) if os.path.exists(a.bank) else None
-    build(a.frag, a.variant, a.out, bakedir=a.bakedir, bank=bank, jiggle=a.jiggle)
+    build(
+        a.frag,
+        a.variant,
+        a.out,
+        bakedir=a.bakedir,
+        bank=bank,
+        jiggle=a.jiggle or a.jiggle_model is not None,
+        jiggle_model=a.jiggle_model,
+    )

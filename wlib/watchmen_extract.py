@@ -185,26 +185,174 @@ def naz_read(path, e):
 # ===========================================================================
 # (2) Kapow block (.block_h_z / .block_s_z)
 # ===========================================================================
-BLOCK_TABLES_START, TABLES_SIZE_OFFSET, NUM_TABLES_OFFSET = 399, 332, 352
-STREAM_PAIRS, SIZE_VARIANTS = 6, 6
+# Fixed header = exactly 400 bytes (one read of 0x190 bytes, engine 0x4ae315);
+# the directory follows at 400.  Engine: loader FUN_004a36d8, walker FUN_004a3525.
+BLOCK_HEADER_SIZE = 400
+BLOCK_TABLES_START, TABLES_SIZE_OFFSET, NUM_TABLES_OFFSET = BLOCK_HEADER_SIZE, 332, 352
+#: every directory record carries SIX slots of (header-blob size) and of
+#: (stream offset, size).  The slot index is the current LANGUAGE (FUN_0045c762),
+#: not the build platform; the six are equal except on localized assets.
+BLOCK_LANGUAGES = 6
+STREAM_PAIRS, SIZE_VARIANTS = BLOCK_LANGUAGES, BLOCK_LANGUAGES
+_FINGERPRINT_KEY = b"1E564E3B-D243-4ec5-AFB7"
+
+
+def _name_hash(s):
+    """Engine name hash (FUN_00423ce8: every byte & 0xDF) via kapow_props."""
+    try:
+        import kapow_props as _kp
+    except ImportError:
+        _d = os.path.dirname(os.path.abspath(__file__))
+        if _d not in sys.path:
+            sys.path.append(_d)
+        import kapow_props as _kp
+    fn = getattr(_kp, "name_hash", None)
+    return (
+        fn(s)
+        if fn
+        else _kp.kapow_hash(bytes(c & 0xDF for c in s.encode("latin1")).decode("latin1"))
+    )
+
+
+#: asset-type names whose name hash is the directory's `type_hash` field.
+ASSET_TYPE_NAMES = (
+    "sound",
+    "Texture",
+    "animation",
+    "fragment",
+    "modelRes",
+    "textRes",
+    "PropertySequenceAsset",
+    "ParticleSystemAsset",
+    "grass",
+    "mediastream",
+    "DetailMeshAsset",
+    "terrain",
+    "pivotbook",
+    "aipathdata",
+    "ModelEffects(ModelRes)",  # 0x41764525: TNT script class on top of ModelRes
+    "TextureEffects(Texture)",  # 0x96ea413f: TNT script class on top of Texture
+)
+_ASSET_TYPES = {}
+
+
+def asset_type_name(type_hash):
+    """Directory type hash -> asset-type name ('' when unknown)."""
+    if not _ASSET_TYPES:
+        for n in ASSET_TYPE_NAMES:
+            _ASSET_TYPES[_name_hash(n)] = n
+    return _ASSET_TYPES.get(type_hash, "")
+
+
+def asset_base_class(cls):
+    """'ModelEffects(ModelRes)' -> 'ModelRes'.  Script (TNT) asset classes are read
+    by their native base class's loader (FUN_0047e126 stores the base at +0x5c;
+    FUN_00511f96 only re-types the entity), so they extract like the base type."""
+    if cls.endswith(")") and "(" in cls:
+        return cls[cls.rindex("(") + 1 : -1]
+    return cls
+
+
+def fingerprint_decrypt(buf, key=_FINGERPRINT_KEY):
+    """Block-header fingerprint string: 3-LFSR stream cipher (FUN_00405a31 init,
+    FUN_00405a8b key setup, FUN_00405b1e per byte), applied by FUN_0049dd0e."""
+    a = int.from_bytes(key[0:4], "big") or 0x13579BDF
+    b = int.from_bytes(key[4:8], "big") or 0x2468ACE0
+    c = int.from_bytes(key[8:12], "big") or 0xFDB97531
+    out = bytearray()
+    for ch in buf:
+        if ch == 0:
+            break
+        ob, oc, k = b & 1, c & 1, 0
+        for _ in range(8):
+            if a & 1:
+                a = ((a ^ 0x80000062) >> 1) | 0x80000000
+                if b & 1:
+                    b, ob = ((b ^ 0x40000020) >> 1) | 0xC0000000, 1
+                else:
+                    b, ob = (b >> 1) & 0x3FFFFFFF, 0
+            else:
+                a = (a >> 1) & 0x7FFFFFFF
+                if c & 1:
+                    c, oc = ((c ^ 0x10000002) >> 1) | 0xF0000000, 1
+                else:
+                    c, oc = (c >> 1) & 0x0FFFFFFF, 0
+            k = ((k << 1) & 0xFF) | (ob ^ oc)
+        v = ch ^ k
+        out.append(v if v else k)
+    return bytes(out)
 
 
 class Toc:
-    __slots__ = ("flag", "pairs", "variants", "unknown", "name")
+    """One directory record (FUN_004a3525):
+    [u32 size[6]][u32 typeHash][u32 nameLen][name][u8 hasStream][6 x (u32 off, u32 size)]
+    The stream pairs are the TAIL of the record they locate (no +1 shift)."""
+
+    __slots__ = ("name", "type_hash", "sizes", "has_stream", "streams", "localized", "language")
+
+    def __init__(s):
+        s.name, s.type_hash, s.sizes = "", 0, [0] * BLOCK_LANGUAGES
+        s.has_stream, s.streams, s.localized, s.language = False, None, False, 0
+
+    # --- names used before the layout was read from the engine (read + write) --
+    @property
+    def flag(s):
+        return 1 if s.has_stream else 0
+
+    @flag.setter
+    def flag(s, v):
+        s.has_stream = bool(v)
+
+    @property
+    def pairs(s):
+        return list(s.streams) if s.streams else []
+
+    @pairs.setter
+    def pairs(s, v):
+        s.streams = list(v) if v else None
+
+    @property
+    def variants(s):
+        return list(s.sizes)
+
+    @variants.setter
+    def variants(s, v):
+        s.sizes = list(v)
+
+    @property
+    def unknown(s):
+        return s.type_hash
+
+    @unknown.setter
+    def unknown(s, v):
+        s.type_hash = v
+
+    @property
+    def type_name(s):
+        return asset_type_name(s.type_hash)
 
     @property
     def data_size(s):
-        for v in s.variants:
+        v = s.sizes[s.language] if 0 <= s.language < len(s.sizes) else 0
+        if v > 0:
+            return v
+        for v in s.sizes:
             if v > 0:
                 return v
-        return s.variants[-1]
+        return s.sizes[-1]
 
     @property
     def best_stream(s):
-        for off, sz in s.pairs:
+        if not s.streams:
+            return None
+        if 0 <= s.language < len(s.streams):
+            off, sz = s.streams[s.language]
+            if sz > 0:
+                return off, sz
+        for off, sz in s.streams:
             if off > 0 and sz > 0:
                 return off, sz
-        return s.pairs[0] if s.pairs else None
+        return s.streams[0]
 
 
 # Block numeric fields are stored in the target CPU's byte order: little-endian
@@ -230,35 +378,86 @@ def detect_block_order(h):
     return "<" if le <= be else ">"  # correct count is small; wrong one is huge
 
 
-def parse_block_toc(h, order=None):
+def parse_block_header(h, order=None):
+    """The fixed 400-byte block_h_z header as a dict (engine FUN_004a36d8 /
+    FUN_0049dd0e; field names follow what the loader does with each value)."""
+    if len(h) < BLOCK_HEADER_SIZE:
+        raise ValueError("not a block header: %d bytes, need %d" % (len(h), BLOCK_HEADER_SIZE))
+    bo = order or detect_block_order(h)
+    (
+        sig,
+        tables_size,
+        entry0_size,
+        io_buffer_size,
+        fragment_offset,
+        fragment_size,
+        num_entries,
+        num_localized,
+        num_streams,
+    ) = struct.unpack_from(bo + "9I", h, 328)
+    return {
+        "order": bo,
+        "bounds": struct.unpack_from(bo + "8f", h, 0),  # -> LoadBlock+0x180
+        "guid": h[0x24:0x48].split(b"\0", 1)[0].decode("latin1"),
+        "fingerprint": fingerprint_decrypt(h[0x48:0x147]).decode("latin1"),
+        "version_signature": sig,  # written, never checked by the loader
+        "tables_size": tables_size,  # directory bytes, starting at 400
+        "entry0_size": entry0_size,  # header-blob size of entry 0 (first read)
+        "io_buffer_size": io_buffer_size,  # max(tables_size, largest header blob)
+        "fragment_offset": fragment_offset,  # trailing "loadblock fragment" blob
+        "fragment_size": fragment_size,
+        "num_entries": num_entries,
+        "num_localized": num_localized,  # extra records behind the language seek
+        "num_streams": num_streams,  # records with hasStream == 1
+        "language_header_offset": struct.unpack_from(bo + "6I", h, 364),
+    }
+
+
+def parse_block_toc(h, order=None, language=0):
+    """-> (entries, data_start).  `entries` holds the `num_entries` main records
+    followed by the `num_localized` per-language ones (`.localized` is True)."""
     global BLOCK_ORDER
+    if (
+        isinstance(language, bool)
+        or not isinstance(language, int)
+        or not (0 <= language < BLOCK_LANGUAGES)
+    ):
+        raise ValueError("language slot must be 0..%d, not %r" % (BLOCK_LANGUAGES - 1, language))
     bo = order or detect_block_order(h)
     BLOCK_ORDER = bo
     tables_size = struct.unpack_from(bo + "I", h, TABLES_SIZE_OFFSET)[0]
     num = struct.unpack_from(bo + "I", h, NUM_TABLES_OFFSET)[0]
-    out, pos = [], BLOCK_TABLES_START
-    for _ in range(num):
-        if pos >= len(h):
+    nloc = struct.unpack_from(bo + "I", h, 356)[0]
+    end = min(len(h), BLOCK_HEADER_SIZE + tables_size)
+    if not 0 <= nloc <= 4096:
+        nloc = 0
+    out, pos = [], BLOCK_HEADER_SIZE
+    for i in range(num + nloc):
+        if pos + 32 > end:
             break
         t = Toc()
-        t.flag = h[pos]
-        pos += 1
-        t.pairs = []
-        if t.flag > 0:
-            for _ in range(STREAM_PAIRS):
-                off, sz = struct.unpack_from(bo + "II", h, pos)
-                pos += 8
-                t.pairs.append((off, sz))
-        t.variants = list(struct.unpack_from(bo + "6I", h, pos))
+        t.language = language
+        t.localized = i >= num
+        t.sizes = list(struct.unpack_from(bo + "6I", h, pos))
         pos += 24
-        t.unknown = struct.unpack_from(bo + "I", h, pos)[0]
+        t.type_hash = struct.unpack_from(bo + "I", h, pos)[0]
         pos += 4
         nlen = struct.unpack_from(bo + "I", h, pos)[0]
         pos += 4
         t.name = h[pos : pos + nlen].decode("utf-8", "replace").rstrip("\x00")
         pos += nlen
+        t.has_stream = pos < end and h[pos] == 1  # ReadBool (FUN_004353e9)
+        pos += 1
+        t.streams = None
+        if t.has_stream:
+            if pos + 48 > len(h):
+                t.has_stream = False
+            else:
+                v = struct.unpack_from(bo + "12I", h, pos)
+                pos += 48
+                t.streams = [(v[2 * k], v[2 * k + 1]) for k in range(BLOCK_LANGUAGES)]
         out.append(t)
-    return out, BLOCK_TABLES_START + tables_size + 1
+    return out, BLOCK_HEADER_SIZE + tables_size
 
 
 def _maybe_inflate(blob):
@@ -358,6 +557,115 @@ TEX_FMT = {  # enum -> (D3D name, ('blk',bytes/block) | ('lin',bpp))
 }
 
 
+def _is_texture(hdr, order="<"):
+    return asset_base_class(asset_class(hdr, order)) == "Texture"
+
+
+#: per-frame layer slots (FUN_005382aa reads slot 0, then 7 x [present][desc]).
+TEXTURE_SLOTS = 8
+_TEX_DESC = 29  # FUN_00429e77: u32 w, h, format, x, type; u8 alpha; u32 mips, z
+
+
+def _chain_bytes_exact(en, w, h, mip):
+    """Stored bytes of one mip chain.  Block formats as usual; LINEAR formats keep
+    every row padded to 4 bytes (the locked D3D pitch), which only shows on the
+    1- and 2-texel-wide L8 mips (validated: 936/936 Part 2 PC streams exact)."""
+    k, unit = TEX_FMT[en][1]
+    total = 0
+    for i in range(mip):
+        ww, hh = max(1, w >> i), max(1, h >> i)
+        if k == "blk":
+            total += max(1, (ww + 3) // 4) * max(1, (hh + 3) // 4) * unit
+        else:
+            total += ((ww * unit + 3) & ~3) * hh
+    return total
+
+
+def parse_texture_frames(hdr):
+    """ENGINE-EXACT PC Texture header (FUN_005382aa / FUN_00429e77), or None.
+
+    [bag][u32 nFrames][u8 hasAnim] then per frame: slot-0 descriptor, 7 x
+    ([u8 present][descriptor if present]), [u32 len][source path].  Returns
+    {"frames": [{"slots": [desc|None]*8, "path": str}], "anim": bool, "end": off};
+    desc = {slot, enum, aw, ah, mip, type (1=2D, 2=cube), alpha, drift}."""
+    if not _is_texture(hdr, "<"):
+        return None
+    try:
+        (tlen,) = struct.unpack_from("<I", hdr, 0)
+        (nd,) = struct.unpack_from("<I", hdr, 4 + tlen)
+        p = 4 + tlen + 4 + 4 * nd  # FUN_00511f96: bag = nd dwords
+        (nf,) = struct.unpack_from("<I", hdr, p)
+        anim = hdr[p + 4]
+        p += 5
+        if not 1 <= nf <= 1024 or anim > 1:
+            return None
+        frames = []
+        for _ in range(nf):
+            slots = []
+            for k in range(TEXTURE_SLOTS):
+                if k:
+                    present = hdr[p]
+                    p += 1
+                    if present > 1:
+                        return None
+                    if not present:
+                        slots.append(None)
+                        continue
+                w, h, en, _x, typ, alpha, mip, _z = struct.unpack_from("<5IBII", hdr, p)
+                p += _TEX_DESC
+                if en not in TEX_FMT or typ not in (1, 2) or alpha > 1:
+                    return None
+                if not (0 < w <= 8192 and 0 < h <= 8192 and 1 <= mip <= 14):
+                    return None
+                slots.append(
+                    {
+                        "slot": k,
+                        "enum": en,
+                        "fmt": TEX_FMT[en][0],
+                        "aw": w,
+                        "ah": h,
+                        "mip": mip,
+                        "type": typ,
+                        "alpha": bool(alpha),
+                        # slot 7 is the record the stride walk used to reach through
+                        # a 4-byte "drift" (four absent-slot bytes): the specSize map
+                        "drift": k == 7,
+                        "chain": _chain_bytes_exact(en, w, h, mip),
+                    }
+                )
+            (sl,) = struct.unpack_from("<I", hdr, p)
+            if sl > 1024 or p + 4 + sl > len(hdr):
+                return None
+            path = hdr[p + 4 : p + 4 + sl].split(b"\0", 1)[0].decode("latin1")
+            p += 4 + sl
+            frames.append({"slots": slots, "path": path})
+    except (struct.error, IndexError):
+        return None
+    return {"frames": frames, "anim": bool(anim), "end": p}
+
+
+def _exact_texture_plan(hdr, stream_len):
+    """plan_texture_layers() answer straight from the exact header, or None when
+    the header does not parse or does not tile the stream byte-for-byte."""
+    ex = parse_texture_frames(hdr)
+    if not ex:
+        return None
+    sets = [[d for d in fr["slots"] if d] for fr in ex["frames"]]
+    L = sets[0]
+    key = lambda ls: [(d["slot"], d["enum"], d["aw"], d["ah"], d["mip"], d["type"]) for d in ls]
+    if any(key(x) != key(L) for x in sets[1:]):
+        return None
+    cube = any(d["type"] == 2 for d in L)
+    if cube and (len(L) != 1 or len(sets) != 1):
+        return None  # layer order inside a multi-layer cube was never observed
+    S = sum(d["chain"] for d in L)
+    count = 6 if cube else len(sets)
+    if S * count != stream_len:
+        return None
+    kind = "cube" if cube else ("anim" if count > 1 else "single")
+    return {"kind": kind, "layers": L, "count": count, "exact": True}
+
+
 def parse_texture_header(hdr, order="<"):
     """Deterministically parse a Texture .header blob.
 
@@ -371,7 +679,7 @@ def parse_texture_header(hdr, order="<"):
     mip count.  (Stored byte-resolution still comes from the stream length — this
     block stores reduced-LOD data; see MASTER §6.)
     """
-    if asset_class(hdr, order) != "Texture":
+    if not _is_texture(hdr, order):
         return None
     tlen = struct.unpack_from(order + "I", hdr, 0)[0]
     p = 4 + tlen + 4  # skip typeName + classId(0x2D)
@@ -550,6 +858,9 @@ def plan_texture_layers(hdr, stream_len):
       cube  : count == 6, layers describe ONE face
       anim  : count == N frames, layers describe ONE frame (a full material set)
     """
+    ex = _exact_texture_plan(hdr, stream_len)
+    if ex:
+        return ex
     L, last, end, rs = _stride_layers(hdr)
     if not L:
         return {"kind": "fail", "layers": [], "count": 0}
@@ -606,30 +917,29 @@ def plan_texture_layers(hdr, stream_len):
     return {"kind": "fail", "layers": L, "count": 0}
 
 
-def extract_block(h_data, s_data):
-    """Yield (entry, header, stream) for every asset, with DETERMINISTIC binding.
+def extract_block(h_data, s_data, language=0):
+    """Yield (entry, header, stream) for every asset.
 
-    Stream binding (cracked 2026-06-25, search-free): the (off,sz) pair is a TRAILER
-    written after each asset's name and locates THAT asset's own stream. A head-first
-    TOC parser reads the trailer as the *leading* field of the next record, so the
-    pair physically parsed on entry i+1 actually belongs to entry i. Hence:
-
-        stream(entry i) = entries[i+1].best_stream, present iff entries[i+1].flag == 1
-
-    The block-tables region opens with one sentinel flag/pair owned by no asset. This
-    resolves 1190/1190 textures across all level blocks with zero content search (was
-    a ±2 search). See docs/WATCHMEN_EXTRACTION_MASTER.md §6.
+    Engine layout (FUN_004a3525): the header blobs follow the directory in record
+    order; each record's stream pair is the tail of ITS OWN record.  After the
+    `num_entries` main records the loader seeks to `language_header_offset
+    [language]` and reads the `num_localized` per-language blobs from there
+    (0x4a3938).  `language` picks the slot (0..5) for sizes, offsets and that seek.
     """
-    entries, data_start = parse_block_toc(h_data)
+    entries, data_start = parse_block_toc(h_data, language=language)
+    bo = BLOCK_ORDER
+    num = struct.unpack_from(bo + "I", h_data, NUM_TABLES_OFFSET)[0]
+    lang_off = struct.unpack_from(bo + "6I", h_data, 364)
     cur = data_start
     for i, e in enumerate(entries):
+        if i == num and 0 <= language < BLOCK_LANGUAGES and lang_off[language]:
+            cur = lang_off[language]
         dsz = e.data_size
         header = _maybe_inflate(h_data[cur : cur + dsz])
         cur += dsz
         stream = None
-        nxt = entries[i + 1] if i + 1 < len(entries) else None
-        if nxt is not None and nxt.flag > 0 and s_data is not None and nxt.best_stream:
-            off, sz = nxt.best_stream
+        if e.has_stream and s_data is not None and e.best_stream:
+            off, sz = e.best_stream
             if 0 <= off and off + sz <= len(s_data):
                 stream = _maybe_inflate(s_data[off : off + sz])
         yield e, header, stream
@@ -773,6 +1083,17 @@ def _looks_like_normal(XY):
     if not (112 <= X.mean() <= 144 and 112 <= Y.mean() <= 144):
         return False
     return _coherence(X) < 16 and _coherence(Y) < 16
+
+
+def _unpad_linear(buf, en, w, h):
+    """Top mip of a LINEAR layer without the 4-byte row padding (no-op unless the
+    row size is not a multiple of 4, i.e. L8 narrower than 4 texels)."""
+    k, unit = TEX_FMT[en][1]
+    row = w * unit
+    if k == "blk" or row % 4 == 0:
+        return buf
+    pitch = (row + 3) & ~3
+    return b"".join(buf[y * pitch : y * pitch + row] for y in range(h))
 
 
 def _decode_one_layer(buf, en, w, h, normal=False):
@@ -1270,7 +1591,7 @@ def carve_texture(stream, header, out_dir, log=None):
     S = len(stream)
     if S < 16:  # was 256, which silently skipped 12 tiny valid textures
         return False
-    if asset_class(header, "<") != "Texture" and asset_class(header, ">") == "Texture":
+    if not _is_texture(header, "<") and _is_texture(header, ">"):
         return carve_texture_console(stream, header, out_dir, log)
     info = parse_texture_header(header)
     if info is None:
@@ -1301,16 +1622,20 @@ def carve_texture(stream, header, out_dir, log=None):
         return _carve_texture_legacy(stream, header, out_dir, log)
     out_dir.mkdir(parents=True, exist_ok=True)
     layers, kind, count = plan["layers"], plan["kind"], plan["count"]
-    set_bytes = sum(_chain_bytes(x["enum"], x["aw"], x["ah"], x["mip"]) for x in layers)
+    cb = lambda x: x.get("chain") or _chain_bytes(x["enum"], x["aw"], x["ah"], x["mip"])
+    set_bytes = sum(cb(x) for x in layers)
     wrote = 0
 
     def dump_set(buf, prefix):
         nonlocal wrote
         off = 0
         for j, lay in enumerate(layers):
-            en, w, h, mip = lay["enum"], lay["aw"], lay["ah"], lay["mip"]
-            c = _chain_bytes(en, w, h, mip)
-            img = _decode_one_layer(buf[off : off + c], en, w, h)
+            en, w, h = lay["enum"], lay["aw"], lay["ah"]
+            c = cb(lay)
+            lb = buf[off : off + c]
+            if lay.get("chain"):  # exact plan: linear rows carry the 4-byte pitch
+                lb = _unpad_linear(lb, en, w, h)
+            img = _decode_one_layer(lb, en, w, h)
             off += c
             if img is None:
                 continue
@@ -1945,25 +2270,409 @@ def _model_is_body(header):
         return True  # default: treat as body (prior behaviour)
 
 
-def decode_model(header, stream, out_path, tex_index=None, log=None, order=None):
-    """DETERMINISTIC multi-submesh carve (strict validation -> no squish), split
-    into per-submesh OBJ objects, each with a material (named by its texture) and a
-    companion .mtl linking the diffuse/normal/specular/glossiness maps dumped to
-    textures/. Falls back to the single-run _pick_vb scan when the header has no
-    descriptors. With --glb, also emits a rigged + textured + animated .glb for
-    skinned (stride-56) character models."""
+# ---------------------------------------------------------------------------
+# ENGINE-EXACT ModelRes header (PC).  Reader chain, all read from the exe:
+#   FUN_00547006 ModelRes::Read -> FUN_00545927 (part / pivot node)
+#   -> FUN_00542541 (submesh record) -> FUN_004336ec (MeshBuffer header).
+# The stream blob then holds, per MeshBuffer in header order, the bulk fields in
+# the order FUN_00433ef4 reads them: vertices, indices, cluster table, lists,
+# optional per-vertex array.  Every offset is computed -- nothing is searched.
+# ---------------------------------------------------------------------------
+#: vertex stride per format id (exe table 0x00C791B0); the id is the third u32
+#: of the vertex-buffer descriptor and selects the D3D9 declaration (FUN_0045544e).
+VERTEX_STRIDES = (28, 24, 68, 16, 56, 44, 56, 60, 48, 20, 32)
+#: byte offsets of the elements of the formats ModelRes files use.
+#:   normal/tangent/bitangent = half3 (+1 unused half), uv = half2,
+#:   color = D3DCOLOR (bytes B,G,R,A), joints = D3DCOLOR (idx0..3 = bytes 2,1,0,3),
+#:   weights = half4.  Writers: FUN_00430efe (5), FUN_0043106f (6),
+#:   FUN_0043114e (9), FUN_00431195 (10).
+VERTEX_FORMATS = {
+    5: {"position": 0, "normal": 12, "color": 20, "uv": 24, "tangent": 28, "bitangent": 36},
+    6: {
+        "position": 0,
+        "normal": 12,
+        "color": 20,
+        "uv": 24,
+        "tangent": 28,
+        "bitangent": 36,
+        "joints": 44,
+        "weights": 48,
+    },
+    9: {"position": 0, "normal": 12},  # rigid shadow hull
+    10: {"position": 0, "normal": 12, "joints": 20, "weights": 24},  # skinned shadow hull
+}
+_VOLUME_FLOATS = {5: 3, 6: 1, 7: 2}  # box / sphere / capsule (FUN_00524b23)
+
+
+class _Rd:
+    """Bounds-checked sequential reader (raises ValueError past the end)."""
+
+    def __init__(s, b, order="<"):
+        s.b, s.p, s.o = b, 0, order
+
+    def _need(s, n):
+        if n < 0 or s.p + n > len(s.b):
+            raise ValueError("read past end")
+
+    def u32(s):
+        s._need(4)
+        v = struct.unpack_from(s.o + "I", s.b, s.p)[0]
+        s.p += 4
+        return v
+
+    def u8(s):
+        s._need(1)
+        v = s.b[s.p]
+        s.p += 1
+        return v
+
+    def boolean(s):
+        v = s.u8()
+        if v > 1:
+            raise ValueError("bool %d" % v)
+        return v
+
+    def floats(s, n):
+        s._need(4 * n)
+        v = struct.unpack_from(s.o + "%df" % n, s.b, s.p)
+        s.p += 4 * n
+        return v
+
+    def skip(s, n):
+        s._need(n)
+        s.p += n
+
+    def count(s, item_bytes=1):
+        """u32 element count, rejected when the elements cannot fit."""
+        n = s.u32()
+        if n * item_bytes > len(s.b) - s.p:
+            raise ValueError("count %d" % n)
+        return n
+
+    def string(s):
+        n = s.count()
+        if n > 65536:  # merged-mesh names run to a few KB (TwilightMansion_Attic)
+            raise ValueError("string %d" % n)
+        v = s.b[s.p : s.p + n]
+        s.p += n
+        return v.split(b"\0", 1)[0].decode("latin1")
+
+
+def _mr_meshbuffer(r):
+    """MeshBuffer header, FUN_004336ec."""
+    m = {"bbox_center": r.floats(3), "bbox_half": r.floats(3)}
+    m["has_color"] = r.u8()  # source flag bit 1 (builder 0x0043426c)
+    m["has_alpha"] = r.u8()  # source flag bit 2
+    if r.boolean():  # FUN_0042f9c1: cloth / physics side arrays
+        r.u8()
+        for sz in (12, 2, 12, 2, 2):
+            r.skip(r.count(sz) * sz)
+    m["vertex_flags"], m["vertex_count"], m["format"] = r.u32(), r.u32(), r.u32()
+    m["index_flags"], m["index_bytes"], m["ix"] = r.u32(), r.u32(), r.u32()
+    if m["format"] >= len(VERTEX_STRIDES) or m["index_bytes"] % 2:
+        raise ValueError("vertex format %d" % m["format"])
+    return m
+
+
+def _mr_part(r, pi, buffers):
+    """Part / pivot node, FUN_00545927; submesh records FUN_00542541."""
+    P = {"pos": r.floats(3), "quat": r.floats(4), "name": r.string()}
+    P["f1"], P["parent"] = r.u32(), r.u32()
+    P["lods"] = []
+    for li in range(r.count(4)):
+        lod = []
+        for si in range(r.count(20)):
+            sm = {"name": r.string()}
+            sm["tex_index"] = [r.u32() for _ in range(r.count(4))]
+            sm["b24"], inline, sm["u28"] = r.boolean(), r.boolean(), r.u32()
+            sm["dynamic_copy"], sm["no_defer"] = r.boolean(), r.boolean()
+            if inline:  # FUN_00433ef4 inline bulk: never seen in shipped data
+                raise ValueError("inline mesh buffer")
+            mb = _mr_meshbuffer(r)
+            r.skip(r.count())  # cooked physics blob
+            sm.update(mb, kind="render", part=pi, lod=li)
+            lod.append(sm)
+            buffers.append(sm)
+        P["lods"].append(lod)
+    P["shadow"] = []
+    for _ in range(r.count(4)):
+        for _ in range(r.count(30)):
+            r.boolean()
+            r.u32()
+            mb = _mr_meshbuffer(r)
+            mb.update(kind="shadow", part=pi, lod=None, name="", tex_index=[])
+            P["shadow"].append(mb)
+            buffers.append(mb)
+    P["proxy"] = None
+    if r.boolean():  # one coarse format-5 slab per part (doors, walls, containers)
+        mb = _mr_meshbuffer(r)
+        mb.update(kind="proxy", part=pi, lod=None, name="", tex_index=[])
+        P["proxy"] = mb
+        buffers.append(mb)
+    for _ in range(2):  # collision volumes (FUN_00524b23) + cooked blob
+        for _ in range(r.count(8)):
+            t = r.u32()
+            r.u32()
+            if t in _VOLUME_FLOATS:
+                r.floats(_VOLUME_FLOATS[t])
+            elif t in (2, 4):
+                r.u32()
+                r.skip(r.count(12) * 12)
+                r.skip(r.count(4) * 4)
+            else:
+                raise ValueError("volume type %d" % t)
+            r.floats(7)
+            r.skip(r.count())
+    for _ in range(r.count(12)):  # FUN_00561d1c
+        r.skip(r.count(20) * 20)
+        r.skip(r.count(12) * 12)
+        r.skip(r.count(4) * 4)
+    return P
+
+
+def parse_model_header(header, order="<"):
+    """ModelRes header -> dict, or None when the blob does not follow the Part 2
+    layout (console/Part 1 variants, truncated data): callers then fall back to
+    the descriptor scan.
+
+    {"type", "textures": [path], "texture_flags", "pivotbooks", "bbox_center",
+     "bbox_half", "parts": [{name, pos, quat, f1, parent, lods: [[submesh]],
+     shadow: [buf], proxy: buf|None}], "buffers": [buf in STREAM order], "end"}
+    Every buf has kind ('render' | 'shadow' | 'proxy'), part, lod, name,
+    tex_index, format, vertex_count, index_bytes, has_color, has_alpha, bbox_*."""
+    if asset_base_class(asset_class(header, order)).lower() not in ("modelres", "model"):
+        return None
+    try:
+        r = _Rd(header, order)
+        M = {"type": r.string()}
+        r.skip(r.count(4) * 4)  # property bag: dword count (FUN_00511f96)
+        r.u32()
+        M["has_skeleton"] = r.boolean()
+        r.u32()
+        M["has_cloth"] = r.boolean()
+        r.skip(r.count(32) * 32)
+        r.skip(r.count(4) * 4)
+        M["bbox_center"], M["bbox_half"] = r.floats(3), r.floats(3)
+        tex = [(r.boolean(), r.string()) for _ in range(r.count(5))]
+        M["texture_flags"] = [t[0] for t in tex]
+        M["textures"] = [t[1] for t in tex]
+        M["pivotbooks"] = [r.string() for _ in range(r.count(4))]
+        buffers = []
+        M["parts"] = [_mr_part(r, pi, buffers) for pi in range(r.count(40))]
+        M["buffers"] = buffers
+        M["end"] = r.p  # physics / cloth / animation-event tail follows
+    except (ValueError, struct.error, IndexError):
+        return None
+    return M
+
+
+def model_stream_layout(model, stream, order="<"):
+    """Locate every buffer of `model` (parse_model_header) in the stream blob.
+    Adds vb / ib / stride / clusters=(offset, count) to each buffer and returns
+    the buffer list, or None unless the layout consumes the stream EXACTLY."""
+    p, n = 0, len(stream)
+    try:
+        for b in model["buffers"]:
+            b["stride"] = VERTEX_STRIDES[b["format"]]
+            b["vb"] = p
+            p += b["vertex_count"] * b["stride"]
+            b["ib"] = p
+            p += b["index_bytes"]
+            (nc,) = struct.unpack_from(order + "I", stream, p)
+            b["clusters"] = (p + 4, nc)
+            p += 4 + nc * 40
+            (nl,) = struct.unpack_from(order + "I", stream, p)
+            p += 4
+            for _ in range(nl):
+                p += 8 + struct.unpack_from(order + "I", stream, p + 4)[0] * 0x44
+            if p >= n:
+                return None
+            if stream[p] > 1:
+                return None
+            p += 1 + (b["vertex_count"] * 8 if stream[p] else 0)
+            if p > n:
+                return None
+    except struct.error:
+        return None
+    return model["buffers"] if p == n else None
+
+
+def _material_stem(path):
+    return path.replace("\\", "/").split("/")[-1].rsplit(".", 1)[0]
+
+
+def check_lod(lod):
+    """`lod` as decode_model / select_model_buffers accept it: 'all' / None or an
+    int >= 0.  ValueError otherwise (a negative LOD used to select no buffer and
+    silently drop the model onto the legacy scan)."""
+    if lod in (None, "all"):
+        return lod
+    if isinstance(lod, bool) or not isinstance(lod, int) or lod < 0:
+        raise ValueError("model LOD must be a whole number >= 0 or 'all', not %r" % (lod,))
+    return lod
+
+
+def _model_lod_arg(v):
+    import argparse
+
+    try:
+        return check_lod(v if v == "all" else int(v))
+    except ValueError:
+        raise argparse.ArgumentTypeError("expected a whole number >= 0 or 'all', got %r" % v)
+
+
+def _language_arg(v):
+    import argparse
+
+    try:
+        n = int(v)
+    except ValueError:
+        n = -1
+    if not 0 <= n < BLOCK_LANGUAGES:
+        raise argparse.ArgumentTypeError(
+            "expected a language slot 0..%d, got %r" % (BLOCK_LANGUAGES - 1, v)
+        )
+    return n
+
+
+def select_model_buffers(model, lod=0, kinds=("render",)):
+    """Buffers of the requested kinds, in stream order.  `lod`: an int picks that
+    LOD of every part (clamped to the part's last LOD); 'all' / None keeps all."""
+    lod = check_lod(lod)
+    out = []
+    for b in model["buffers"]:
+        if b["kind"] not in kinds:
+            continue
+        if b["kind"] == "render" and lod not in (None, "all"):
+            nl = len(model["parts"][b["part"]]["lods"])
+            if b["lod"] != min(int(lod), nl - 1):
+                continue
+        out.append(b)
+    return out
+
+
+def decode_vertex_attributes(stream, buf):
+    """Numpy views of ONE located buffer (model_stream_layout) beyond what the
+    OBJ writer uses.  Keys present depend on the vertex format:
+      color      (N,4) uint8 RGBA                       (formats 5, 6)
+      tangent    (N,3) float32  = dP/du                 (formats 5, 6)
+      bitangent  (N,3) float32  = dP/dv                 (formats 5, 6)
+      joints     (N,4) uint8, weights (N,4) float32 raw (formats 6, 10)"""
+    lay = VERTEX_FORMATS.get(buf["format"])
+    if lay is None or not HAVE_IMG:
+        return {}
+    nv, st = buf["vertex_count"], buf["stride"]
+    a = np.frombuffer(stream, np.uint8, nv * st, buf["vb"]).reshape(nv, st)
+    half = lambda off, k: np.ascontiguousarray(a[:, off : off + 2 * k]).view("<f2")
+    out = {}
+    if "color" in lay:
+        c = lay["color"]
+        out["color"] = np.ascontiguousarray(a[:, [c + 2, c + 1, c, c + 3]])
+    if "tangent" in lay:
+        out["tangent"] = half(lay["tangent"], 3).astype(np.float32)
+        out["bitangent"] = half(lay["bitangent"], 3).astype(np.float32)
+    if "joints" in lay:
+        j = lay["joints"]
+        out["joints"] = np.ascontiguousarray(a[:, [j + 2, j + 1, j, j + 3]])
+        out["weights"] = half(lay["weights"], 4).astype(np.float32)
+    return out
+
+
+def gltf_tangents(normals, tangents, bitangents):
+    """(N,4) float32 glTF TANGENT: unit tangent + handedness sign of the stored
+    bitangent against cross(normal, tangent)."""
+    n = np.asarray(normals, np.float32)
+    t = np.asarray(tangents, np.float32)
+    b = np.asarray(bitangents, np.float32)
+    ln = np.linalg.norm(t, axis=1, keepdims=True)
+    t = np.where(ln > 1e-9, t / np.maximum(ln, 1e-9), np.array([[1.0, 0.0, 0.0]], np.float32))
+    w = np.where((np.cross(n, t) * b).sum(1) < 0, -1.0, 1.0).astype(np.float32)
+    return np.concatenate([t, w[:, None]], 1).astype(np.float32)
+
+
+def decode_model_mesh(header, stream, lod=0, kinds=("render",)):
+    """Header-driven PC mesh decode.  Returns None when the header path does not
+    apply (use decode_model's scan fallback), else
+    {"model": parse_model_header dict, "submeshes": [ {name, kind, part, lod,
+      format, stride, material (texture stem or None), texture (path or None),
+      positions, normals, uvs  (python lists, same values as the OBJ writer gets),
+      triangles [(a, b, c)] local indices, vb, ib,
+      + decode_vertex_attributes() keys} ]}."""
+    M = parse_model_header(header, "<")
+    if M is None or stream is None or model_stream_layout(M, stream, "<") is None:
+        return None
+    subs = []
+    for b in select_model_buffers(M, lod, kinds):
+        nv, st = b["vertex_count"], b["stride"]
+        verts, norms, uvs = _decode_sub(stream, b["vb"], nv, st, False)
+        if "uv" not in VERTEX_FORMATS.get(b["format"], {}):
+            uvs = None
+        idx = struct.unpack_from("<%dH" % (b["index_bytes"] // 2), stream, b["ib"])
+        ti = b["tex_index"][0] if b["tex_index"] else None
+        tex = M["textures"][ti] if ti is not None and ti < len(M["textures"]) else None
+        d = {
+            "name": b["name"],
+            "kind": b["kind"],
+            "part": b["part"],
+            "lod": b["lod"],
+            "format": b["format"],
+            "stride": st,
+            "vb": b["vb"],
+            "ib": b["ib"],
+            "texture": tex,
+            "material": _material_stem(tex) if tex else None,
+            "positions": verts,
+            "normals": norms,
+            "uvs": uvs,
+            "triangles": [idx[i : i + 3] for i in range(0, len(idx) - 2, 3)],
+        }
+        d.update(decode_vertex_attributes(stream, b))
+        subs.append(d)
+    return {"model": M, "submeshes": subs}
+
+
+def _header_model_plan(header, stream, lod):
+    """Render buffers of the requested LOD with exact stream offsets, or None when
+    the engine-exact header path does not apply to this model."""
+    M = parse_model_header(header, "<")
+    if M is None or not stream or model_stream_layout(M, stream, "<") is None:
+        return None
+    bufs = [b for b in select_model_buffers(M, lod) if b["format"] in (5, 6)]
+    if not bufs:
+        return None
+    return M, bufs
+
+
+def decode_model(header, stream, out_path, tex_index=None, log=None, order=None, lod=0):
+    """Per-submesh OBJ (+ .mtl linking the diffuse/normal/specular/glossiness maps
+    dumped to textures/), each material named by its texture.
+
+    PC models are decoded HEADER-DRIVEN (parse_model_header: every buffer offset
+    and the texture-list index of each submesh come from the file).  `lod` picks
+    the level of detail written: 0 (default) = the full-detail mesh, an int = that
+    LOD, 'all' = every LOD.  Shadow hulls and per-part proxy slabs are never
+    written.  Anything the header path rejects (console files, Part 1 variants)
+    takes the descriptor scan: strict-validated VB search, then the single-run
+    _pick_vb scan.  With --glb, also emits a rigged + textured .glb for skinned
+    (stride-56) character models."""
     if tex_index is None:
         tex_index = {}
     if not callable(log):
         log = lambda *a, **k: None
-    if order is None:  # auto: pick the order with MORE descriptors
+    hplan = _header_model_plan(header, stream, lod) if order in (None, "<") else None
+    if hplan:
+        order = "<"
+    elif order is None:  # auto: pick the order with MORE descriptors
         # (a BE model can throw a stray false-positive LE descriptor, so "LE if
         # non-empty" mis-detects those -- compare counts instead).
         order = (
             ">" if len(find_descriptors(header, ">")) > len(find_descriptors(header, "<")) else "<"
         )
     be = order == ">"
-    descs = find_descriptors(header, order)
+    if hplan:
+        descs = [(b["vertex_count"], b["stride"], b["index_bytes"]) for b in hplan[1]]
+    else:
+        descs = find_descriptors(header, order)
     V = []
     N = []
     U = []
@@ -1981,8 +2690,8 @@ def decode_model(header, stream, out_path, tex_index=None, log=None, order=None)
         for di, (nv, stride, ib) in enumerate(descs):
             hi = len(stream) - nv * stride - ib
             cand = off
-            vbo = None
-            while cand <= min(off + 65536, hi):
+            vbo = hplan[1][di]["vb"] if hplan else None
+            while vbo is None and cand <= min(off + 65536, hi):
                 if (
                     _sane(struct.unpack_from(order + "f", stream, cand)[0])
                     and _vb_ok(stream, cand, nv, stride, ib, order)
@@ -2059,13 +2768,22 @@ def decode_model(header, stream, out_path, tex_index=None, log=None, order=None)
     if not T:
         return False
     mats = extract_materials(header)
+    materials = None
+    if hplan and didx and len(didx) == len(subs):
+        # the submesh record carries the index into the model's texture list
+        # (FUN_00542541, array at record+0x18)
+        tex = hplan[0]["textures"]
+        materials = []
+        for k in didx:
+            ti = hplan[1][k]["tex_index"]
+            ok = ti and ti[0] < len(tex)
+            materials.append(_material_stem(tex[ti[0]]) if ok else "submesh_%d" % k)
     # Per-submesh materialIndex read from the header records (2026-08-17): positional
     # pairing is WRONG whenever one material covers several submeshes (see the
     # submesh_materials docstring; Rorschach trenchcoat) -- same pattern as
     # char_lib._parts.  Falls back to the old positional logic when the records
     # are unavailable/unparsable (or the _pick_vb path, which has no descriptors).
-    materials = None
-    if mats and didx and len(didx) == len(subs):
+    if materials is None and mats and didx and len(didx) == len(subs):
         try:
             smat = submesh_materials(header, order)
         except Exception:
@@ -2934,6 +3652,20 @@ def main(argv):
     ap.add_argument(
         "--limit", type=int, default=None, metavar="N", help="stop after N block assets (debug)"
     )
+    ap.add_argument(
+        "--model-lod",
+        type=_model_lod_arg,
+        default=0,
+        metavar="N|all",
+        help="which level of detail of each PC model to write: 0 (default) = full detail, N = that LOD (clamped per part), 'all' = every LOD in one file",
+    )
+    ap.add_argument(
+        "--language",
+        type=_language_arg,
+        default=0,
+        metavar="0..5",
+        help="language slot used for localized block assets (per-language header blobs and streams); default 0",
+    )
     ap.add_argument("--quiet", action="store_true")
     a = ap.parse_args(argv)
     if not a.naz.exists():
@@ -3028,7 +3760,10 @@ def main(argv):
             break  # --limit N: stop after N block assets (was accepted but ignored)
         log("\nBLOCK %s" % stem)
         try:
-            it = list(extract_block(hs["h"], hs.get("s")))
+            if a.language:
+                it = list(extract_block(hs["h"], hs.get("s"), a.language))
+            else:
+                it = list(extract_block(hs["h"], hs.get("s")))
         except Exception as ex:
             log("  ! parse failed: %s" % ex)
             continue
@@ -3036,7 +3771,9 @@ def main(argv):
             if a.limit is not None and n_assets >= a.limit:
                 break
             n_assets += 1
-            cls = asset_class(header, BLOCK_ORDER)
+            # script classes ("ModelEffects(ModelRes)", "TextureEffects(Texture)")
+            # are read by their base class loader -> dispatch on the base name
+            cls = asset_base_class(asset_class(header, BLOCK_ORDER))
             name = e.name
             low = name.lower()
             # class-name compare is case-insensitive (2026-08-17): the source had
@@ -3166,10 +3903,11 @@ def main(argv):
                 log("  skeleton_%-12s %3d bones" % (_fam, _s["bone_count"]))
         except Exception as _ex:
             log("  ! skeleton pass: %s" % _ex)
+    model_lod = a.model_lod
     log("\nMODELS: %d  (textures indexed: %d)" % (len(model_jobs), len(tex_index)))
     for header, stream, out_path, mo in model_jobs:
         try:
-            if decode_model(header, stream, out_path, tex_index, log, order=mo):
+            if decode_model(header, stream, out_path, tex_index, log, order=mo, lod=model_lod):
                 stats["mdl"] += 1
         except Exception as ex:
             log("      ! model %s: %s" % (out_path.name, ex))

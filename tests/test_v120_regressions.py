@@ -629,24 +629,29 @@ def test_skeleton_records_explicit_order_matches_autodetect():
 # 9. parse_node_aux honours order
 # ---------------------------------------------------------------------------
 
+# 2026-10: regenerated for the engine layout (Node::Deserialize 0x545927).  The
+# 1.2.0 fixture wrote fixed 48-byte "joints" [type][0][pos][a][a'][quat], which
+# is only what a capsule looks like when its (diameter, height) are misread as
+# the start of the position; a sphere is 44 bytes.
 AUX_JOINTS = [
-    (7, (0.1, 0.2, 0.3), (1.5, 2.5), (0.0, 0.0, 0.0, 1.0), b""),
-    (6, (0.4, 0.5, 0.6), (0.25, 0.75), (0.0, 0.6, 0.0, 0.8), b"abcdefg"),
+    # (type, type data, pos, quat, blob)
+    (7, (1.5, 2.5), (0.1, 0.2, 0.3), (0.0, 0.0, 0.0, 1.0), b""),  # capsule: diameter, height
+    (6, (0.25,), (0.4, 0.5, 0.6), (0.0, 0.6, 0.0, 0.8), b"abcdefg"),  # sphere: radius
 ]
 
 
 def _aux_region(order, parent=3, c34=2, joints=AUX_JOINTS):
-    """One node aux region, per the layout documented above parse_node_aux:
-    [f1][parent][cnt34][cnt34 x u32 0][cnt40=0][u8 0][njoint]
-    per joint [type][0][pos x3][a][a'][quat x4][blobLen][blob]  [0][0]."""
+    """One node aux region:
+    [f1][parent][cnt34][cnt34 x u32 0][cnt40=0][u8 0][n0]
+    per volume [type][base=0][type data][pos x3][quat x4][blobLen][blob]  [n1=0][n2=0]."""
     b = bytearray()
     b += struct.pack(order + "3I", 0, parent, c34)
     b += struct.pack(order + "%dI" % c34, *([0] * c34))
     b += struct.pack(order + "I", 0) + b"\0"
     b += struct.pack(order + "I", len(joints))
-    for t, pos, (a, a2), q, blob in joints:
+    for t, data, pos, q, blob in joints:
         b += struct.pack(order + "2I", t, 0)
-        b += struct.pack(order + "3f", *pos) + struct.pack(order + "2f", a, a2)
+        b += struct.pack(order + "%df" % len(data), *data) + struct.pack(order + "3f", *pos)
         b += struct.pack(order + "4f", *q) + struct.pack(order + "I", len(blob)) + blob
     b += struct.pack(order + "2I", 0, 0)
     return bytes(b)
@@ -656,10 +661,13 @@ def _check_aux(r):
     assert r is not None
     assert r["parent"] == 3
     assert len(r["joints"]) == len(AUX_JOINTS)
-    for j, (t, pos, (a, a2), q, blob) in zip(r["joints"], AUX_JOINTS):
+    for j, (t, data, pos, q, blob) in zip(r["joints"], AUX_JOINTS):
         assert j["type"] == t
         assert np.allclose(j["pos"], pos, atol=1e-6)
-        assert j["a"] == pytest.approx(a) and j["a2"] == pytest.approx(a2)
+        if t == 7:
+            assert j["a"] == pytest.approx(data[0]) and j["a2"] == pytest.approx(data[1])
+        else:
+            assert j["a"] is None and j["radius"] == pytest.approx(data[0])
         assert np.allclose(j["quat"], q, atol=1e-6)
         assert j["blob"] == blob
 

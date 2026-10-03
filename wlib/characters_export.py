@@ -463,9 +463,54 @@ def grip_anims(anims, bn, par):
     return out
 
 
-def export(extract_out, outdir, naz="game.naz", budget=None, only=None):
+def animation_meta(extract_out, outdir):
+    """The game's animation metadata table (anim_meta.build), written once to
+    <outdir>/anim_meta.json and reused by later (resumed) runs.  None when the
+    extract has no AnimationClass fragments (it is optional decoration: a
+    failure here must not stop the character export)."""
+    import json
+    import anim_meta
+
+    path = os.path.join(outdir, "anim_meta.json")
+    if os.path.exists(path):
+        try:
+            with open(path, encoding="utf-8") as fh:
+                m = json.load(fh)
+            if m.get("format") == anim_meta.FORMAT:
+                return m
+        except (OSError, ValueError):
+            pass
+    try:
+        if not anim_meta.find_class_fragments(extract_out):
+            return None
+        bdir = os.path.join(extract_out, "binds")
+        m = anim_meta.build(extract_out, binds=bdir if os.path.isdir(bdir) else None)
+    except Exception as ex:
+        print("  anim_meta: skipped (%s: %s)" % (type(ex).__name__, ex))
+        return None
+    os.makedirs(outdir, exist_ok=True)
+    with open(path + ".tmp", "w", encoding="utf-8", newline="\n") as fh:
+        json.dump(m, fh, indent=1)
+    os.replace(path + ".tmp", path)
+    print("  anim_meta: %s -> %s" % (anim_meta.summary(m), path))
+    return m
+
+
+def jiggle_cache_dir(cdir, jiggle_model=None):
+    """Directory of the jiggled-palette memo of bake cache `cdir`.  Its name
+    carries the jiggle model, mode and constants (jiggle_d6.cache_signature), so a
+    directory baked with another model -- including the bare `<key>_j` of 1.2.0 --
+    is never read.  Old directories are simply unused and can be deleted."""
+    from jiggle_d6 import cache_signature
+
+    return cdir + "_j_" + cache_signature(jiggle_model)
+
+
+def export(extract_out, outdir, naz="game.naz", budget=None, only=None, jiggle_model=None):
     """Write <outdir>/<Char>/<Variant>.glb.  Resumable: existing glbs skipped,
-    bakes cached.  budget: seconds of baking per skeleton per call."""
+    bakes cached.  budget: seconds of baking per skeleton per call.
+    jiggle_model: 'pinned' / 'pivot' (None = jiggle_d6.DEFAULT_MODEL).  Existing
+    glbs are NOT rebuilt when the model changes: delete them to re-export."""
     import char_lib, variant_glb as vg
 
     chars = discover(extract_out)
@@ -477,6 +522,7 @@ def export(extract_out, outdir, naz="game.naz", budget=None, only=None):
             "(e.g. part1_pc/Watchmen/derived_pc) as the 3rd argument." % str(naz)
         )
     pending = 0
+    meta = animation_meta(extract_out, outdir)
     for cname, vs in sorted(chars.items()):
         if only and cname != only:
             continue
@@ -507,7 +553,7 @@ def export(extract_out, outdir, naz="game.naz", budget=None, only=None):
                     anims = []
                     from jiggle_d6 import apply_jiggle
 
-                    jdir = cdir + "_j"  # jiggle disk memo (chunked runs)
+                    jdir = jiggle_cache_dir(cdir, jiggle_model)  # disk memo (chunked runs)
                     os.makedirs(jdir, exist_ok=True)
                     jn = 0
                     jig_todo = []  # anim indices needing a jiggle attempt
@@ -542,7 +588,7 @@ def export(extract_out, outdir, naz="game.naz", budget=None, only=None):
                     for i in jig_todo:
                         nm, pal, fps = anims[i]
                         try:
-                            jp = apply_jiggle(pal, fps, bind)
+                            jp = apply_jiggle(pal, fps, bind, model=jiggle_model)
                         except Exception:
                             if jn == 0:
                                 break  # skeleton without jiggle bones
@@ -630,6 +676,7 @@ def export(extract_out, outdir, naz="game.naz", budget=None, only=None):
                     textures=tex,
                     face=face,
                     attachments=atts,
+                    meta=meta,
                 )
                 os.replace(out + ".tmp", out)
     return pending

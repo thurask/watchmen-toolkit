@@ -3,6 +3,13 @@
 The extractor left fragments as "passthrough" (prop_count 0). Reversed the property-bag node tree
 from the binary. `wlib/kapow_fragment.py` parses it (losslessly).
 
+> **Corrected 2026-10-02.** The record framing described in the first two
+> sections below was partly wrong, and the parser built on it lost alignment
+> after the opening block. The engine-verified grammar is in
+> [Stream grammar](#stream-grammar-corrected-2026-10-02); statements it
+> replaces are marked where they stand. The key hash is not "CRC over the
+> UPPERCASE name": every byte is ANDed with 0xDF (`kapow_props.name_hash`).
+
 ## Node record
 Each scene-graph node is a variable-length record. The fixed, reliable part is:
 ```
@@ -10,9 +17,16 @@ Each scene-graph node is a variable-length record. The fixed, reliable part is:
 [ u32  parentHash ]                   0xFFFFFFFF / 0xFFFFFFFE = root-ish/no-parent ; otherwise = parent node's hash
 [ u32  selfHash ]                     this node's id (other nodes reference it by this)
 [ u32  depth ]                        tree nesting depth  <-- reconstructs the hierarchy
+                                      [corrected 2026-10-02: 0xFFFFFFFF / 0xFFFFFFFE are record
+                                      markers (type record / instance), not parents, and the u32
+                                      in front of a type name is the name's length in 32-bit
+                                      words, not a depth -- see "Stream grammar"]
 [ optional name '\0' ]               e.g. "{dominatrice}", "{act_FOLLOW_PIVOT_{dominatrice}}", "Cam_01"
 [ embedded typed properties ]        [u32 keyHashLo][u32 keyHashHi][u32 typeTag][value...] records,
                                       variable size (floats for pivot transforms, ids for references)
+                                      [corrected 2026-10-02: in a fragment a property is
+                                      [u32 keyHash][value]; there is no second hash word and no
+                                      type tag -- the type comes from the key]
 ```
 `TypeName` is the engine class + node kind, e.g. `CharacterDef(Node)`, `EnemyDef(Node)`,
 `CharacterModelCollection(Node)`, `CharacterHeadModel(Character)`, `CharacterGroup(Folder)`,
@@ -30,6 +44,10 @@ A `.fragment.header` is two serializations back to back:
 1. **Front schema table (0 .. ~43 KB)** — pure topology. Tightly-packed records
    `[u32 depth][TypeName '\0', padded to 4][u32 parent=0xFFFFFFFF][u32 selfHash]`.
    Gives the node-TYPE tree. No values here.
+   *[corrected 2026-10-02: the same bytes, framed correctly, are type records
+   `[FFFFFFFF][nodeId][wc][TypeName]`. "depth" is `wc`, the word count of the
+   name; "parent = 0xFFFFFFFF" is the marker of the next record. Type records
+   are not confined to the front: they recur between instances.]*
 
 2. **Back instance stream (~43 KB .. EOF)** — the named nodes + their property values.
    Per node:
@@ -46,6 +64,59 @@ A `.fragment.header` is two serializations back to back:
    stream is NOT 4-byte aligned — a string/vector value shifts everything after it. The node's
    **world translation is a float3 (x,y,z)** sitting in its span; the transform decoder finds it by a
    byte-granular sane-float-triple scan (skips the `(-5.6, *, -5.6)` default-bounds placeholder).
+   *[corrected 2026-10-02: a value's size follows from its key's type — see the
+   sizes under "Stream grammar"; the position is read from its key (see
+   "Transform record" below), not found by a scan. An instance is opened by
+   `0xFFFFFFFE` only; `0xFFFFFFFF` opens a type record and is never followed
+   by properties.]*
+
+## Stream grammar (corrected 2026-10-02)
+
+Engine readers `FUN_005473ee` / `FUN_00545e1b`; implemented in
+`wlib/kapow_fragment.py`.
+
+```
+file    = [header: 17 bytes, or extended with a name when a flag bit is set] + chunks
+chunk   = [u32 size <= 0x2800][payload]        payloads concatenate into ONE stream
+stream  = ( type record | instance )*
+
+type record = [FFFFFFFF][nodeId][wc][TypeName, NUL-padded to wc words]
+instance    = [FFFFFFFE][nodeId] ( [keyHash][value] )*
+```
+
+- `TypeName` is `Class(Native)` for a script class (`CharacterRoot(PivotNode)`)
+  or a bare native class (`Folder`, `Model`, `Sprite`, …).
+- Type records open the stream **and recur between instances**. `0xFFFFFFFF`
+  is never followed by properties. The parser used to accept only the
+  parenthesised form in the opening block and read every later record's word
+  count and name bytes as property keys — the source of keys such as
+  `key_00000006` or `key_63697461` ("atic").
+- A 17-byte file is a header with no chunk: an empty fragment, not a failure
+  (9 of the 906 Part 2 files).
+- `keyHash = name_hash(name)`: bit-CRC32, poly 0x04C11DB7, over the name's
+  bytes `& 0xDF` (engine `FUN_00423ce8`). Digits fold too, so this is not
+  `hash(name.upper())`: `m_nsupersynclocal1` is `0xee2a40a0`.
+- Value sizes by type: number / integer / truth / color 4 bytes; biginteger 8;
+  vector 12; quaternion 16; string `[wc][wc × 4 bytes]`; `list(T)`
+  `[count][T × count]`; entity references are tagged (`[tag]`, tag 0 / 1 / 2 =
+  4 bytes, tag 3 = `[3][nodeId]`, tag 4 = `[4][a][n][n words]`, tag 5 =
+  `[5][n][n words]`).
+- Key names and types come from `kapow_fragment_keys.pkl`. Built-in node
+  properties are typed from the engine's typed registration wrappers (862
+  names, e.g. `aspectRatio` number, `includeInAO` truth, `pivotSheet_Id`
+  biginteger). A registration site's `typeIdx` is the declaring class, not a
+  value type.
+
+In the JSON, `schema` lists every type record, created nodes carry their
+`type` in `nodes_full`, and a type record still produces a
+`{"node", "created": true, "props": []}` entry.
+
+Part 2 PC corpus (906 `.fragment` files): all 906 parse to the end of the
+file; 22 unknown-key occurrences remain (580,286 before the hash fold, the
+built-in types and type-record handling). The residue: 22 different values,
+each directly after `key_0991b0d4 = 3`, of the form `[X][float][0][0][0]`.
+`key_0991b0d4` is the one standard key without a name; its name and type are
+not established.
 
 ## Spawn map — RECOVERED (`enemy_spawns.json`)
 `watchmen fragment Enemies.fragment enemy_spawns.json`
@@ -107,6 +178,10 @@ plus `SetCamDir` aim markers and an `editorcamera`. These are the literal cinema
 The exact TriggerAction->target-group id wiring (u32 hash references in the property stream resolve via
 instHash, but per-key types aren't all mapped). The node names already make the wiring legible
 (`act_ACTIVATE_Entrance_enemies_02`, `act_FOLLOW_PIVOT_{dominatrice}`), so this is optional.
+*[2026-10-02: key typing is no longer the obstacle — see the corpus figures
+under "Stream grammar". Not established: the name and type of `key_0991b0d4`;
+the serialized size of `netparticipant` (one property, absent from the
+corpus).]*
 
 ## Encounter content (from the decoded types + the name table)
 Enemies.fragment instantiates, across 56 CharacterGroups / 164 spawn pivots:

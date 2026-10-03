@@ -1,0 +1,1508 @@
+{
+"format": "kapow-engine-enums/1",
+"source": "KapowMultiDEDRM.exe: every item is one call FUN_005052c9(family, 'PREFIX___NAME', value); ids and names exactly as registered (findings/enums.md)",
+"families": {
+"ANIMATION_CRITERIA": {
+"prefix": "ANIMATION_CRITERIA",
+"registered_in": "0x5e50f7",
+"items": {
+"0": "VALUE",
+"1": "ACTION",
+"2": "ENUM",
+"3": "EVENT",
+"4": "PLAY_TIME",
+"5": "PLAY_POS",
+"6": "REVERSE_PLAY_POS",
+"7": "OVERLAY_PLAY_POS",
+"8": "REVERSE_OVERLAY_PLAY_POS",
+"9": "ANIM_PLAY_DONE",
+"10": "FORCE_ANIM",
+"11": "ANY_OF",
+"12": "ALL_OF"
+}
+},
+"ANIMATION_ENUM": {
+"prefix": "ANIMATION_ENUM",
+"registered_in": "0x809e94",
+"items": {
+"0": "ATTACK_DIR",
+"1": "CHARACTER_MODE",
+"2": "ATTACK_TYPE",
+"3": "ATTACK_POSE",
+"4": "DAMAGE_POSE",
+"5": "WEAPON_ANIMATION_TYPE",
+"6": "MODEL_ANIMATION_TYPE",
+"7": "TARGET_MODE",
+"8": "OVERRIDE_ATTACK_COMBO",
+"9": "STATE_CHANGE_OVERRIDE",
+"10": "TARGET_LOCK",
+"11": "OPPONENT_MODEL_TYPE",
+"12": "OPPONENT_WEAPON_TYPE",
+"13": "KNEE",
+"14": "SPECIFIC_MODEL",
+"15": "SCENE_ID"
+}
+},
+"ANIMATION_VALUE": {
+"prefix": "ANIMATION_VALUE",
+"registered_in": "0x809e94",
+"items": {
+"0": "NONE",
+"1": "SPEED",
+"2": "DIRECTION",
+"3": "FREEFALL",
+"4": "ATTACK_MOVE_DIST",
+"5": "HEALTH",
+"6": "CHARACTER_PELVIS_ROTATION",
+"7": "CHARACTER_PELVIS_STATIONARY",
+"8": "CHARACTER_PELVIS_RAGDOLL_FREE",
+"9": "DISTANCE_TO_END_POS",
+"10": "CHARACTER_PELVIS_VELOCITY",
+"11": "CHARACTER_PELVIS_GROUND_HEIGHT",
+"12": "ANGLE_TO_TARGET",
+"13": "VERTICAL_ANGLE_TO_TARGET",
+"14": "RELATIVE_HEAD_HEIGHT",
+"15": "SPEED_TIME",
+"16": "TARGET_ANGLE_TO_YOU",
+"17": "HEAD_ANGLE_TO_TARGET",
+"18": "HEAD_VERTICAL_ANGLE_TO_TARGET",
+"19": "HAS_WEAPON",
+"20": "BLOCK_TIME",
+"21": "HAS_1H_WEAPON",
+"22": "HAS_2H_WEAPON",
+"23": "VERTICAL_HEIGHT_TO_TARGET",
+"24": "TARGET_DIST"
+}
+},
+"ANIMATION_EVENT": {
+"prefix": "ANIMATION_EVENT",
+"registered_in": "0x809e94",
+"items": {
+"0": "NONE",
+"1": "PUNCH",
+"2": "STOP_L",
+"3": "STOP_R",
+"4": "IMPACT",
+"5": "BRANCH",
+"6": "LEFT_FOOT_DOWN",
+"7": "ANIMATION_DRIVEN",
+"8": "TRIGGER_01",
+"9": "SOUND",
+"11": "DISABLE_ROTATION_INPUT",
+"12": "ENABLE_ROTATION_INPUT",
+"13": "CAN_GO_TO_MOVEMENT",
+"14": "UNUSED",
+"15": "CHARGE",
+"16": "PRE_IMPACT",
+"17": "GRAPPLING_HOOK",
+"18": "CAMERA",
+"19": "LEAVE_ABSOLUTE_MODE",
+"20": "KILL_ANIMATION_PARTNER",
+"21": "DISALLOW_AUTOAIM",
+"22": "ALLOW_AUTOAIM",
+"23": "CLEAR_DEADZONE",
+"24": "ALLOW_ATTACKS",
+"25": "DISABLE_CHARACTER_COLLISION",
+"26": "DROP_TARGET_LOCK",
+"27": "FORCE_ALLOW_COUNTER_ATTACK",
+"28": "ABSOLUTE_GOTO_TARGET_POS",
+"29": "FLASH_GRENADE",
+"30": "ELECTRIFY_ARMOR",
+"31": "DISCHARGE_ARMOR",
+"32": "COUNTER_ATTACK_WEAPON_STEAL",
+"33": "BULLMOVE_IMPACT",
+"34": "STEP_AROUND",
+"35": "EXTEND_COMBO_TIME",
+"36": "PICK_UP_WEAPON",
+"37": "SPEAK",
+"38": "THROW_BRANCH_POINT",
+"39": "GOT_UP",
+"40": "RIGHT_FOOT_DOWN",
+"41": "REVERSE_HEADING",
+"42": "NO_LONGER_IMMUNE_TO_ATTACK",
+"43": "RIGHT_FOOT_UP",
+"44": "LEFT_FOOT_UP",
+"45": "LOOK_AT_TARGET",
+"46": "GRAPGUN_ENABLE",
+"47": "GRAPGUN_DISABLE",
+"48": "SET_MOVE_AS_FACEHEADING",
+"49": "NORMAL_HEADING",
+"50": "RIGHT_ROTATED_HEADING",
+"51": "LEFT_ROTATED_HEADING",
+"52": "FACE_HEADING_FORCE_IGNORE",
+"53": "FACE_HEADING_REMOVE_FORCE_IGNORE",
+"54": "ROTATE_HEADING_90_LEFT",
+"55": "ROTATE_HEADING_90_RIGHT",
+"56": "IMPACT_EFFECTS",
+"57": "SAFE_RAGDOLL_COLLISION",
+"58": "DROP_WEAPON",
+"59": "CAMERA_CUT",
+"60": "STARTING_UBER_RAGE",
+"61": "CAMERA_CUT_TO_CHARACTER_CAM",
+"62": "SET_HEADINGS_FROM_ALIGNEMENT",
+"63": "UNDERBOSS_START_FLAMER",
+"64": "UNDERBOSS_STOP_FLAMER",
+"65": "UNDERBOSS_FLAMER_DONE",
+"66": "TRIGGER_START_INTERPOLATING",
+"67": "TRIGGER_END_INTERPOLATING",
+"68": "UNDERBOSS_JUMP_OFF_LAND_DONE",
+"69": "MAKE_LIGHTNING_FLASH",
+"70": "THROW_MODE_STORE_TARGET",
+"71": "UNDERBOSS_WOBBLE_DONE",
+"72": "KNEE",
+"73": "RAGDOLL_MODIFIER",
+"74": "REMOVE_INVERSE_DIRECTION",
+"75": "DROP_WEAPON_WITH_ANIM",
+"76": "FOOT_DOWN_JUMP",
+"77": "FOOT_DOWN_STOP",
+"78": "LOOP_START",
+"79": "LOOP_END",
+"80": "DO_AUTO_ALIGN",
+"81": "UNDERBOSS_SUPPORT_EVENT",
+"82": "RUMBLE",
+"83": "STARTING_HURT_ANIMATION",
+"84": "DO_BLOCK_FLASH",
+"85": "DIE",
+"86": "DELAY_OPPONENT",
+"87": "FORCE_ALLOW_BREAKOUT",
+"88": "FORCE_ALLOW_BREAKOUT_NO_MORE",
+"89": "ACTIVATE_DEPTH_OF_FIELD",
+"90": "DEACTIVATE_DEPTH_OF_FIELD",
+"91": "NEVER_USE_THIS_ANIM_AGAIN",
+"92": "STOP_TWILIGHT_CAM_LOCK",
+"93": "DO_CHOKE_EFFECT"
+}
+},
+"ANIMATION_EVENT_TYPES": {
+"prefix": "ANIMATION_EVENT_TYPE",
+"registered_in": "0x5e50f7",
+"items": {
+"0": "PLAY_POS",
+"1": "ENTER_STATE",
+"2": "LEAVE_STATE",
+"3": "TOTAL_PLAY_TIME"
+}
+},
+"ANIMATION_STATE": {
+"prefix": "ANIMATION_STATE",
+"registered_in": "0x809e94",
+"items": {
+"0": "NONE",
+"1": "THROWN_BY_RORSCHACH",
+"2": "CLIMB_DRAIN",
+"3": "JUMP_DOWN_AUTO_HEIGHT",
+"4": "CLIMB_DRAIN_DOWN",
+"5": "GRAPPLING_HOOK",
+"6": "GRAPPLING_HOOK_DOWN",
+"7": "JUMP_DOWN_1M",
+"8": "FINISH_MOVE_VICTIM_01",
+"9": "COMBAT_IDLE",
+"10": "COUNTER_ATTACK_VICTIM_01",
+"11": "BULLRUSH_VICTIM",
+"12": "GRAB_1H_WEAPON",
+"13": "RAGDOLL_IDLE",
+"15": "PULL_LEVER",
+"16": "TURN_VALVE",
+"17": "PULL_SWITCH",
+"18": "JUMP_DOWN_2M",
+"19": "CLIMB_UP_1M",
+"20": "JUMP_ACROSS_3M",
+"21": "LOCKPICK_START",
+"22": "LOCKPICK_END",
+"23": "LIFT_START",
+"24": "LIFT_END",
+"25": "LIFT",
+"26": "SQUEEZE_UNDER",
+"27": "COUNTER_ATTACK_VICTIM_02",
+"28": "COUNTER_ATTACK_VICTIM_03",
+"29": "COUNTER_ATTACK_VICTIM_04",
+"30": "COUNTER_ATTACK_VICTIM_05",
+"31": "COUNTER_ATTACK_VICTIM_06",
+"32": "COUNTER_ATTACK_VICTIM_07",
+"33": "FINISH_MOVE_VICTIM_02",
+"34": "FINISH_MOVE_VICTIM_03",
+"35": "FINISH_MOVE_VICTIM_04",
+"36": "FINISH_MOVE_VICTIM_05",
+"37": "FINISH_MOVE_VICTIM_06",
+"38": "FINISH_MOVE_VICTIM_07",
+"39": "CLIMB_LADDER",
+"40": "CLIMB_LADDER_DOWN",
+"41": "RESIST",
+"42": "JUMP_UP_6M",
+"43": "UNDERBOSS_USE_FLAMER",
+"44": "UNDERBOSS_JUMP_OFF_PLATFORM",
+"45": "UNDERBOSS_JUMP_OFF_MIDAIR",
+"46": "UNDERBOSS_JUMP_OFF_LAND",
+"47": "UNDERBOSS_JUMP_ON_PLATFORM",
+"48": "RORSCHACH_MENU_ANIMATION",
+"49": "NITE_OWL_MENU_ANIMATION",
+"50": "UNDERBOSS_WOBBLE",
+"51": "UNDERBOSS_DEFEAT",
+"52": "UNDERBOSS_EQUIP_FLAMER",
+"53": "UNDERBOSS_UNEQUIP_FLAMER",
+"54": "UNDERBOSS_PICKUP_WEAPON",
+"55": "COUNTER_ATTACK_VICTIM_08",
+"56": "FINISH_MOVE_VICTIM_08",
+"57": "COUNTER_ATTACK_VICTIM_09",
+"58": "UNDERBOSS_WOBBLE_LEFT",
+"59": "UNDERBOSS_IDLE_TAUNT_A",
+"60": "UNDERBOSS_IDLE_TAUNT_B",
+"61": "UNDERBOSS_IDLE_TAUNT_C",
+"62": "UNDERBOSS_IDLE_TAUNT_D",
+"63": "UNDERBOSS_IDLE_TAUNT_E",
+"64": "UNDERBOSS_IDLE_TAUNT_F",
+"65": "UNDERBOSS_IDLE_TAUNT_G",
+"66": "UNDERBOSS_IDLE_TAUNT_H",
+"67": "UNDERBOSS_IDLE_TAUNT_I",
+"68": "UNDERBOSS_IDLE_TAUNT_J",
+"69": "UNDERBOSS_RECHARGE",
+"70": "UNUSED",
+"71": "COUNTER_ATTACK_VICTIM_10",
+"72": "COUNTER_ATTACK_VICTIM_11",
+"73": "UNDERBOSS_DEFEAT_PER_LEVEL",
+"74": "KNOCKDOWN_ANIM",
+"75": "JUMP_DOWN_4M_WITH_RAILING",
+"76": "KICK_OPEN_DOOR",
+"77": "SLIDE_DOOR_LEFT",
+"78": "SLIDE_DOOR_RIGHT",
+"79": "FINISH_MOVE_VICTIM_09",
+"80": "FINISH_MOVE_VICTIM_10",
+"81": "COUNTER_ATTACK_VICTIM_12",
+"82": "FINISH_MOVE_VICTIM_11",
+"83": "FINISH_MOVE_VICTIM_12",
+"84": "GRAPPLE_STRAIGHT_DOWN"
+}
+},
+"CONTROL_ACTION_TYPES": {
+"prefix": "CONTROL_ACTION_TYPE",
+"registered_in": "0x809e94",
+"items": {
+"0": "PUNCH",
+"1": "NORMAL_ATTACK",
+"2": "HITTAKEN",
+"3": "FINISHING_MOVE",
+"4": "THROW",
+"5": "THROW_GRAB_FAILED",
+"6": "BULLMOVE",
+"7": "HEAVY_PUNCH",
+"8": "RAGDOLL",
+"9": "GRAPPLING_RELEASE",
+"10": "GRAPPLING_LAND",
+"11": "DODGE",
+"12": "COUNTER_ATTACK",
+"13": "STICK_FLICK",
+"14": "ONE_FRAME_ACTION",
+"15": "NEVER_FIRED",
+"16": "IDLE_ALLOWED",
+"17": "THROW_GRENADE",
+"18": "ELECTRIFY_ARMOR",
+"19": "STEP_AROUND_ATTACK",
+"20": "BLOCK",
+"21": "INITIAL_ATTACK",
+"22": "INITIALIZE_BLOCK",
+"23": "BREAK_LOOP",
+"24": "STICK_REVERSE",
+"25": "AFTER_DASH_ATTACK",
+"26": "STEP",
+"27": "DROP_WEAPON",
+"28": "START_UBER_RAGE",
+"29": "KILL_PRONE_TARGET",
+"30": "ATTACK_BLOCKED",
+"31": "START_SPEAK",
+"32": "STOP_SPEAK",
+"33": "BECKON",
+"34": "FLIP_MOVE"
+}
+},
+"OPPONENT_MODEL_TYPE": {
+"prefix": "OPPONENT_MODEL_TYPE",
+"registered_in": "0x809e94",
+"items": {
+"0": "NONE",
+"1": "RORSCHACH",
+"2": "NITE_OWL",
+"3": "ENEMY_01",
+"4": "ENEMY_02_BIG_GUY",
+"5": "UNDERBOSS",
+"6": "ENEMY_03",
+"7": "ENEMY_04"
+}
+},
+"MODEL_ANIMATION_TYPE": {
+"prefix": "MODEL_ANIMATION_TYPE",
+"registered_in": "0x809e94",
+"items": {
+"0": "RORSHACK",
+"1": "NITE_OWL",
+"2": "ENEMY_1"
+}
+},
+"OPPONENT_WEAPON_TYPE": {
+"prefix": "OPPONENT_WEAPON_TYPE",
+"registered_in": "0x809e94",
+"items": {
+"-1": "NONE",
+"0": "BASH_1H",
+"1": "BASH_2H"
+}
+},
+"WEAPON_ANIMATION_TYPE": {
+"prefix": "WEAPON_ANIMATION_TYPE",
+"registered_in": "0x809e94",
+"items": {
+"0": "UNARMED",
+"1": "BASH_1H",
+"2": "BASH_2H"
+}
+},
+"WEAPON_TYPES": {
+"prefix": "WEAPON_TYPE",
+"registered_in": "0x6726d6",
+"items": {
+"-1": "NONE",
+"0": "BASH_1H",
+"1": "BASH_2H"
+}
+},
+"WEAPON_TYPE": {
+"prefix": "WEAPON_TYPE",
+"registered_in": "0x8bb4aa",
+"items": {
+"0": "MELEE_ONE_HAND",
+"1": "MELEE_TWO_HAND"
+}
+},
+"ANIMATION_SPECIAL_CASE": {
+"prefix": "ANIMATION_SPECIAL_CASE",
+"registered_in": "0x809e94",
+"items": {
+"0": "NORMAL",
+"1": "INVERSE_CONTROL_DIRECTION",
+"2": "FLY_TO_SPECIAL_TARGET",
+"3": "ABSOLUTE_START_AT_CURRENT_POS",
+"4": "RESEND_PUNCH_WHEN_IN_RANGE",
+"5": "DODGE",
+"6": "BULL_MOVE",
+"7": "SET_IDLE_TIME",
+"8": "BLOCK",
+"9": "BYPASS_BLOCKER",
+"10": "SPAM_SEND_SPECIAL_ACTION",
+"11": "STEP_AROUND",
+"12": "FIT_TO_END_POS_Y",
+"13": "IMMUNE_TO_BREAK_ATTACK",
+"14": "FAILED_THROW"
+}
+},
+"ANIMATION_TYPE": {
+"prefix": "ANIMATION_TYPE",
+"registered_in": "0x809e94",
+"items": {
+"0": "NOTSET",
+"4": "LIGHTATTACK",
+"5": "HEAVYATTACK",
+"6": "BLOCK",
+"7": "DODGE",
+"8": "COUNTERATTACK",
+"9": "FINISHINGMOVE",
+"10": "THROW",
+"11": "DAMAGE",
+"12": "STUNNED",
+"13": "BULLMOVE",
+"14": "NOTUSED",
+"15": "FLASHGRENADE",
+"16": "ELECTRIFYARMOR",
+"17": "AI_SYSTEM_ONLY__ANY_ATTACK",
+"19": "STEP"
+}
+},
+"DAMAGE_POSE": {
+"prefix": "DAMAGE_POSE",
+"registered_in": "0x809e94",
+"items": {
+"0": "NO_POSE",
+"1": "LIGHT_UPPER_LEFT",
+"2": "LIGHT_UPPER_STRAIGHT",
+"3": "LIGHT_UPPER_RIGHT",
+"4": "LIGHT_MIDDLE_LEFT",
+"5": "LIGHT_MIDDLE_STRAIGHT",
+"6": "LIGHT_MIDDLE_RIGHT",
+"7": "HEAVY_UPPER_LEFT",
+"8": "HEAVY_UPPER_STRAIGHT",
+"9": "HEAVY_UPPER_RIGHT",
+"10": "HEAVY_MIDDLE_LEFT",
+"11": "HEAVY_MIDDLE_STRAIGHT",
+"12": "HEAVY_MIDDLE_RIGHT",
+"13": "KNOCKDOWN_UPPER_LEFT",
+"14": "KNOCKDOWN_UPPER_STRAIGHT",
+"15": "KNOCKDOWN_UPPER_RIGHT",
+"16": "KNOCKDOWN_MIDDLE_LEFT",
+"17": "KNOCKDOWN_MIDDLE_STRAIGHT",
+"18": "KNOCKDOWN_MIDDLE_RIGHT",
+"19": "STUN_UPPER",
+"20": "STUN_MIDDLE",
+"21": "STUN_UPPER_BACK",
+"22": "STUN_MIDDLE_BACK",
+"23": "LIGHT_UPPER_BACK",
+"24": "LIGHT_MIDDLE_BACK",
+"25": "HEAVY_UPPER_BACK",
+"26": "HEAVY_MIDDLE_BACK",
+"27": "KNOCKDOWN_UPPER_BACK",
+"28": "KNOCKDOWN_MIDDLE_BACK"
+}
+},
+"CHARACTER_TYPES": {
+"prefix": "CHARACTER_TYPE",
+"registered_in": "0x80c150",
+"items": {
+"-1": "INVALID",
+"0": "RORSCHACH",
+"1": "NITE_OWL",
+"2": "BIKER",
+"3": "BIKER_BIG",
+"4": "PRISONER",
+"6": "PRISONER_FAST",
+"8": "THUG",
+"9": "THUG_BIG",
+"10": "THUG_FAST",
+"11": "THUG_LEADER",
+"12": "MERCENARY",
+"14": "MERCENARY_FAST",
+"15": "MERCENARY_LEADER",
+"16": "MINION",
+"18": "MINION_FAST",
+"19": "MINION_LEADER",
+"22": "COP",
+"23": "COP_LEADER",
+"24": "COP_FAST",
+"25": "UNDERBOSS",
+"26": "BIKER_HEAD",
+"27": "PRISONER_ELITE",
+"28": "GO_GO_DANCER",
+"29": "HEAVIES",
+"30": "KNOT_TOP_NORMAL",
+"31": "KNOT_TOP_FAST",
+"32": "KNOT_TOP_BIG",
+"33": "DOMINATRICE",
+"34": "GIMP",
+"35": "TWILIGHT_LADY",
+"36": "GIMP_WITH_GAGBALL"
+}
+},
+"CHARACTER_ANIMATIONS": {
+"prefix": "CHARACTER_ANIMATION",
+"registered_in": "0x809e94",
+"items": {
+"0": "RSH",
+"1": "NTO",
+"2": "BS1",
+"3": "EN1",
+"4": "EN1_FAST",
+"5": "EN2",
+"6": "EN3",
+"7": "EN1_FACE",
+"8": "NTO_FACE",
+"9": "UB_FACE",
+"10": "EN4",
+"11": "EN4_FACE"
+}
+},
+"CHARACTER_MODE": {
+"prefix": "CHARACTER_MODE",
+"registered_in": "0x809e94",
+"items": {
+"0": "NONCOMBAT",
+"1": "COMBAT",
+"2": "DEAD",
+"3": "STUNNED",
+"4": "PRONE"
+}
+},
+"ATTACK_DIR": {
+"prefix": "ATTACK_DIR",
+"registered_in": "0x809e94",
+"items": {
+"0": "LEFT",
+"1": "RIGHT"
+}
+},
+"ATTACK_TYPES": {
+"prefix": "ATTACK_TYPE",
+"registered_in": "0x809e94",
+"items": {
+"0": "HEAVY",
+"1": "LIGHT",
+"2": "THROW"
+}
+},
+"ATTACK_POSE": {
+"prefix": "ATTACK_POSE",
+"registered_in": "0x809e94",
+"items": {
+"0": "POSE_DEFAULT",
+"1": "POSE_AFTER_DASH"
+}
+},
+"OVERRIDE_ATTACK_COMBO": {
+"prefix": "OVERRIDE_ATTACK_COMBO",
+"registered_in": "0x809e94",
+"items": {
+"0": "NORMAL",
+"1": "KNOCKDOWN",
+"2": "STUN",
+"3": "HEAVY_DAM",
+"4": "FINISHING_MOVE",
+"5": "AREA_DAMAGE",
+"6": "COUNTER_ATTACK",
+"7": "KILL_PRONE_TARGET",
+"8": "SUPER_DAMAGE"
+}
+},
+"STATE_CHANGE_OVERRIDE": {
+"prefix": "STATE_CHANGE_OVERRIDE",
+"registered_in": "0x809e94",
+"items": {
+"0": "NO_OVERRIDE",
+"1": "ALLOW_LEAVE_STATE"
+}
+},
+"TARGET_LOCK": {
+"prefix": "TARGET_LOCK",
+"registered_in": "0x809e94",
+"items": {
+"0": "NO_TARGET",
+"1": "TARGET_LOCK"
+}
+},
+"KNEE": {
+"prefix": "KNEE",
+"registered_in": "0x809e94",
+"items": {
+"0": "NONE",
+"1": "LEFT",
+"2": "RIGHT",
+"3": "BOTH"
+}
+},
+"SPECIFIC_MODEL": {
+"prefix": "SPECIFIC_MODEL",
+"registered_in": "0x809e94",
+"items": {
+"0": "DEFAULT",
+"1": "TWILIGHT_LADY"
+}
+},
+"SCENE_ID": {
+"prefix": "SCENE_ID",
+"registered_in": "0x80c150",
+"items": {
+"-1": "NONE",
+"0": "MAIN_MENU",
+"1": "PRISON",
+"2": "STREETS",
+"3": "DOCKS",
+"4": "UNDERGROUND",
+"5": "CONSTRUCT_SITE",
+"6": "STREETS_2",
+"7": "NIGHTCLUB",
+"8": "STREETS_OF_RIOTS",
+"9": "BORDELLO",
+"20": "GAME_ESSENTIALS",
+"30": "TUTORIAL",
+"40": "PLAYER_VS_PLAYER",
+"50": "DEBUG_TOOL_CHECKER"
+}
+},
+"ANIMATION_LAYER": {
+"prefix": "ANIMATION_LAYER",
+"registered_in": "0x5e50f7",
+"items": {
+"0": "MOTION_LAYER_1",
+"1": "MOTION_LAYER_2",
+"2": "MOTION_LAYER_3",
+"3": "MOTION_LAYER_4",
+"4": "MOTION_LAYER_5",
+"5": "MOTION_LAYER_6",
+"10": "ACTION_LAYER_1",
+"11": "ACTION_LAYER_2",
+"12": "ACTION_LAYER_3",
+"13": "ACTION_LAYER_4",
+"14": "ACTION_LAYER_5",
+"15": "ACTION_LAYER_6"
+}
+},
+"ACTION_LAYER_FLAG": {
+"prefix": "ACTION_LAYER_FLAG",
+"registered_in": "0x5e50f7",
+"items": {
+"1": "ACTION_LAYER_1",
+"2": "ACTION_LAYER_2",
+"4": "ACTION_LAYER_3",
+"8": "ACTION_LAYER_4",
+"16": "ACTION_LAYER_5",
+"32": "ACTION_LAYER_6"
+}
+}
+},
+"enum_variable_family": {
+"0": "ATTACK_DIR",
+"1": "CHARACTER_MODE",
+"2": "ATTACK_TYPES",
+"3": "ATTACK_POSE",
+"4": "DAMAGE_POSE",
+"5": "WEAPON_ANIMATION_TYPE",
+"6": "MODEL_ANIMATION_TYPE",
+"7": null,
+"8": "OVERRIDE_ATTACK_COMBO",
+"9": "STATE_CHANGE_OVERRIDE",
+"10": "TARGET_LOCK",
+"11": "OPPONENT_MODEL_TYPE",
+"12": "OPPONENT_WEAPON_TYPE",
+"13": "KNEE",
+"14": "SPECIFIC_MODEL",
+"15": "SCENE_ID"
+},
+"interval_types": {
+"0": "INTERVAL",
+"1": "LESS_THAN",
+"2": "GREATER_THAN_OR_EQUAL"
+},
+"event_semantics": {
+"0": {
+"name": "NONE",
+"effect": "No case in any registered command_animation_event_received handler; the id is still recorded in the controller's per-frame event list.",
+"value": "not established",
+"moves_character": false,
+"affects_partner": false,
+"handler": null,
+"evidence": "read from code"
+},
+"1": {
+"name": "PUNCH",
+"effect": "No case in any registered command_animation_event_received handler; the id is still recorded in the controller's per-frame event list.",
+"value": "not established",
+"moves_character": false,
+"affects_partner": false,
+"handler": null,
+"evidence": "read from code"
+},
+"2": {
+"name": "STOP_L",
+"effect": "No case in any registered command_animation_event_received handler; the id is still recorded in the controller's per-frame event list.",
+"value": "not established",
+"moves_character": false,
+"affects_partner": false,
+"handler": null,
+"evidence": "read from code"
+},
+"3": {
+"name": "STOP_R",
+"effect": "No case in any registered command_animation_event_received handler; the id is still recorded in the controller's per-frame event list.",
+"value": "not established",
+"moves_character": false,
+"affects_partner": false,
+"handler": null,
+"evidence": "read from code"
+},
+"4": {
+"name": "IMPACT",
+"effect": "Hit moment: for a non-attack (paired) state, asks the animation partner is_attack_successful and sends it CharacterRoot.command_give_damage; for an attack state runs SetCloseCombatDamageToTarget on the current target, TestImpactOnDynamicObjects and DebugHit.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": true,
+"handler": "0x6ac9dd",
+"evidence": "read from code"
+},
+"5": {
+"name": "BRANCH",
+"effect": "Combo branch point: fires the next queued attack (FireAttackBasedOnAttackID + InitializeNextAttack) or, with none queued, ends the combo and clears the target and the animation-partner link (then update_animdata_partner_model).",
+"value": "unused",
+"moves_character": false,
+"affects_partner": true,
+"handler": "0x6ae34f",
+"evidence": "read from code"
+},
+"6": {
+"name": "LEFT_FOOT_DOWN",
+"effect": "Left footstep: looks up the foot bone (id 0xb), finds the ground material and plays the footstep sound/effect.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a533a",
+"evidence": "read from code (case skimmed for commands and field writes, not instruction by instruction)"
+},
+"7": {
+"name": "ANIMATION_DRIVEN",
+"effect": "Sends CharacterRootLogic.command_reset_physics_state to self.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6ac992",
+"evidence": "read from code"
+},
+"8": {
+"name": "TRIGGER_01",
+"effect": "Not handled by CharacterRootLogic. TriggerCharacter (0x87d421) runs a local function once per state.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x87d421",
+"evidence": "read from code"
+},
+"9": {
+"name": "SOUND",
+"effect": "Plays the event sound (AnimationEvent.command_play_event_sound / _sound_entity) or, with bool1 set, stops the entity sound and starts a speak line.",
+"value": "event data (bool1, entity refs, vectors) select what is played; m_nvalue not read here",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6aba76",
+"evidence": "read from code"
+},
+"11": {
+"name": "DISABLE_ROTATION_INPUT",
+"effect": "Sets CharacterRoot data +0xa8 = 1 (rotation input disabled).",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a9f19",
+"evidence": "read from code"
+},
+"12": {
+"name": "ENABLE_ROTATION_INPUT",
+"effect": "Sets CharacterRoot data +0xa8 = 0 (rotation input enabled).",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a9f03",
+"evidence": "read from code"
+},
+"13": {
+"name": "CAN_GO_TO_MOVEMENT",
+"effect": "Player: PlayerCtrl.command_doing_block_breaker(0); then AnimationLib.SetAnimationEnum(own ctrl, 9, 1).",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6ac08c",
+"evidence": "read from code"
+},
+"14": {
+"name": "UNUSED",
+"effect": "No case in any registered command_animation_event_received handler; the id is still recorded in the controller's per-frame event list.",
+"value": "not established",
+"moves_character": false,
+"affects_partner": false,
+"handler": null,
+"evidence": "read from code"
+},
+"15": {
+"name": "CHARGE",
+"effect": "Subtracts rage (add_rage of a negative global), clears the throw target for a player and sends CollisionCapsuleNode.command_state_charge.",
+"value": "unused",
+"moves_character": true,
+"affects_partner": false,
+"handler": "0x6ac010",
+"evidence": "read from code"
+},
+"16": {
+"name": "PRE_IMPACT",
+"effect": "Pre-hit: tells the current target hit is coming (command_hit_soon with damage pose) or makes an AI target block; an AI attacker out of range (1.8 m, 2.2 m if big) drops its target and partner link instead.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": true,
+"handler": "0x6ad5ec",
+"evidence": "read from code"
+},
+"17": {
+"name": "GRAPPLING_HOOK",
+"effect": "Sends CollisionCapsuleNode.command_goto_grappling_hook.",
+"value": "unused",
+"moves_character": true,
+"affects_partner": false,
+"handler": "0x6a9ebe",
+"evidence": "read from code"
+},
+"18": {
+"name": "CAMERA",
+"effect": "Not handled by CharacterRootLogic. CharacterCameraStateManager (0x64b304) maps the camera event type 1..12 to a camera state.",
+"value": "not read; the camera event type comes from AnimationEvent.command_get_camera_event_type",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x64b304",
+"evidence": "read from code"
+},
+"19": {
+"name": "LEAVE_ABSOLUTE_MODE",
+"effect": "Capsule leaves StateAbsoluteAnimation for StateOnGround (command_goto_phys_normal_mode) and own slave flag is cleared; if a partner is linked: CharacterRoot.command_leave_slave_mode (dual_end on both capsules) and command_break_joint on the partner capsule.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": true,
+"handler": "0x6ac8de",
+"evidence": "read from code"
+},
+"20": {
+"name": "KILL_ANIMATION_PARTNER",
+"effect": "Gives the victim (logic +0x18, else current target) CharacterRoot.command_give_damage of 100000 with a zeroed ragdoll-modifier direction, adds rage/electrify power to self, clears the partner link.",
+"value": "unused (bool1 = victim dies without the death speak line)",
+"moves_character": false,
+"affects_partner": true,
+"handler": "0x6ac5f6",
+"evidence": "read from code"
+},
+"21": {
+"name": "DISALLOW_AUTOAIM",
+"effect": "Sets CharacterRoot data +0xb0 = 1.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a9eec",
+"evidence": "read from code"
+},
+"22": {
+"name": "ALLOW_AUTOAIM",
+"effect": "Sets CharacterRoot data +0xb0 = 0.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a9ed6",
+"evidence": "read from code"
+},
+"23": {
+"name": "CLEAR_DEADZONE",
+"effect": "Combo timing: sets the attack dead-zone time (logic +0x54), trims the combo list against the combo database and logs the combo.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6ae002",
+"evidence": "read from code (case skimmed for commands and field writes, not instruction by instruction)"
+},
+"24": {
+"name": "ALLOW_ATTACKS",
+"effect": "Logic +0x60 = 0, +0x54 = -2.0, +0x84 = 1 (attacks allowed again).",
+"value": "not read by the handler",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6ac9a3",
+"evidence": "read from code"
+},
+"25": {
+"name": "DISABLE_CHARACTER_COLLISION",
+"effect": "Sets property \"enabled\" = 0 on the collision capsule.",
+"value": "not read by the handler",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6ac10a",
+"evidence": "read from code"
+},
+"26": {
+"name": "DROP_TARGET_LOCK",
+"effect": "Clears the target lock: root +0x7c = 0, +0x8c = 0, +0x90 = (-10000,-10000,-10000); fires a tutorial event in one case.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a9df6",
+"evidence": "read from code"
+},
+"27": {
+"name": "FORCE_ALLOW_COUNTER_ATTACK",
+"effect": "Logic +0x74 = 1.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a9dea",
+"evidence": "read from code"
+},
+"28": {
+"name": "ABSOLUTE_GOTO_TARGET_POS",
+"effect": "Sets the capsule flag at data +0xb8 to 1: from then on the absolute-animation update re-reads m_vWorldStartPos/m_qWorldStartOrient (or End) every frame and blends from the pose the state was entered in to the track over the blend time.",
+"value": "unused",
+"moves_character": true,
+"affects_partner": false,
+"handler": "0x6a9dca",
+"evidence": "read from code"
+},
+"29": {
+"name": "FLASH_GRENADE",
+"effect": "Area attack: effect, game event, hit_soon + give_damage to characters found by a physics query (radius 3).",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a62d8",
+"evidence": "read from code (case skimmed for commands and field writes, not instruction by instruction)"
+},
+"30": {
+"name": "ELECTRIFY_ARMOR",
+"effect": "Same block as FLASH_GRENADE, plus ElectricArmor.command_electric_armor_charge.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a62d8",
+"evidence": "read from code (case skimmed for commands and field writes, not instruction by instruction)"
+},
+"31": {
+"name": "DISCHARGE_ARMOR",
+"effect": "Electric-armor discharge on the partner: rumble, hit_soon, force_anim_always, give_damage, lightning effect.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": true,
+"handler": "0x6a8865",
+"evidence": "read from code (case skimmed for commands and field writes, not instruction by instruction)"
+},
+"32": {
+"name": "COUNTER_ATTACK_WEAPON_STEAL",
+"effect": "Partner is forced to drop its weapon and (unless Underboss / type 0) the weapon is picked up by self (WeaponBase.command_do_actual_pickup, root +0xd4).",
+"value": "unused",
+"moves_character": false,
+"affects_partner": true,
+"handler": "0x6a84cf",
+"evidence": "read from code"
+},
+"33": {
+"name": "BULLMOVE_IMPACT",
+"effect": "Bull-move hit: give_damage to logic +0x18 if is_attack_successful, camera recoil, tutorial/achievement calls.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": true,
+"handler": "0x6abcb1",
+"evidence": "read from code"
+},
+"34": {
+"name": "STEP_AROUND",
+"effect": "Sends CharacterRoot.command_set_stun_time to the locked target (root +0x7c).",
+"value": "unused",
+"moves_character": false,
+"affects_partner": true,
+"handler": "0x6abbe9",
+"evidence": "read from code"
+},
+"35": {
+"name": "EXTEND_COMBO_TIME",
+"effect": "Logic +0xc = current time + m_nvalue.",
+"value": "seconds added to the combo window",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6ac9bf",
+"evidence": "read from code"
+},
+"36": {
+"name": "PICK_UP_WEAPON",
+"effect": "Completes a weapon pick-up: detaches the current weapon, makes the pending one (root +0x15c) current and sends WeaponBase.command_do_actual_pickup; Underboss variant notifies its behaviour.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a817a",
+"evidence": "read from code"
+},
+"37": {
+"name": "SPEAK",
+"effect": "SpeakCtrl.command_add_speak_event_based_on_enum.",
+"value": "not read; enum at +0x20 = speak line, bool1 = stop current speak first",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a9f30",
+"evidence": "read from code"
+},
+"38": {
+"name": "THROW_BRANCH_POINT",
+"effect": "Throw branch: with a partner in special state 8 fires animation action 0x1e and sends hit_soon both ways; then ClearAttackData.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": true,
+"handler": "0x6a91c0",
+"evidence": "read from code"
+},
+"39": {
+"name": "GOT_UP",
+"effect": "Non-player: behaviour.command_got_up.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a812a",
+"evidence": "read from code"
+},
+"40": {
+"name": "RIGHT_FOOT_DOWN",
+"effect": "Right footstep: same as LEFT_FOOT_DOWN with bone id 0x11.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a533a",
+"evidence": "read from code (case skimmed for commands and field writes, not instruction by instruction)"
+},
+"41": {
+"name": "REVERSE_HEADING",
+"effect": "Heading offset root +0x158 = pi, then command_set_move_and_face_heading_to_actual_heading.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a8108",
+"evidence": "read from code"
+},
+"42": {
+"name": "NO_LONGER_IMMUNE_TO_ATTACK",
+"effect": "Logic +0x84 = 1.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6ac9b0",
+"evidence": "read from code"
+},
+"43": {
+"name": "RIGHT_FOOT_UP",
+"effect": "No case in any registered command_animation_event_received handler; the id is still recorded in the controller's per-frame event list.",
+"value": "not established",
+"moves_character": false,
+"affects_partner": false,
+"handler": null,
+"evidence": "read from code"
+},
+"44": {
+"name": "LEFT_FOOT_UP",
+"effect": "No case in any registered command_animation_event_received handler; the id is still recorded in the controller's per-frame event list.",
+"value": "not established",
+"moves_character": false,
+"affects_partner": false,
+"handler": null,
+"evidence": "read from code"
+},
+"45": {
+"name": "LOOK_AT_TARGET",
+"effect": "Player only: camera command_lookat_target_timed{target, m_nvalue, value2}. Camera only; the character is not turned.",
+"value": "m_nvalue = look-at time (s); second float (+0x28) = second camera parameter; enum (+0x20)==1 adds a force_rotate by pi; bool1 = look at self instead of the target",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a86ae",
+"evidence": "read from code"
+},
+"46": {
+"name": "GRAPGUN_ENABLE",
+"effect": "Sends command_enable to logic +0x24.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a9eaf",
+"evidence": "read from code"
+},
+"47": {
+"name": "GRAPGUN_DISABLE",
+"effect": "Sends command_disable to logic +0x24.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a9ea6",
+"evidence": "read from code"
+},
+"48": {
+"name": "SET_MOVE_AS_FACEHEADING",
+"effect": "CharacterRoot.command_hack_set_moveheading_to_faceHeading (copies the face heading into the move-heading fields).",
+"value": "not read by the handler",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a80ce",
+"evidence": "read from code"
+},
+"49": {
+"name": "NORMAL_HEADING",
+"effect": "Heading offset root +0x158 = 0, then command_set_move_and_face_heading_to_actual_heading.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a80dc",
+"evidence": "read from code"
+},
+"50": {
+"name": "RIGHT_ROTATED_HEADING",
+"effect": "No case in any registered command_animation_event_received handler; the id is still recorded in the controller's per-frame event list.",
+"value": "not established",
+"moves_character": false,
+"affects_partner": false,
+"handler": null,
+"evidence": "read from code"
+},
+"51": {
+"name": "LEFT_ROTATED_HEADING",
+"effect": "No case in any registered command_animation_event_received handler; the id is still recorded in the controller's per-frame event list.",
+"value": "not established",
+"moves_character": false,
+"affects_partner": false,
+"handler": null,
+"evidence": "read from code"
+},
+"52": {
+"name": "FACE_HEADING_FORCE_IGNORE",
+"effect": "Root +0xb4 = 1.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a80b7",
+"evidence": "read from code"
+},
+"53": {
+"name": "FACE_HEADING_REMOVE_FORCE_IGNORE",
+"effect": "Root +0xb4 = 0.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a80a1",
+"evidence": "read from code"
+},
+"54": {
+"name": "ROTATE_HEADING_90_LEFT",
+"effect": "Heading offset root +0x158 = +MathLib constant (data +0x40), then command_set_move_and_face_heading_to_actual_heading.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a80ef",
+"evidence": "read from code"
+},
+"55": {
+"name": "ROTATE_HEADING_90_RIGHT",
+"effect": "Heading offset root +0x158 = -MathLib constant, then command_set_move_and_face_heading_to_actual_heading.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a80e0",
+"evidence": "read from code"
+},
+"56": {
+"name": "IMPACT_EFFECTS",
+"effect": "Hit cosmetics: rumble, damage effect, recoil (command_do_recoil), partner behaviour command_when_attacked, head animation, particle effect.",
+"value": "m_nvalue passed to a local function when bool1 is set; enum (+0x20) = damage pose, selects the rumble strength",
+"moves_character": false,
+"affects_partner": true,
+"handler": "0x6aae6f",
+"evidence": "read from code"
+},
+"57": {
+"name": "SAFE_RAGDOLL_COLLISION",
+"effect": "With a partner: PhysicsSimulation.command_set_safe_ragdoll_collision_groups{own visual, partner visual, m_nvalue}.",
+"value": "m_nvalue = third argument (duration) of the physics call",
+"moves_character": false,
+"affects_partner": true,
+"handler": "0x6a8031",
+"evidence": "read from code"
+},
+"58": {
+"name": "DROP_WEAPON",
+"effect": "CharacterRoot.command_force_drop_weapon on self.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a845c",
+"evidence": "read from code"
+},
+"59": {
+"name": "CAMERA_CUT",
+"effect": "Combat camera cut: CameraCtrl.command_set_combat_cut_data, may lock players, hide HUDs and send command_force_step_back to other characters.",
+"value": "m_nvalue and the further floats/vectors are copied into the camera cut data",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6aa7e4",
+"evidence": "read from code (case skimmed for commands and field writes, not instruction by instruction)"
+},
+"60": {
+"name": "STARTING_UBER_RAGE",
+"effect": "Uber-rage start: two effects, root +0x13c timer, global flag.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a7de3",
+"evidence": "read from code"
+},
+"61": {
+"name": "CAMERA_CUT_TO_CHARACTER_CAM",
+"effect": "Returns the camera from a combat cut to the character camera.",
+"value": "m_nvalue = argument of command_return_to_character_camera",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6aa036",
+"evidence": "read from code"
+},
+"62": {
+"name": "SET_HEADINGS_FROM_ALIGNEMENT",
+"effect": "CharacterRoot.command_set_move_and_face_heading_to_actual_heading.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a7dd5",
+"evidence": "read from code"
+},
+"63": {
+"name": "UNDERBOSS_START_FLAMER",
+"effect": "Underboss phase behaviour: command_flamer_start.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a7ce7",
+"evidence": "read from code"
+},
+"64": {
+"name": "UNDERBOSS_STOP_FLAMER",
+"effect": "Underboss phase behaviour: command_flamer_stop.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a7bf9",
+"evidence": "read from code"
+},
+"65": {
+"name": "UNDERBOSS_FLAMER_DONE",
+"effect": "Underboss phase behaviour: command_flamer_done.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a7b0b",
+"evidence": "read from code"
+},
+"66": {
+"name": "TRIGGER_START_INTERPOLATING",
+"effect": "In this handler: Underboss phase behaviour command_jump_anim_part_done{event id}.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a739d",
+"evidence": "read from code"
+},
+"67": {
+"name": "TRIGGER_END_INTERPOLATING",
+"effect": "In this handler: Underboss phase behaviour command_jump_anim_part_done{event id}.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a739d",
+"evidence": "read from code"
+},
+"68": {
+"name": "UNDERBOSS_JUMP_OFF_LAND_DONE",
+"effect": "Underboss phase behaviour command_jump_anim_part_done{event id}.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a739d",
+"evidence": "read from code"
+},
+"69": {
+"name": "MAKE_LIGHTNING_FLASH",
+"effect": "Player with electric armor: two EffectCtrl.command_fire_effect_by_id.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6ac1bf",
+"evidence": "read from code"
+},
+"70": {
+"name": "THROW_MODE_STORE_TARGET",
+"effect": "Chooses and stores the throw target and its position (root +0x8c, +0x90).",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a9349",
+"evidence": "read from code (case skimmed for commands and field writes, not instruction by instruction)"
+},
+"71": {
+"name": "UNDERBOSS_WOBBLE_DONE",
+"effect": "Underboss phase behaviour command_jump_anim_part_done{event id}.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a739d",
+"evidence": "read from code"
+},
+"72": {
+"name": "KNEE",
+"effect": "AnimationLib.SetAnimationEnum(own ctrl, 13, enum).",
+"value": "not read; enum (+0x20) is the value set",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a7ad9",
+"evidence": "read from code"
+},
+"73": {
+"name": "RAGDOLL_MODIFIER",
+"effect": "CharacterVisual data +0x28 = normalised stored direction (logic +0xb8) x m_nvalue.",
+"value": "scale of the ragdoll modifier vector",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a7996",
+"evidence": "read from code"
+},
+"74": {
+"name": "REMOVE_INVERSE_DIRECTION",
+"effect": "Logic +0x34 = 0.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a798d",
+"evidence": "read from code"
+},
+"75": {
+"name": "DROP_WEAPON_WITH_ANIM",
+"effect": "If a weapon is held: AnimationLib.FireAnimationAction(own ctrl, 0x1b).",
+"value": "not read by the handler",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a8480",
+"evidence": "read from code"
+},
+"76": {
+"name": "FOOT_DOWN_JUMP",
+"effect": "Footstep, jump variant of the sound enum (same block as LEFT_FOOT_DOWN).",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a533a",
+"evidence": "read from code (case skimmed for commands and field writes, not instruction by instruction)"
+},
+"77": {
+"name": "FOOT_DOWN_STOP",
+"effect": "Footstep, stop variant of the sound enum (same block as LEFT_FOOT_DOWN).",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a533a",
+"evidence": "read from code (case skimmed for commands and field writes, not instruction by instruction)"
+},
+"78": {
+"name": "LOOP_START",
+"effect": "Not handled by CharacterRootLogic. TriggerCharacter (0x87d421, 0x87e574) stores the event play position when the trigger type is PLAY_POS.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x87d421",
+"evidence": "read from code"
+},
+"79": {
+"name": "LOOP_END",
+"effect": "Not handled by CharacterRootLogic. TriggerCharacter (0x87d421) stores the event play position when the trigger type is PLAY_POS.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x87d421",
+"evidence": "read from code"
+},
+"80": {
+"name": "DO_AUTO_ALIGN",
+"effect": "CharacterRoot.command_force_auto_align: for the duration StateActive uses m_nvalue in place of root +0xe8 in its auto-align distance logic.",
+"value": "m_nvalue -> root +0x270; second float (+0x28) = duration in seconds",
+"moves_character": true,
+"affects_partner": false,
+"handler": "0x6aae3c",
+"evidence": "read from code"
+},
+"81": {
+"name": "UNDERBOSS_SUPPORT_EVENT",
+"effect": "Underboss combat behaviour command_recieve_anim_support_event.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a78ea",
+"evidence": "read from code"
+},
+"82": {
+"name": "RUMBLE",
+"effect": "Player: PlayerCtrl.command_do_rumble_effect.",
+"value": "m_nvalue and second float (+0x28) = the two rumble parameters; bool1 = third",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a7879",
+"evidence": "read from code"
+},
+"83": {
+"name": "STARTING_HURT_ANIMATION",
+"effect": "Behaviour handler command_dont_move_while_animation_runs{length of the main blend source}.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6ac12f",
+"evidence": "read from code"
+},
+"84": {
+"name": "DO_BLOCK_FLASH",
+"effect": "Block flash: logic +0xd8 = 1, removes electrify power, SetTextureSheetData on the electric model.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a779e",
+"evidence": "read from code"
+},
+"85": {
+"name": "DIE",
+"effect": "CharacterRoot.command_give_damage of 100000 to self.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6ac4e1",
+"evidence": "read from code"
+},
+"86": {
+"name": "DELAY_OPPONENT",
+"effect": "Sends command_delay to the current target (root +0x70).",
+"value": "unused",
+"moves_character": false,
+"affects_partner": true,
+"handler": "0x6a7772",
+"evidence": "read from code"
+},
+"87": {
+"name": "FORCE_ALLOW_BREAKOUT",
+"effect": "Logic +0xe0 = 1.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a7763",
+"evidence": "read from code"
+},
+"88": {
+"name": "FORCE_ALLOW_BREAKOUT_NO_MORE",
+"effect": "Logic +0xe0 = 0.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a7757",
+"evidence": "read from code"
+},
+"89": {
+"name": "ACTIVATE_DEPTH_OF_FIELD",
+"effect": "Player (own or partner): FXGfxEffectCtrl.command_fade_in.",
+"value": "m_nvalue = fade time; entity ref (+0x14) = effect",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a7619",
+"evidence": "read from code"
+},
+"90": {
+"name": "DEACTIVATE_DEPTH_OF_FIELD",
+"effect": "No case in any registered command_animation_event_received handler; the id is still recorded in the controller's per-frame event list.",
+"value": "not established",
+"moves_character": false,
+"affects_partner": false,
+"handler": null,
+"evidence": "read from code"
+},
+"91": {
+"name": "NEVER_USE_THIS_ANIM_AGAIN",
+"effect": "Sets property \"enabled\" = 0 on the current animation state node.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a760d",
+"evidence": "read from code"
+},
+"92": {
+"name": "STOP_TWILIGHT_CAM_LOCK",
+"effect": "If logic +0xe4 is set: StopTwilightLadyCamLock.",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a75ed",
+"evidence": "read from code"
+},
+"93": {
+"name": "DO_CHOKE_EFFECT",
+"effect": "Head controller: FireAnimationAction(head ctrl, 2) and SetAnimationEnum(head ctrl, 4, 0x10).",
+"value": "unused",
+"moves_character": false,
+"affects_partner": false,
+"handler": "0x6a7512",
+"evidence": "read from code"
+}
+}
+}

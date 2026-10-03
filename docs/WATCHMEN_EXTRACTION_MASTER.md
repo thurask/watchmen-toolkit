@@ -17,8 +17,8 @@ memory, or NinjaRipper. Engine = **Kapow** (Deadline Games, codename WM07), a
 | block → asset (header+stream) | ✅ solved & verified | `extract_block(header, RAW block_s_z)` |
 | Asset property-bag header format | ✅ characterized | typed, name-HASHED records (config) |
 | **Texture header → name/format/layers** | ✅ **SOLVED & verified** | `parse_texture_header()`; 100% exact name+format+layers, all 186 |
-| **Models — geometry → OBJ/FBX/STL** | ✅ **deterministic, multi-submesh** (640/642) | `wlib/watchmen_extract.py`; header submesh descriptors + IB-validated carve; OBJ submesh groups; see §5 below |
-| **Models — collision mesh / full byte-faithful parse** | ◻️ mapped, not extracted | ~19% of stream is collision volumes (excluded from render); skeleton parse pending |
+| **Models — geometry → OBJ** | ✅ **header-driven on Part 2 PC** (735/735 models with a stream) | `wlib/watchmen_extract.py`. *Corrected 2026-10-02:* this row read "OBJ/FBX/STL … (640/642) … header submesh descriptors + IB-validated carve". Every buffer offset now comes from the model header (§5); the descriptor scan remains as the fallback for console files and Part 1. The shipped extractor writes OBJ + MTL (and GLB with `--glb`); it has no FBX or STL writer |
+| **Models — collision mesh / full byte-faithful parse** | ✅ header + stream tile exactly (740/740 Part 2 PC); node collision volumes parsed | *Corrected 2026-10-02:* this row read "mapped, not extracted; ~19% of stream is collision volumes". The non-render bytes of the stream are shadow hulls, per-part proxy slabs and cluster tables; collision volumes are in the header, per node (`skeleton_records.parse_node_tail`, see `FORMATS_MISC.md`). The physics / cloth tail of the header is not parsed |
 | **Models — skin weights** | ✅ **decoded** (4×u8 idx @+44, 4×half wt @+48, Σ=1) | rigged FBX still needs skeleton+keyframes from the `.ani` asset; see §5 below |
 | **Animation / skeleton (`.animation`)** | ⚠️ **mapped** — skeleton extracted (428/428), keyframe format decoded | bone names+fps+frames parse; compact quat/trans tracks mapped; full rigged FBX = assembly step; see `ENGINE_CONSTANTS.md` |
 | **Per-variant character glbs** | ✅ 25 glbs, ALL user-QA'd (2026-07-13): header-exact fps, finger-shear dense bakes, d6 jiggle default, face attaches incl. NiteOwl cowl + Heavies_Head_1, BipNN name fixes | `watchmen.py characters 20260708 20260708/characters`; current state + engine truths in `docs/ENGINE_CONSTANTS.md` |
@@ -27,12 +27,12 @@ memory, or NinjaRipper. Engine = **Kapow** (Deadline Games, codename WM07), a
 | **Character BIND (rest pose → skinning palettes)** | ✅ **SOLVED, FILE-ONLY, engine-exact** (2026-07-08, all 7 skeletons) | node records store [pos][quat XYZW] BEFORE the name (old parser off-by-one); bind Rb = conj-quat FK, tb = FK(Rb, node locals); palette order = bone list rotated by one. `wlib/build_bind_file.py`, `wl.ensure_binds()`, see `docs/ENGINE_CONSTANTS.md` |
 | Vertex normal packing | ✅ solved | HALF4 (3×f16) at vertex+12 |
 | **Textures — format enum** | ✅ solved (Ghidra) | enum→D3DFORMAT table @0xc799e0 |
-| **Texture → stream binding** | ✅ **SOLVED, deterministic** (1190/1190, no search) | (off,sz) is a per-asset TRAILER; +1 shift. See §6 below |
+| **Texture → stream binding** | ✅ **SOLVED, deterministic** (1190/1190, no search) | *Corrected 2026-10-02:* the (off,sz) pair is the tail of the asset's own directory record; the "+1 shift" was an artefact of starting the directory walk at 399 instead of 400. Same bytes, same assets. See `KAPOW_NAZ_FORMAT.md` §2.3 |
 | **Textures — pixel decode** | ✅ **COMPLETE — 1190/1190** stream-exact | `plan_texture_layers()` tiles every stream as single / cube×6 / animN; multi-layer diffuse+BC5 normal+spec all decode; see §6 below |
 | **Audio — SFX (`sound`)** | ✅ **COMPLETE — 848/848** → WAV | `wlib/watchmen_extract.py`; format tag @+10 selects MS-ADPCM (98%) / PCM (2%); mono+stereo; see §7 below |
 | **Audio — music (`.mediastream_s`)** | ✅ **13/13 → Ogg Vorbis** | `naz_sound_extract.py game.naz` / `watchmen_extract.py` |
 | **Determinism** | textures+archive ✅ verified reproducible; meshes+SFX empirical/blocked | textures: identical manifest + byte-identical PNG across runs |
-| Full-binary decompile corpus | ✅ available | `ghidra_kapow_out\` (14,910 funcs) |
+| Full-binary decompile corpus | ✅ available | `ghidra_kapow_out\` (14,910 funcs). *2026-10-02:* a later pass with the scripts in `tools/ghidra/` has 17,225 functions; the research reports are in `docs/re/` |
 
 ---
 ## 0.5 Session changelog — 2026-07-16 (before PS3 pass)
@@ -78,6 +78,37 @@ already byte-order aware, so these carry over.**
   prerelease art. Left unbuilt.
 
 ---
+## 0.6 Corrections — 2026-10-02 (toolkit 1.3.0)
+
+The engine's loaders were read function by function (`docs/re/formats.md`,
+`docs/re/names.md`, `docs/re/skeleton_blobs.md`). Statements in this document
+that the code contradicts are corrected in place and marked "corrected
+2026-10-02". In summary:
+
+- **Block header and directory** (§3): the fixed header is 400 bytes and
+  entries start at 400; a directory record is `6 sizes, type hash, name,
+  hasStream, 6 × (offset, size)`; the `unknown` field is the asset-type hash;
+  the six slots are languages, not platforms; the stream pair belongs to its
+  own record. Each block also has records behind a per-language seek that were
+  never listed (15 per game).
+- **Asset header** (§4): the u32 after the type name is the property bag's
+  length in 32-bit words, not a property count or class id.
+- **Models** (§5): PC models decode from their header; the vertex format id is
+  stored in the file; the "stride-16 baked env mesh" claim is withdrawn.
+- **Textures** (§6): the descriptor is 29 bytes plus a presence byte per
+  optional slot, eight slots per frame; linear formats pad every row to 4
+  bytes; header and stream length agree exactly.
+- **Stream primitives** (§8): `0x4354a8` reads a vec3.
+- **Name hash**: every byte `& 0xDF`, not upper-case (`kapow_props.name_hash`).
+  The two asset-type hashes that had no name are `ModelEffects(ModelRes)`
+  (0x41764525) and `TextureEffects(Texture)` (0x96ea413f).
+- **Node "joint records"** are collision volumes.
+
+The authoritative layouts are in `KAPOW_NAZ_FORMAT.md` (block, asset header,
+texture, ModelRes) and `FORMATS_MISC.md` (`.sequence`, `.detailmesh`, node
+collision volumes).
+
+---
 ## 1. File map
 
 **Inputs (on your machine)** — nothing here ships with the toolkit; every path
@@ -115,9 +146,17 @@ artifact.
 ## 3. Block format  (✅ verified, 2291 assets, 0 mismatch)
 - `block_h_z` decompresses (or is read raw — it parses either way) to the header
   block: a TOC + the per-asset header blobs (each blob itself zlib-compressed).
-- TOC fields: `TABLES_SIZE @332`, `NUM_TABLES @352`, entries start ~`399`. Each TOC
-  entry: `flag`, 6 stream `(offset,size)` pairs, 6 `variants` (header sizes), an
-  `unknown`, then a length-prefixed name.
+- TOC fields: `TABLES_SIZE @332`, `NUM_TABLES @352`, entries start at `400`. Each TOC
+  entry: 6 header-blob sizes (one per language slot), the asset-type hash, a
+  length-prefixed name, a `hasStream` byte and, if set, 6 stream `(offset,size)`
+  pairs.
+  *Corrected 2026-10-02:* this read "entries start ~399. Each TOC entry: `flag`,
+  6 stream pairs, 6 `variants`, an `unknown`, then a name". The fixed header is
+  400 bytes; the flag and pairs are the tail of a record, not its head; the
+  `unknown` is the type hash. `Toc` keeps the old attribute names (`flag`,
+  `pairs`, `variants`, `unknown`) as properties, and `flag` / `pairs` now
+  describe the entry's own stream. `numLocalized @356` further records follow
+  the main directory; `--language 0..5` picks their slot.
 - **`block_s_z` is a CONCATENATION of per-asset zlib substreams.** Each asset's
   stream = `inflate(block_s_z[offset : offset+size])` using the TOC pair.
 - **Correct entry point:** `watchmen_extract.extract_block(decompressed_header_block,
@@ -132,9 +171,14 @@ Each per-asset header (the inflated TOC blob) is a serialized **property bag**:
 ```
 +0  u32 typeNameLen          (e.g. 7 = "Texture", 8 = "ModelRes")
 +4  char[len] typeName
-+.. u32 propCount
-+.. propCount typed records
++.. u32 bagDwords            length of the property bag in 32-bit words
++.. bagDwords x 4 bytes of typed records, then the type-specific body
 ```
+*Corrected 2026-10-02:* the u32 was documented here as `propCount` and in §6 as
+"classId/version (always 0x2D)". It is the bag's dword count (engine
+`FUN_00511f96`): 45 for `Texture` (9 records of 20 bytes), 91 for `ModelRes`,
+55 for `TextureEffects(Texture)`, 96 for `ModelEffects(ModelRes)`. The body
+starts at `4 + typeNameLen + 4 + 4·bagDwords`.
 Record (typical scalar) = `[typeGUID u32][nameHash u64][typeTag u32][value]` (20 B for
 a scalar). **Property names are name-HASHED at runtime** (no plaintext), and values
 are config (LOD distances, scales, flags) — NOT geometry. The header is read
@@ -143,25 +187,40 @@ are config (LOD distances, scales, flags) — NOT geometry. The header is read
 records. Full notes: §4 below.
 
 ---
-## 5. MODELS  (float-VB ✅ · stride-16 ⚠️)
-- Geometry lives in the **stream**, read by `ModelResDerivedIO::Read @ ~0x542541`:
-  `[count][element-table (count×u32)][flags][bbox vec3 min/max][blobSize][blob]`.
-  Stream primitives: `ReadU32 = 0x435459`, `ReadByte = 0x4353E9`. CVarList = 24-bit
-  count + 8-bit flags (the `& 0xFFFFFF` seen everywhere).
-- **Vertex normal = HALF4** (3× float16 + pad) at `vertex+12`, little-endian.
-  Validated (unit_box 24/24; body 0.976).
-- **Two vertex formats:**
-  - *Compact float VB* (stride 44/56) → **fully decodes to OBJ** today
-    (`watchmen_extract.decode_model`, IB-validated VB pick + tri gate).
-  - *Stride-16 "baked" env meshes* → int16 positions normalized to a per-mesh bbox,
-    packed normal/uv in trailing int16s. **Not fully decodable from `.naz` yet**: the
-    extracted asset is missing the **index buffer** and the **bbox** (the engine
-    dequant runs at GPU-upload time via a runtime vtable). Point-cloud shape is
-    recoverable; a usable mesh is not. NinjaRipper capture is the only
-    complete path for these right now. **Next:** read the exact
-    `ModelResDerivedIO::Read` record layout in `ghidra_kapow_out\` to find whether
-    the IB/bbox are in the stream just outside the current slice. See
-    §5 below.
+## 5. MODELS  (header-driven on Part 2 PC ✅)
+*Rewritten 2026-10-02.* This section said geometry is "read by
+`ModelResDerivedIO::Read @ ~0x542541`", listed `ReadByte = 0x4353E9`, and
+described two vertex classes: a compact float VB and a "stride-16 baked env
+mesh" with int16 positions that could not be decoded from the `.naz`.
+
+- The reader chain is `ModelRes::Read` `FUN_00547006` → part `FUN_00545927` →
+  submesh `FUN_00542541` → mesh buffer `FUN_004336ec`. `0x542541` is the
+  submesh record, `0x4353E9` is ReadBool. Layout: `KAPOW_NAZ_FORMAT.md` §6b.
+- The **header** lists every buffer (render submeshes per LOD, shadow hulls,
+  an optional per-part proxy slab) with its vertex count, vertex **format id**
+  and index byte count. The **stream** holds them in header order: vertices,
+  u16 indices, a cluster table, lists, an optional per-vertex array. The sum
+  reproduces the stream length exactly on 740 / 740 Part 2 PC models, so every
+  offset is computed and nothing is searched.
+- **Vertex formats** (stride table at `0x00C791B0`): 5 rigid (44 bytes), 6
+  skinned (56), 9 shadow hull (20), 10 skinned shadow hull (32). Positions are
+  raw `float32 × 3` in every format. **Vertex normal = HALF4** (3× float16 +
+  pad) at `vertex+12`, little-endian — validated (unit_box 24/24; body 0.976).
+  Colour, UV, tangent and bitangent offsets: `KAPOW_NAZ_FORMAT.md` §6b.
+- **The stride-16 "baked env mesh" claim is withdrawn.** No vertex declaration
+  in the executable has a SHORT element; format 3 (stride 16) is a 2D format,
+  `FLOAT2 pos + FLOAT2 uv`. All 735 model streams of Part 2 PC tile exactly
+  with formats 5, 6, 9 and 10, which leaves no room for another vertex class,
+  and the five `.detailmesh.stream` files the claim was attached to are float
+  data (`FORMATS_MISC.md`). Which file the original observation was read from
+  could not be found; it may have described a run-time buffer in a capture.
+- `watchmen_extract.decode_model` writes the full-detail LOD by default
+  (`--model-lod N|all`), names each material from the submesh's texture-list
+  index, and writes neither shadow hulls nor proxy slabs. Console files and
+  Part 1 PC headers do not follow this layout and take the older descriptor
+  scan (`find_descriptors`, IB-validated VB pick + tri gate), unchanged.
+- CVarList = 24-bit count + 8-bit flags (the `& 0xFFFFFF` seen everywhere).
+  Stream primitive: `ReadU32 = 0x435459`.
 
 ## 6. TEXTURES  (format ✅ · extractor ~39/186 ⚠️)
 **Texel data:** raw DXT/BC mip chain, top level first, **no per-stream header**
@@ -187,7 +246,8 @@ The `.header` (block_h_z) of a `Texture` asset, little-endian:
 ```
 +0    u32  typeNameLen (=8, "Texture\0")
 +4    char[8] "Texture\0"
-+12   u32  classId/version (always 0x2D = 45)
++12   u32  classId/version (always 0x2D = 45)     [corrected 2026-10-02: the property
+                                                   bag's length in dwords, 45 = 9 x 20 B]
 +16   9 x 20-byte PROPERTY records  (the generic property bag, fixed 180 B):
           [salt u32][nameHashLo u32][nameHashHi u32][typeTag u32][value u32]
       `salt` = per-asset constant repeated on every record (the alignment oracle
@@ -200,6 +260,15 @@ The `.header` (block_h_z) of a `Texture` asset, little-endian:
       Array ends when +13 isn't a valid enum / +26 ∉ 1..13; then a length-prefixed
       source path "/data/.../<name>.bmp".
 ```
+*Corrected 2026-10-02 (engine `FUN_005382aa` / `FUN_00429e77`):* what follows
+the bag at +196 is `u32 nFrames, u8 hasAnim`, then per frame eight slots — a
+29-byte descriptor for slot 0 and, for slots 1–7, a presence byte followed by
+a descriptor if present — and the source path. Descriptor: `u32 width, u32
+height, u32 format, u32 0, u32 type (1 = 2D, 2 = cube), u8 hasAlpha, u32
+mipCount, u32 0`. The "30-byte record" offsets above are those fields seen
+through a window that starts at `nFrames`: the "× 256" is the `hasAnim` byte in
+front of the width (the "low byte carries a flag"). See `KAPOW_NAZ_FORMAT.md`
+§4. `watchmen_extract.parse_texture_frames` reads it exactly.
 **100% exact & verified on all 186 bordello textures:** asset NAME, per-image
 FORMAT, image COUNT, and LAYER structure. Most textures are **multi-layer
 materials** (73 single · 10×2 · 98×3 · 5×4 images) = diffuse(DXT1) + normal(ATI2/
@@ -207,6 +276,12 @@ BC5) + specular(DXT1). Authored dims verified vs GPU: FemaleSkinBody authored
 512×1024 → 1 mip-drop → **256×512 DXT1 = the byte-exact GPU copy**.
 
 ### ⚠️ The remaining wall — STORED resolution is NOT in the header
+*Superseded (noted 2026-10-02).* This subsection and "Multi-layer texture stream
+— still framed" in §8.5 record the state of 2026-06-24. With the exact header
+and 4-byte row padding of linear formats, header and inflated stream length
+agree on 936 / 936 Part 2 PC textures; there is no per-layer framing. The
+individual byte counts quoted below were not re-checked.
+
 The header carries the **authored** texture; the stream stores a **runtime-reduced**
 copy whose resolution is recorded **nowhere in the header**. Proof: `MansionDoor_01`,
 `Mansion_wood_01`, `Mansion_plaster_03` have **byte-identical** 512/512/512
@@ -241,6 +316,10 @@ libVorbis + Bink + libpng/zlib present. `watchmen_extract.decode_audio` exists
 ## 8. Engine serialization primitives (StreamBuffer)
 `ReadU32 = 0x435459 · ReadVec4 = 0x4354a8 · ReadVec3 = 0x43552a · ReadFloat = 0x435494
 · ReadBool/Byte = 0x4353e9`. The header/stream are read sequentially with these.
+*Corrected 2026-10-02:* `0x4354a8` reads **12 bytes** (a vec3), not a vec4. The
+16-byte readers are `0x4354d1` and `0x43553c`; `0x4353e9` is ReadBool (byte
+`== 1`) and `0x435403` is ReadU8. The `0x43552a` entry above was not
+re-checked.
 Sheet deserializers `FUN_00529a1a` / `FUN_0052e011` show the pattern
 (width→this+4, height→this+8 via ReadU32, etc.).
 
@@ -256,6 +335,10 @@ non-destructive). Result: **`FUN_005351f6` 14 → 2215 B, `FUN_0045b961` 10 → 
 5014 bodies regrown, only 200 disasm-fallback left.** Best run also disabled the
 "Non-Returning Functions - Discovered" analyzer + enabled Decompiler Parameter ID.
 The recovered `ghidra_kapow_out\deep3\` is now the corpus to use for textures/audio.
+*2026-10-02:* the scripts named in this section were never shipped. The
+equivalent repair is `tools/ghidra/FixEHProlog.java` (it attaches Ghidra's
+`EH_prolog` call-fixup and re-bodies 2,000 functions); see
+`tools/ghidra/README.md`.
 
 What the recovered texture loader (`FUN_005351f6`, texturesheet upload) shows:
 - A **Texture is a multi-slot MATERIAL**: layer pointers at object `+0xe0/+0xe4/+0xe8/
@@ -411,7 +494,9 @@ the WM06 engine: asset-header PROPERTY records are **16 bytes**
 (`[salt][hashLo][hashHi][tag][val]`). `_prop_walk()` auto-detects the stride by
 which one yields more consecutive salt hits — no version flag. The texture
 IMAGE records are 30 bytes on BOTH engines with identical field offsets; only
-the record-area START shifts. This one difference had broken two things on
+the record-area START shifts. *(Corrected 2026-10-02: 29-byte descriptors plus
+one presence byte per optional slot, on both engines — the exact header
+grammar of `KAPOW_NAZ_FORMAT.md` §4 also holds on Part 1.)* This one difference had broken two things on
 Part 1: (a) `parse_texture_header` found zero image records → textures fell to
 the legacy coherence-guess carve → grid/stripe/mip garbage (user-reported:
 Biker_DenimVest*, Generic_door05, …). Now 1970/1971 Part 1 textures plan
@@ -700,6 +785,10 @@ with zero flags** (the `files/` + `extracted/` raw trees).
      `_stride_layers` now tags `drift`, `texture_layer_label` maps drift →
      specSize regardless of codec. 45 X360 textures relabeled + roughnessGen
      rebaked from the real specSize data.
+     *(Corrected 2026-10-02: on PC the "extra 4-byte field" is the presence
+     bytes of the empty slots in front of slot 7; the gloss map is the slot-7
+     layer. The discriminator stands — the exact parser marks slot 7 the same
+     way. The console header was not re-read.)*
    - **Known residual (X360 only):** records that arrive via
      `_console_recover_layers` byte-scan lose the drift context, and the
      last-recovered-record heuristic is provably unsafe (PS3 ground truth:
@@ -769,7 +858,9 @@ with zero flags** (the `files/` + `extracted/` raw trees).
    and are DEFERRED pending a decision on the (large) Xenos-internals effort.
 4. **Models — ✅ DONE 2026-07-13.** `find_descriptors`/`_vb_ok`/`decode_model`
    take `order=`; model_jobs carry their block's order (deferred decode).
-   Console vertex declarations are SMALLER than PC for the same descriptor G:
+   Console vertex declarations are SMALLER than PC for the same descriptor G
+   *(2026-10-02: `G` is the vertex format id stored in the file, not an element
+   count; the console declarations are not in the PC executable)*:
    rigid G=5 → 32B (PC 44), skinned G=6 → 44B (PC 56). Console layout:
    pos f32×3 BE @0 · normal packed u32 @12 (LSB-first x:11 y:11 z:10 signed,
    x,y/1023 z/511 — `_dec1110`, solved vs PC half3 ground truth, max 0.13°) ·

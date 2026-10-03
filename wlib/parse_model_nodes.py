@@ -12,7 +12,9 @@ parent index from the record itself.
 Node 0 is the unnamed root (empty name, parent -1) == GamePivot slot.
 """
 
-import struct, sys, numpy as np
+import os, struct, sys, numpy as np
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 def _detect_order(mb):
@@ -43,10 +45,41 @@ def _names(mb, order="<"):
     return occ
 
 
+def parse_header_driven(mb):
+    """Node table straight from the engine-exact ModelRes header walk
+    (watchmen_extract.parse_model_header: FUN_00547006 -> FUN_00545927), or None
+    when the blob is not a Part 2 PC header.  Same return shape as parse(); every
+    part of the file is a node, so parent indices can never be misaligned."""
+    try:
+        import watchmen_extract as _we
+    except ImportError:
+        if _HERE not in sys.path:
+            sys.path.append(_HERE)  # append, never insert(0)
+        import watchmen_extract as _we
+    M = _we.parse_model_header(bytes(mb), "<")
+    if not M or not M["parts"]:
+        return None
+    parts = M["parts"]
+    n = len(parts)
+    names = [P["name"] or ("(root)" if i == 0 else "(node%d)" % i) for i, P in enumerate(parts)]
+    pos = np.array([P["pos"] for P in parts], dtype=np.float32).astype(np.float64)
+    quat = np.array([P["quat"] for P in parts], dtype=np.float32).astype(np.float64)
+    parent = [P["parent"] - (1 << 32) if P["parent"] >= (1 << 31) else P["parent"] for P in parts]
+    parent = [pa if -1 <= pa < n else -1 for pa in parent]
+    return names, pos, quat, np.array(parent)
+
+
 def parse(mb, order=None):
     """-> names(list), pos (N,3), quat (N,4 xyzw), parent (N,) int (node indices, -1 root).
     order '<' PC / '>' console; auto-detected when None (record layout is the
-    same on all platforms, only the f32/u32 fields are byte-flipped)."""
+    same on all platforms, only the f32/u32 fields are byte-flipped).
+
+    PC headers are read header-driven first (parse_header_driven); the name-anchored
+    scan below remains for console and Part 1 blobs."""
+    if order in (None, "<"):
+        hd = parse_header_driven(mb)
+        if hd is not None:
+            return hd
     if order is None:
         order = _detect_order(mb)
     f4 = order + "f4"
@@ -154,76 +187,57 @@ if __name__ == "__main__":
 
 
 # ---------------------------------------------------------------------------
-# 2026-07-09p: node AUX region layout (bytes between a node's name and the
-# next node's transform), reversed from Node::Deserialize 0x545927 + corpus
-# tiling (exact on all skeleton/prop nodes; 33.4% of ALL node regions incl.
-# mesh models):
-#   [u32 f1=0][u32 parent]
-#   [u32 cnt34]  per outer: [u32 innerCnt] ; innerCnt>0 only on mesh nodes
-#                (inner item 0x2c: [str][u32 n][n u32 ids][u8][u8][u32][u8] =
-#                 material/palette binding, NOT fully tiled here)
-#   [u32 cnt40]  >0 only on mesh nodes: meshbuffer descriptors
-#                ([vec3 bboxmin][vec3 bboxmax][u8 hasBuf][meshbuf...], deep)
-#   [u8 0]
-#   [u32 njoint] per joint (reader 0x545cbe..): 48B + blob:
-#       [u32 type(4/5/6/7)][u32 0][f32 pos x3][f32 a][f32 a']
-#       [f32 quat x4 xyzw]  (2026-07-12c: a/a' BEFORE quat; unit-norm proof)
-#       [u32 blobLen][blob]
-#       type7 blobLen=0 (508/508); type6 (UpperArm/Head twist) blobLen=7;
-#       types 4/5 blob layout unknown (arm/hand/pelvis special joints).
-#   [u32 0][u32 0] terminator
-# These joint records are the file-side EmbeddedJointNodes (jiggle/ragdoll
-# D6 joints, see 2026-07-09i/j PhysX findings).
-def parse_node_aux(mb, start, end, order="<"):
-    """Parse one node aux region [start,end). Returns dict or None if the
-    region contains mesh data / unknown joint blobs (not fully tiled).
-    order: '<' PC (default, previous hardcoded behavior) / '>' X360+PS3
-    (2026-08-17: the reads were LE-only)."""
-    import struct as _s
-
-    p = start
-
-    def u32():
-        nonlocal p
-        v = _s.unpack_from(order + "I", mb, p)[0]
-        p += 4
-        return v
-
+# Node AUX region = the bytes between a node's name and the next node's
+# transform (Node::Deserialize 0x545927):
+#   [u32 f1][u32 parent]
+#   [u32 cnt34] cnt34 x [u32 innerCnt]   innerCnt > 0 only on mesh nodes
+#   [u32 cnt40]                          > 0 only on mesh nodes
+#   [u8 flag]
+#   [u32 n0] n0 x volume   collision shapes, PhysX scene 0
+#   [u32 n1] n1 x volume   collision shapes, PhysX scene 1
+#   [u32 n2] n2 x surface  (one node of the PC corpus)
+# The volume records are read by skeleton_records.parse_node_tail (box 52 B,
+# sphere 44 B, capsule 48 B, mesh variable).  Until 2026-10 this function read
+# them itself as fixed 48-byte "joints" [type][0][pos][a][a'][quat], which only
+# tiles capsule-only nodes with an empty second list, and put the capsule's
+# (diameter, height, x) in `pos`; the quaternion was right.
+def _skeleton_records():
     try:
-        f1, parent, c34 = u32(), u32(), u32()
-        if c34 > 64:
-            return None
-        if any(u32() for _ in range(c34)):
-            return None  # mesh node
-        if u32():
-            return None  # cnt40 mesh node
-        p += 1
-        nj = u32()
-        if nj > 200:
-            return None
-        joints = []
-        for _ in range(nj):
-            t, _z = u32(), u32()
-            import numpy as _np
+        import skeleton_records as _sr
+    except ImportError:
+        if _HERE not in sys.path:
+            sys.path.append(_HERE)  # append, never insert(0)
+        import skeleton_records as _sr
+    return _sr
 
-            pos = _np.frombuffer(mb, order + "f4", 3, p)
-            p += 12
-            # 2026-07-12c FIELD-ORDER FIX: the two scalars precede the quat.
-            # True layout: [pos x3][f32 a][f32 a'][quat x4 xyzw] -- verified
-            # |q|^2 = 1.0000 on all 24 female-skeleton joints (old order gave
-            # non-unit "quats").  a/a' = per-joint scalar pair (limit/offset?).
-            a, a2 = _s.unpack_from(order + "2f", mb, p)
-            p += 8
-            quat = _np.frombuffer(mb, order + "f4", 4, p)
-            p += 16
-            bl = u32()
-            if bl > 4096:
-                return None
-            blob = mb[p : p + bl]
-            p += bl
-            joints.append(dict(type=t, pos=pos.copy(), quat=quat.copy(), a=a, a2=a2, blob=blob))
-        if u32() or u32() or p != end:
-            return None
-        return dict(f1=f1, parent=parent, joints=joints)
-    except (_s.error, ValueError):
+
+def parse_node_aux(mb, start, end, order="<"):
+    """Parse one node aux region [start, end).  Returns None when the node
+    carries mesh data or the bytes do not tile the region exactly, else
+        dict(f1, parent, joints, volumes, surfaces)
+    volumes  [scene 0 list, scene 1 list] as skeleton_records.parse_node_tail
+             returns them (type, kind, base, pos, quat, blob + size | radius |
+             diameter, height | mode, verts, indices)
+    joints   the same volumes flattened in file order under the keys older
+             callers use: type, pos (3,) f32, quat (4,) f32 xyzw, blob, scene,
+             and a / a2 = a capsule's diameter / height (None for other types)
+    order: '<' PC (default) / '>' X360+PS3."""
+    tail = _skeleton_records().parse_node_tail(mb, start, end, order)
+    if tail is None:
         return None
+    joints = []
+    for scene, vols in enumerate(tail["volumes"]):
+        for v in vols:
+            j = dict(v)
+            j["scene"] = scene
+            j["pos"] = np.array(v["pos"], dtype=np.float32)
+            j["quat"] = np.array(v["quat"], dtype=np.float32)
+            j["a"], j["a2"] = (v["diameter"], v["height"]) if v["type"] == 7 else (None, None)
+            joints.append(j)
+    return dict(
+        f1=tail["f1"],
+        parent=tail["parent"] & 0xFFFFFFFF,
+        joints=joints,
+        volumes=tail["volumes"],
+        surfaces=tail["surfaces"],
+    )
