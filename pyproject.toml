@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "watchmen-kapow-toolkit"
-version = "1.3.0"
+version = "1.4.0"
 description = "Asset extraction toolkit for Watchmen: The End Is Nigh Parts 1 & 2 (Kapow engine) — .naz archives, textures, models, audio, fragments, and engine-exact character animation on PC, Xbox 360, and PS3."
 readme = "README.md"
 license = {text = "MIT"}
 # TODO before publishing: fill these in.
-authors = [{name = "FILL IN"}]
+authors = [{name = "thurask"}]
 requires-python = ">=3.8"
 keywords = ["reverse-engineering", "game-assets", "kapow", "watchmen", "naz", "glb"]
 classifiers = [
@@ -23,11 +23,10 @@ dependencies = [
     "Pillow>=9",
 ]
 
-# TODO before publishing: point these at the repo.
-# [project.urls]
-# Homepage = "https://github.com/OWNER/watchmen-kapow-toolkit"
-# Repository = "https://github.com/OWNER/watchmen-kapow-toolkit"
-# Issues = "https://github.com/OWNER/watchmen-kapow-toolkit/issues"
+[project.urls]
+Homepage = "https://github.com/thurask/watchmen-toolkit"
+Repository = "https://github.com/thurask/watchmen-toolkit"
+Issues = "https://github.com/thurask/watchmen-toolkit/issues"
 
 [project.optional-dependencies]
 dev = ["black", "pyflakes", "pytest"]

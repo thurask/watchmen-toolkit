@@ -7,9 +7,24 @@ Provenance of the data files shipped in wlib/ (see docs/INDEX.md):
                            (kapow_props.name_hash: bit-CRC32/0x04C11DB7 over
                            the name's bytes & 0xDF, engine FUN_00423ce8).
                            Source: string harvest over the game EXE + all naz
-                           block payloads.  FULLY regenerable de novo — the
-                           string sections (.rdata/.data) are identical even in
-                           the DRM-packed retail KapowMulti.exe.
+                           block payloads (`gendata strings`; the string
+                           sections are readable even in the DRM-packed retail
+                           KapowMulti.exe).  The shipped table is an earlier
+                           harvest, not the byte output of today's generator:
+                           from the Part 2 PC executable alone `strings` gives
+                           40,575 names, the shipped table has 23,753, and 675
+                           shared hashes differ in letter case.  Names the
+                           native classes register carry the registered
+                           spelling (registered_names.json); `gendata respell`
+                           applies that to a table without any game file and
+                           is how the shipped table got them (byte-stable:
+                           running it again changes nothing).
+  registered_names.json    The spelling of the 1,224 property / command hashes
+                           the native classes register (research output from
+                           the registration sites; each entry re-hashed on
+                           load), the three names the dictionary keeps
+                           (PLATFORM, Scene, physicsTimepassed) and the
+                           per-class exception is3D (Sprite) / is3d.
   reg_dump.json            441 engine classes (5,090 property and 6,630 command
                            registrations with defaults/UI captions/handler
                            slots; format "kapow-reg-dump/2"), recovered by a
@@ -40,6 +55,7 @@ Provenance of the data files shipped in wlib/ (see docs/INDEX.md):
 
 Usage (via the CLI: `watchmen gendata SUBCMD ...`):
   gendata strings   EXE [NAZ_OR_DIR ...] [-o OUT.pkl]   rebuild prop_hash_dict
+  gendata respell   [PKL] [-o OUT.pkl]                  registered spellings -> prop_hash_dict
   gendata regdump   EXE [-o OUT.json]                   rebuild reg_dump (capstone)
   gendata propnames [REG_DUMP.json] [-o OUT.json]       derive prop_names
   gendata keys-export [PKL] [-o OUT.json]               fragment keys -> readable json
@@ -64,6 +80,14 @@ _REEXPORTED = (kapow_hash,)  # gen_data.kapow_hash stays importable for older ca
 
 
 # ---- PE helpers -------------------------------------------------------------
+
+
+def _read_bytes(path):
+    """The file's bytes; the handle is closed before returning."""
+    with open(path, "rb") as fh:
+        return fh.read()
+
+
 def pe_sections(d):
     """[(name, va, vsize, raw_off, raw_size)] from a PE image."""
     pe = struct.unpack_from("<I", d, 0x3C)[0]
@@ -177,11 +201,92 @@ def _tokens(s):
     return out
 
 
+# ---- registered spellings ---------------------------------------------------
+# The hash folds case, so a dictionary entry may be any case variant of a name.
+# For the names the native classes register, the spelling pushed at the
+# registration call is the engine's own (`animation`, `mass`, `textRes`); the
+# capitalised variants in the executable are editor captions.  That spelling
+# outranks every other string of the same hash, with the exceptions the table
+# lists (`keep`).  registered_names.json is research output, checked here.
+_REG_NAMES_PATH = os.path.join(_HERE, "registered_names.json")
+PROP_DICT_PICKLE_PROTOCOL = 4  # what the shipped table is written with (byte-stable)
+
+
+def load_registered_names(path=None):
+    """registered_names.json -> {"names": {hash: {spelling: [classes]}}, "keep":
+    {hash: name}, "generic": {hash: name}, "class_overrides": {class: {hash: name}}}
+    with integer hashes.  A spelling whose hash is not its key is dropped, so a
+    damaged table cannot inject names.  {} tables when the file is missing."""
+    out = {"names": {}, "keep": {}, "generic": {}, "class_overrides": {}}
+    try:
+        with open(path or _REG_NAMES_PATH, encoding="utf-8") as fh:
+            raw = json.load(fh)
+    except (OSError, ValueError):
+        return out
+    for k, sp in raw.get("names", {}).items():
+        h = int(k, 16)
+        good = {s: list(c) for s, c in sp.items() if name_hash(s) == h}
+        if good:
+            out["names"][h] = good
+    for s in raw.get("keep", []):
+        out["keep"][name_hash(s)] = s
+    for k, s in raw.get("generic", {}).items():
+        if name_hash(s) == int(k, 16):
+            out["generic"][int(k, 16)] = s
+    for cls, tab in raw.get("class_overrides", {}).items():
+        good = {int(k, 16): s for k, s in tab.items() if name_hash(s) == int(k, 16)}
+        if good:
+            out["class_overrides"][cls] = good
+    return out
+
+
+def registered_spellings(reg=None):
+    """{hash: name}: the one spelling a reader without class context uses for
+    every registered hash -- the registered spelling, the `generic` choice where
+    two classes register different ones, and no entry for the `keep` names."""
+    reg = reg or load_registered_names()
+    out = {}
+    for h, sp in reg["names"].items():
+        if h in reg["keep"]:
+            continue
+        if len(sp) == 1:
+            out[h] = next(iter(sp))
+        elif h in reg["generic"]:
+            out[h] = reg["generic"][h]
+    return out
+
+
+def apply_registered_spellings(table, reg=None, exe_bytes=None):
+    """Let the registered spelling outrank the entry of the same hash in `table`
+    ({hash: name}); add the registered names the table lacks.  The `keep` names
+    stay as they are.  With `exe_bytes`, only spellings found there as a
+    NUL-terminated string are used.  The table is changed in place; new hashes
+    are appended in ascending order, so the result does not depend on set or
+    dict order.  -> {"respelled": [(hash, old, new)], "added": [(hash, name)]}"""
+    want = registered_spellings(reg)
+    respelled, added = [], []
+    for h in sorted(want):
+        s = want[h]
+        if exe_bytes is not None and (s.encode("latin1") + b"\0") not in exe_bytes:
+            continue
+        old = table.get(h)
+        if old is None:
+            table[h] = s
+            added.append((h, s))
+        elif old != s:
+            table[h] = s
+            respelled.append((h, old, s))
+    return {"respelled": respelled, "added": added}
+
+
 def build_prop_dict(exe_path, sources=()):
     """De novo prop_hash_dict: hash(UPPER(name)) -> name from the exe string
     sections plus (optionally) every block payload of the given naz sources,
-    expanded with identifier sub-tokens."""
-    strs = harvest_strings(open(exe_path, "rb").read())
+    expanded with identifier sub-tokens.  A name a native class registers gets
+    the registered spelling (apply_registered_spellings); the `keep` names of
+    registered_names.json keep the spelling of their own string."""
+    exe = _read_bytes(exe_path)
+    strs = harvest_strings(exe)
     for src in sources:
         strs |= naz_source_strings(src)
     toks = set()
@@ -191,6 +296,11 @@ def build_prop_dict(exe_path, sources=()):
     out = {}
     for s in sorted(strs | toks, key=_name_rank):
         out.setdefault(name_hash(s), s)
+    reg = load_registered_names()
+    for h, s in sorted(reg["keep"].items()):
+        if s in strs or s in toks:
+            out[h] = s
+    apply_registered_spellings(out, reg, exe)
     return out
 
 
@@ -320,16 +430,18 @@ def sweep_call_args(md, code, base, start, end, wanted):
 
 def build_reg_dump(exe_path, signatures=None, key_names=None):
     """Registration table (format "kapow-reg-dump/2"): list of class dicts
-      {va, name, classId, native_base, parent, base, props[], commands[]}
+      {va, name, classId, native_base, parent, base, root_index, props[], commands[]}
       prop    {va, hash, name, default, ui, flags, typeidx}
-      command {va, name, hash, handler, slot, kind, arg3, typeidx, signature}
+      command {va, name, hash, handler, slot, kind, visibility, arg3, typeidx,
+               signature, dispatch_kind, dispatch_index}
+    root_index / visibility / dispatch_* are derived by add_dispatch().
     `signatures` / `key_names` default to the shipped tables; names and
     signatures are only attached when name_hash(string) == hash."""
     import bisect
 
     import capstone
 
-    d = open(exe_path, "rb").read()
+    d = _read_bytes(exe_path)
     if text_is_packed(d):
         raise RuntimeError(
             "%s has a DRM-packed .text section. reg_dump can only be regenerated "
@@ -455,6 +567,54 @@ def build_reg_dump(exe_path, signatures=None, key_names=None):
             "addresses in this module were reversed from one specific build and do "
             "not apply here; the result would be garbage." % (len(classes), exe_path)
         )
+    return add_dispatch(classes)
+
+
+def add_dispatch(classes):
+    """Add what the script runtime derives from the registrations (in place;
+    returns `classes`).
+
+    class   root_index      position of `_root` in the class's command list
+                            (ScriptClass+0x54), found here by name; None without one
+    command visibility      the same number as `kind` (command record +0x10): 3 on
+                            every command, `_root` and library-class method, 1 on
+                            every other state and method.  "3 = callable from
+                            outside" is inferred; no reader of the field was found
+            dispatch_kind   kind of the class's hash-map entry for this command's
+            dispatch_index  hash, and the command-list index that entry holds
+                            (ScriptClass_ResolveCommandTable 0x47c752); None on
+                            states and methods (no hash: not reachable by hash)
+        0  one version, owned by `_root`: runs whenever sent (a task is created)
+        1  one version, owned by a state: needs a live frame of that state
+        2  several versions, none owned by `_root` (index -1): the topmost frame
+           whose state owns one handles it, else it is unhandled
+        3  several versions, one owned by `_root` (index = that one): a state
+           override with the root version as fallback -- the topmost owning
+           frame wins, the `_root` frame at the bottom supplies the root version
+    `arg3` is the owner: the command-list index of the state the version
+    belongs to (command record +0x14)."""
+    for c in classes:
+        cmds = c["commands"]
+        roots = [i for i, x in enumerate(cmds) if x["name"] == "_root" and x["slot"] == "state"]
+        root = roots[0] if roots else None
+        # insertion order: root_index sits before the two lists, as documented
+        tail = {k: c.pop(k) for k in ("props", "commands")}
+        c["root_index"] = root
+        c.update(tail)
+        by_hash = {}
+        for i, x in enumerate(cmds):
+            x["visibility"] = x["kind"]
+            x["dispatch_kind"] = x["dispatch_index"] = None
+            if x["hash"] is not None and x["arg3"] not in (None, -1):
+                by_hash.setdefault(x["hash"], []).append(i)
+        for idxs in by_hash.values():
+            if len(idxs) == 1:
+                kind, index = (0 if cmds[idxs[0]]["arg3"] == root else 1), idxs[0]
+            else:
+                rv = [i for i in idxs if cmds[i]["arg3"] == root]
+                kind, index = (3, rv[0]) if rv else (2, -1)
+            for i in idxs:
+                cmds[i]["dispatch_kind"], cmds[i]["dispatch_index"] = kind, index
     return classes
 
 
@@ -479,7 +639,8 @@ def derive_prop_names(reg):
 
 # ---- fragment-keys transparency (pkl <-> readable json) ---------------------
 def keys_export(pkl_path=None):
-    kd = pickle.load(open(pkl_path or os.path.join(_HERE, "kapow_fragment_keys.pkl"), "rb"))
+    with open(pkl_path or os.path.join(_HERE, "kapow_fragment_keys.pkl"), "rb") as fh:
+        kd = pickle.load(fh)
     return {
         "keytable": {"%08x" % h: list(v) for h, v in sorted(kd["keytable"].items())},
         "stdkeys": {"%08x" % h: v for h, v in sorted(kd["stdkeys"].items())},
@@ -528,7 +689,8 @@ def check(game_root):
     print("exe:", exe)
     rc = 0
 
-    shipped = pickle.load(open(os.path.join(_HERE, "prop_hash_dict.pkl"), "rb"))
+    with open(os.path.join(_HERE, "prop_hash_dict.pkl"), "rb") as fh:
+        shipped = pickle.load(fh)
     fresh = build_prop_dict(exe, [naz] if os.path.exists(naz) else [])
     cov = sum(1 for h in shipped if h in fresh)
     agree = sum(1 for h in shipped if fresh.get(h, "").upper() == shipped[h].upper())
@@ -542,7 +704,8 @@ def check(game_root):
     reg_path = os.path.join(_HERE, "reg_dump.json")
     try:
         fresh_reg = build_reg_dump(exe)
-        old = json.load(open(reg_path))
+        with open(reg_path) as fh:
+            old = json.load(fh)
 
         def norm(x):  # the original Ghidra string export trimmed trailing spaces
             if isinstance(x, str):
@@ -586,8 +749,27 @@ def main(argv):
     if cmd == "strings":
         d = build_prop_dict(args[0], args[1:])
         out = out or "prop_hash_dict.pkl"
-        pickle.dump(d, open(out, "wb"))
+        with open(out, "wb") as _f:
+            pickle.dump(d, _f, protocol=PROP_DICT_PICKLE_PROTOCOL)
         print("wrote %s (%d names)" % (out, len(d)))
+    elif cmd == "respell":
+        # the shipped dictionary with the registered spellings applied: the step
+        # that needs no game files, and gives the same bytes on every run
+        src = args[0] if args else os.path.join(_HERE, "prop_hash_dict.pkl")
+        with open(src, "rb") as _f:
+            d = pickle.load(_f)
+        ch = apply_registered_spellings(d)
+        out = out or "prop_hash_dict.pkl"
+        with open(out, "wb") as _f:
+            pickle.dump(d, _f, protocol=PROP_DICT_PICKLE_PROTOCOL)
+        for _h, _old, _new in ch["respelled"]:
+            print("  %08x %s -> %s" % (_h, _old, _new))
+        for _h, _new in ch["added"]:
+            print("  %08x + %s" % (_h, _new))
+        print(
+            "wrote %s (%d names; %d respelled, %d added)"
+            % (out, len(d), len(ch["respelled"]), len(ch["added"]))
+        )
     elif cmd == "regdump":
         r = build_reg_dump(args[0])
         out = out or "reg_dump.json"
@@ -604,7 +786,8 @@ def main(argv):
         )
     elif cmd == "propnames":
         src = args[0] if args else os.path.join(_HERE, "reg_dump.json")
-        p = derive_prop_names(json.load(open(src)))
+        with open(src) as _f:
+            p = derive_prop_names(json.load(_f))
         out = out or "prop_names_from_reg.json"
         with open(out, "w", encoding="utf-8", newline="\n") as _f:
             json.dump(p, _f, indent=1)
@@ -616,9 +799,11 @@ def main(argv):
             json.dump(j, _f, indent=1)
         print("wrote %s" % out)
     elif cmd == "keys-import":
-        kd = keys_import(json.load(open(args[0])))
+        with open(args[0]) as _f:
+            kd = keys_import(json.load(_f))
         out = out or "kapow_fragment_keys.pkl"
-        pickle.dump(kd, open(out, "wb"))
+        with open(out, "wb") as _f:
+            pickle.dump(kd, _f)
         print("wrote %s" % out)
     elif cmd == "check":
         return check(args[0] if args else ".")

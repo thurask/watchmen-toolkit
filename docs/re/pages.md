@@ -113,7 +113,7 @@ Page-list record: +0x14 force-stay timer, +0x18 "end of animation reached" flag.
 9. Tail: behaviours, absolute/physical mode messages, dual-animation partner messages (0x5b9afb, already documented),
    first body page forced to blend 1; if the new top state has `m_tholdblendvalues` → one `UpdatePageBlendsFaster(top, 1)`; ctrl+0x2c = 1.
 
-No page-count cap exists in SetupNewPage. **[code]** (The interpreter's cap of 8 has no counterpart here; whether another function caps it is **[not established]**.)
+No page-count cap exists in SetupNewPage. **[code]** (The interpreter's cap of 8 has no counterpart here; neither `DeleteOldPages` 0x5b9e4c nor `DeleteOneOldPage` 0x5ac8a6 tests a count. **[code]**)
 
 ## 2. How play position advances
 
@@ -153,7 +153,7 @@ Where AnimSlot+0x84 is written (per-slot speed, default) is **[not established]*
 - Page blend (tail, 0x5b7560–0x5b7690): `ctrl+0x2c = 1` while blend < 1. Normally `blend += dt/ease` while `blend < 1 && ease > 0`, else 1.
   Overlay top page that is non-looping and has reached playpos ≥ 1: `blend −= dt/ease`, floored at −0.01 (0xa45e88 / 0x9fd4cc).
   Overlay page while the body top state has `m_tdisallowoverridelayers` or AnimationData "No Override Layer" (+0x1c): `blend −= dt/ease`
-  (or 0 if ease ≤ 0). Finally `blend = min(blend, 1)`. DeleteOldPages 0x5b9e4c removes pages below the highest page with blend ≥ 1 and any page with blend < 0.
+  (or 0 if ease ≤ 0). Finally `blend = min(blend, 1)`. DeleteOldPages 0x5b9e4c always deletes index 0: once per page below the highest page with blend ≥ 1; and a page with blend < 0 at index k removes pages 0..k−1 and then itself (the last consequence is inferred from the decompiled loop).
 
 **Event firing** (CheckPlayPosEvents 0x5b51f3) **[code]**: TOTAL_PLAY_TIME (3): compares `event.m_nplaypos` with `page.timePlayed` and fires once (the comparison direction is garbled in the decompilation; "fires when the time is passed" is **[inferred]**).
 PLAY_POS (0), normal play: fires when `event.m_nplaypos < page.playpos` and not yet fired this lap — a latch, not a `(last, cur]` window;

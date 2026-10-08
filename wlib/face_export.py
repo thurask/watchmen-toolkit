@@ -26,6 +26,12 @@ if _HERE not in sys.path:
     sys.path.append(_HERE)  # append, never insert(0): flat module names must not shadow the stdlib
 
 
+def _read_bytes(path):
+    """The file's bytes; the handle is closed before returning."""
+    with open(path, "rb") as fh:
+        return fh.read()
+
+
 def find_heads(extract_out):
     """Every Jaw-rigged model in the archive.  Full art/characters tree scan
     (2026-07-09: the old common/models/head glob missed NiteOwl_Mask2/
@@ -40,7 +46,7 @@ def find_heads(extract_out):
         cands += [os.path.join(dp, f) for f in fns if f.endswith(".model")]
     for m in sorted(cands):
         try:
-            names, _, _, _ = parse(open(m, "rb").read())
+            names, _, _, _ = parse(_read_bytes(m))
         except Exception:
             continue
         if "Jaw" in names and "LowerLip" in names:
@@ -50,9 +56,9 @@ def find_heads(extract_out):
 
 def face_clips(extract_out):
     out = {}
-    for d in glob.glob(os.path.join(extract_out, "extracted", "Animation", "*", "FACE")):
+    for d in sorted(glob.glob(os.path.join(extract_out, "extracted", "Animation", "*", "FACE"))):
         pref = d.split(os.sep)[-2]
-        for f in glob.glob(os.path.join(d, "*.animation")):
+        for f in sorted(glob.glob(os.path.join(d, "*.animation"))):
             out["%s/%s" % (pref, os.path.basename(f)[:-10])] = f
     return out
 
@@ -72,37 +78,47 @@ def head_family(head):
 
 
 def export(extract_out, outdir, budget=None):
+    """One <outdir>/<head>.glb per face-rigged head of the extract.  Resumable: a GLB is
+    kept when characters_export.glb_is_current finds it recorded (<outdir>/
+    _glb_options.json) as written with this run's options (writer_options); files are
+    written atomically.  The folders are made once a head is found."""
     import bake_v4, char_lib, variant_glb as vg, build_bind_file as bbf
+    import characters_export as ce
+    import extract_out as _xo
 
+    _xo.require(extract_out)  # a mistyped folder is an error, not an empty export
     clips = face_clips(extract_out)
     print(len(clips), "face clips")
     texroots = [os.path.join(extract_out, "textures")]
     bdir = os.path.join(extract_out, "binds", "face")
-    os.makedirs(bdir, exist_ok=True)
-    os.makedirs(outdir, exist_ok=True)
+    opts = ce.writer_options()
     import time
 
     t0 = time.time()
     for mbase in find_heads(extract_out):
         head = os.path.basename(mbase)
         out = os.path.join(outdir, head + ".glb")
-        if os.path.exists(out):
+        if ce.glb_is_current(out, None, opts, outdir):
             continue
         if budget and time.time() - t0 > budget:
             print("budget reached -- rerun to continue")
             return 1
+        os.makedirs(bdir, exist_ok=True)
+        os.makedirs(outdir, exist_ok=True)
         bind = os.path.join(bdir, "bind_face_%s.npz" % head)
         if not os.path.exists(bind):
             bbf.build(mbase + ".model", None, bind)
         bake_v4._load_bind(bind)
-        bake_v4._bank_lookup = lambda nm: open(clips[nm], "rb").read() if nm in clips else None
         fam = head_family(head)
         anims = []
         for nm in sorted(clips):
             if not nm.startswith(fam + "/"):
                 continue
             try:
-                pal, dur = bake_v4.bake(nm, 2)
+                # a head model's own node list: its roots keep their bind position
+                pal, dur = bake_v4.bake(
+                    nm, 2, bank=clips, root_rest="bind", twist_align=False, track_names="prefix"
+                )
                 if len(pal) == 1:  # FACE clips are static POSES (all t3
                     import numpy as _np  # tracks); hold 2 frames for viewers
 
@@ -115,5 +131,8 @@ def export(extract_out, outdir, budget=None):
         bn = [str(x) for x in bv["names"]]
         parts = char_lib.load_parts([mbase], bn)
         tex = char_lib.find_textures(parts, texroots)
+        # write_glb writes <out>.tmp and renames it: a killed run leaves no
+        # partial GLB behind, and the log names the final file
         vg.write_glb(parts, anims, out, bind, textures=tex)
+        ce.record_glb_options(out, outdir, opts)
     return 0

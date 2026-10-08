@@ -789,7 +789,7 @@ def test_jiggle_resample_never_extrapolates_past_the_last_sim_sample(tmp_path):
     props["rate_hz"] = hz
     P = np.zeros((F, 2, 3, 4), np.float32)
     P[:, :, :, :3] = np.eye(3)  # static parent -> constant gravity torque drives the sim
-    out = jiggle_d6.apply_jiggle(P, fps, str(bind), props=props)
+    out = jiggle_d6.apply_jiggle(P, fps, str(bind), props=props, model="pinned")
     assert out.shape == P.shape
     dev = [_rotvec(out[i, 1, :, :3].astype(np.float64) @ P[i, 1, :, :3].T) for i in range(F)]
     N = int(round(F / fps * hz))

@@ -1,0 +1,388 @@
+{
+ "format": "watchmen-pivot-sheets/1",
+ "source": "PC Part 2: extracted/pivotbooks/{collisionprimitives,default,mockupbox}.pb.json (26 + 12 + 9 sheets); measured on data. Part 1 has 42 sheets with some different masks: level_meta prefers the pivot books of the extract it reads",
+ "id_rule": "unique_id is the 8 stored bytes as hex (PC byte order: two u32 words, low word first); a node's pivotSheet_Id is that value read little-endian.  A console book stores each word big-endian (447ef063 07180f2f for 63f07e44 2f0f1807)",
+ "ai_bit": {
+  "value": 8192,
+  "name": "KYNAPSE",
+  "evidence": "measured: AIWorldNode.collisionMask is 8192 or 8193 in every shipped level; read: ray filter 0x48b4c8, shape mask 0x51384d"
+ },
+ "sheets": [
+  {
+   "book": "/pivotbooks/collisionprimitives.pb",
+   "name": "default",
+   "unique_id": "63f07e442f0f1807",
+   "collision_mask": 9771,
+   "friction": 0.9,
+   "restitution": 0.0
+  },
+  {
+   "book": "/pivotbooks/collisionprimitives.pb",
+   "name": "Camera",
+   "unique_id": "4446aa44a5808b0b",
+   "collision_mask": 12292,
+   "friction": 0.0,
+   "restitution": 0.0
+  },
+  {
+   "book": "/pivotbooks/collisionprimitives.pb",
+   "name": "Trigger",
+   "unique_id": "3af55246c0c76785",
+   "collision_mask": 16,
+   "friction": 0.0,
+   "restitution": 0.0
+  },
+  {
+   "book": "/pivotbooks/collisionprimitives.pb",
+   "name": "Character_All",
+   "unique_id": "66f5564603b731e7",
+   "collision_mask": 12226,
+   "friction": 0.0,
+   "restitution": 0.0
+  },
+  {
+   "book": "/pivotbooks/collisionprimitives.pb",
+   "name": "None",
+   "unique_id": "4e745e46bfcb8992",
+   "collision_mask": 0,
+   "friction": 0.0,
+   "restitution": 0.0
+  },
+  {
+   "book": "/pivotbooks/collisionprimitives.pb",
+   "name": "Character_Rorschach",
+   "unique_id": "be85a047653f50a6",
+   "collision_mask": 8258,
+   "friction": 0.0,
+   "restitution": 0.0
+  },
+  {
+   "book": "/pivotbooks/collisionprimitives.pb",
+   "name": "Character_NiteOwl",
+   "unique_id": "c585a0472f383746",
+   "collision_mask": 8330,
+   "friction": 0.0,
+   "restitution": 0.0
+  },
+  {
+   "book": "/pivotbooks/collisionprimitives.pb",
+   "name": "Character_Enemy",
+   "unique_id": "c985a0479a3eb12d",
+   "collision_mask": 258,
+   "friction": 0.0,
+   "restitution": 0.0
+  },
+  {
+   "book": "/pivotbooks/collisionprimitives.pb",
+   "name": "Character_Player",
+   "unique_id": "2c86a0479a8ffeca",
+   "collision_mask": 704,
+   "friction": 0.0,
+   "restitution": 0.0
+  },
+  {
+   "book": "/pivotbooks/collisionprimitives.pb",
+   "name": "Slippery",
+   "unique_id": "9c1eed478e01493c",
+   "collision_mask": 66,
+   "friction": 0.0,
+   "restitution": 0.0
+  },
+  {
+   "book": "/pivotbooks/collisionprimitives.pb",
+   "name": "RorschachPathBlocker",
+   "unique_id": "bb714e4821ed3d1a",
+   "collision_mask": 64,
+   "friction": 0.0,
+   "restitution": 0.0
+  },
+  {
+   "book": "/pivotbooks/collisionprimitives.pb",
+   "name": "NiteOwlPathBlocker",
+   "unique_id": "c9714e4898affdb3",
+   "collision_mask": 128,
+   "friction": 0.0,
+   "restitution": 0.0
+  },
+  {
+   "book": "/pivotbooks/collisionprimitives.pb",
+   "name": "EnemyPathBlocker",
+   "unique_id": "4acb4f48da0ee2e0",
+   "collision_mask": 256,
+   "friction": 0.0,
+   "restitution": 0.0
+  },
+  {
+   "book": "/pivotbooks/collisionprimitives.pb",
+   "name": "Character_UnderBoss",
+   "unique_id": "516a7f48589e3bfa",
+   "collision_mask": 2050,
+   "friction": 0.0,
+   "restitution": 0.0
+  },
+  {
+   "book": "/pivotbooks/collisionprimitives.pb",
+   "name": "WaterTriggers",
+   "unique_id": "eaeb9f48a5202bf0",
+   "collision_mask": 1061,
+   "friction": 0.0,
+   "restitution": 0.0
+  },
+  {
+   "book": "/pivotbooks/collisionprimitives.pb",
+   "name": "UnderBoss_Pathblocker",
+   "unique_id": "c27fa9488a8cdc9b",
+   "collision_mask": 10240,
+   "friction": 0.0,
+   "restitution": 0.0
+  },
+  {
+   "book": "/pivotbooks/collisionprimitives.pb",
+   "name": "Character_And_Camera_Collision",
+   "unique_id": "0ae9d048544df635",
+   "collision_mask": 9775,
+   "friction": 0.9,
+   "restitution": 0.0
+  },
+  {
+   "book": "/pivotbooks/collisionprimitives.pb",
+   "name": "Character_Player_and_Underboss",
+   "unique_id": "d44de248de4518a5",
+   "collision_mask": 11968,
+   "friction": 0.0,
+   "restitution": 0.0
+  },
+  {
+   "book": "/pivotbooks/collisionprimitives.pb",
+   "name": "AllCharacterPathBlock",
+   "unique_id": "1badf5483060e2b9",
+   "collision_mask": 3008,
+   "friction": 0.0,
+   "restitution": 0.0
+  },
+  {
+   "book": "/pivotbooks/collisionprimitives.pb",
+   "name": "Waypoint",
+   "unique_id": "7ec3054935e032d1",
+   "collision_mask": 16384,
+   "friction": 1.0,
+   "restitution": 1.0
+  },
+  {
+   "book": "/pivotbooks/collisionprimitives.pb",
+   "name": "CombatAndUseTriggersSeperator",
+   "unique_id": "91fa0a495c131f07",
+   "collision_mask": 8192,
+   "friction": 0.0,
+   "restitution": 0.0
+  },
+  {
+   "book": "/pivotbooks/collisionprimitives.pb",
+   "name": "Ragdoll_All",
+   "unique_id": "cc191049952032ed",
+   "collision_mask": 1025,
+   "friction": 0.0,
+   "restitution": 0.0
+  },
+  {
+   "book": "/pivotbooks/collisionprimitives.pb",
+   "name": "Default_Zero_Friction",
+   "unique_id": "fede1249416925b1",
+   "collision_mask": 9787,
+   "friction": 0.0,
+   "restitution": 0.0
+  },
+  {
+   "book": "/pivotbooks/collisionprimitives.pb",
+   "name": "RorschachPhysicsOnly",
+   "unique_id": "168e2e49d32acdb0",
+   "collision_mask": 64,
+   "friction": 0.0,
+   "restitution": 0.0
+  },
+  {
+   "book": "/pivotbooks/collisionprimitives.pb",
+   "name": "SolidCollisionAiCanSeeThrough",
+   "unique_id": "12ea38493bc52366",
+   "collision_mask": 4095,
+   "friction": 1.0,
+   "restitution": 1.0
+  },
+  {
+   "book": "/pivotbooks/collisionprimitives.pb",
+   "name": "All character block + solid",
+   "unique_id": "c2ab70490e988bdc",
+   "collision_mask": 3040,
+   "friction": 0.0,
+   "restitution": 0.0
+  },
+  {
+   "book": "/pivotbooks/default.pb",
+   "name": "Default",
+   "unique_id": "63f07e44ec361807",
+   "collision_mask": 42543,
+   "friction": 0.9,
+   "restitution": 0.0
+  },
+  {
+   "book": "/pivotbooks/default.pb",
+   "name": "Ragdoll",
+   "unique_id": "8d88af45d430b843",
+   "collision_mask": 1,
+   "friction": 0.6,
+   "restitution": 0.0
+  },
+  {
+   "book": "/pivotbooks/default.pb",
+   "name": "Cloth",
+   "unique_id": "051e5c46e5bac4a8",
+   "collision_mask": 8,
+   "friction": 0.3,
+   "restitution": 0.0
+  },
+  {
+   "book": "/pivotbooks/default.pb",
+   "name": "None",
+   "unique_id": "6c745e4641837645",
+   "collision_mask": 0,
+   "friction": 0.9,
+   "restitution": 0.0
+  },
+  {
+   "book": "/pivotbooks/default.pb",
+   "name": "Trashcan",
+   "unique_id": "a04ac547df7163c5",
+   "collision_mask": 9263,
+   "friction": 0.45,
+   "restitution": 0.2
+  },
+  {
+   "book": "/pivotbooks/default.pb",
+   "name": "DynamicObject",
+   "unique_id": "80e8d84778eedd65",
+   "collision_mask": 9263,
+   "friction": 0.5,
+   "restitution": 0.25
+  },
+  {
+   "book": "/pivotbooks/default.pb",
+   "name": "RagdollAlly",
+   "unique_id": "861187487c817674",
+   "collision_mask": 1024,
+   "friction": 0.6,
+   "restitution": 0.0
+  },
+  {
+   "book": "/pivotbooks/default.pb",
+   "name": "Water",
+   "unique_id": "1057b54899d0089d",
+   "collision_mask": 4096,
+   "friction": 0.0,
+   "restitution": 0.0
+  },
+  {
+   "book": "/pivotbooks/default.pb",
+   "name": "Ragdoll_All",
+   "unique_id": "061a10496f640ce7",
+   "collision_mask": 1025,
+   "friction": 0.6,
+   "restitution": 0.0
+  },
+  {
+   "book": "/pivotbooks/default.pb",
+   "name": "SolidCollisionAiCanSeeThrough",
+   "unique_id": "6d283d49367acc4b",
+   "collision_mask": 4079,
+   "friction": 0.9,
+   "restitution": 0.0
+  },
+  {
+   "book": "/pivotbooks/default.pb",
+   "name": "Default w/o particles",
+   "unique_id": "50bc8149279820df",
+   "collision_mask": 9775,
+   "friction": 0.9,
+   "restitution": 0.0
+  },
+  {
+   "book": "/pivotbooks/default.pb",
+   "name": "SolidCollisionAiCanSeeThroughNoCameraCollision",
+   "unique_id": "49d39249c2468f57",
+   "collision_mask": 4075,
+   "friction": 0.0,
+   "restitution": 0.0
+  },
+  {
+   "book": "/pivotbooks/mockupbox.pb",
+   "name": "Default",
+   "unique_id": "63f07e444da81807",
+   "collision_mask": 9775,
+   "friction": 0.8,
+   "restitution": 0.0
+  },
+  {
+   "book": "/pivotbooks/mockupbox.pb",
+   "name": "CoverBox",
+   "unique_id": "e5f35246204f0ce8",
+   "collision_mask": 512,
+   "friction": 0.0,
+   "restitution": 0.0
+  },
+  {
+   "book": "/pivotbooks/mockupbox.pb",
+   "name": "None",
+   "unique_id": "7e745e46e83802db",
+   "collision_mask": 0,
+   "friction": 0.0,
+   "restitution": 0.0
+  },
+  {
+   "book": "/pivotbooks/mockupbox.pb",
+   "name": "Trigger",
+   "unique_id": "c8856646547357f2",
+   "collision_mask": 16,
+   "friction": 0.0,
+   "restitution": 0.0
+  },
+  {
+   "book": "/pivotbooks/mockupbox.pb",
+   "name": "CoverBoxSolid",
+   "unique_id": "cc8b8b4683228c16",
+   "collision_mask": 8751,
+   "friction": 0.8,
+   "restitution": 0.0
+  },
+  {
+   "book": "/pivotbooks/mockupbox.pb",
+   "name": "Water",
+   "unique_id": "98118e467ae8c883",
+   "collision_mask": 4100,
+   "friction": 0.0,
+   "restitution": 0.0
+  },
+  {
+   "book": "/pivotbooks/mockupbox.pb",
+   "name": "DisabledCoverBox",
+   "unique_id": "68249b4612992c46",
+   "collision_mask": 33,
+   "friction": 0.0,
+   "restitution": 0.0
+  },
+  {
+   "book": "/pivotbooks/mockupbox.pb",
+   "name": "Default + Trigger",
+   "unique_id": "b35dfa4602accc6c",
+   "collision_mask": 9279,
+   "friction": 0.0,
+   "restitution": 0.0
+  },
+  {
+   "book": "/pivotbooks/mockupbox.pb",
+   "name": "DynamicObject",
+   "unique_id": "fbc7754879a3819b",
+   "collision_mask": 9263,
+   "friction": 0.91,
+   "restitution": 0.0
+  }
+ ]
+}

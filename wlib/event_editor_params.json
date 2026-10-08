@@ -1,0 +1,303 @@
+{
+ "_source": "AnimationEventWM.FilterExposedProperties 0x5c1767 (KapowMultiDEDRM.exe), every path executed for ids 0..129 with a scratch x86 interpreter over the exe bytes; base class 0x5c4522 read from the lifted text",
+ "_fields": "PropertyInstance layout from the type string at 0xa252d8: enabled +0x18, category +0x24, subcategory +0x28, caption +0x2c, items +0x38, min +0x44, max +0x48",
+ "_default": "ids not listed: every generic slot (_etarget00.._etarget02, m_ivalue00, m_nvalue..m_nvalue10, m_ttruth1..3, m_vvalue1..2) has enabled = 0",
+ "registered_ui": {
+  "m_nvalue..m_nvalue10": "slider 0.0..2.0",
+  "m_ivalue00": "autodropdown",
+  "_etargetNN": "entityref",
+  "m_ttruthN": "truth",
+  "m_vvalueN": "vector"
+ },
+ "events": {
+  "9": {
+   "name": "SOUND",
+   "params": {
+    "_etarget00": {
+     "caption": "Sound def"
+    },
+    "m_ivalue00": {
+     "caption": "Position",
+     "items": "CHARACTER_AREAS"
+    },
+    "m_ttruth1": {
+     "caption": "Is important speach"
+    }
+   }
+  },
+  "18": {
+   "name": "CAMERA",
+   "params": {
+    "m_ivalue00": {
+     "caption": "Type",
+     "items": "CAMERA_ANIMATION_EVENTS"
+    }
+   }
+  },
+  "20": {
+   "name": "KILL_ANIMATION_PARTNER",
+   "params": {
+    "m_ttruth1": {
+     "caption": "No Death Scream"
+    }
+   }
+  },
+  "35": {
+   "name": "EXTEND_COMBO_TIME",
+   "params": {
+    "m_nvalue": {
+     "caption": "Extend combo time"
+    }
+   }
+  },
+  "37": {
+   "name": "SPEAK",
+   "params": {
+    "m_ivalue00": {
+     "caption": "SpeakID",
+     "items": "SPEAK_ID"
+    },
+    "m_ttruth1": {
+     "caption": "Stop other speak"
+    }
+   }
+  },
+  "45": {
+   "name": "LOOK_AT_TARGET",
+   "params": {
+    "m_ivalue00": {
+     "caption": "Type",
+     "items": "CAMERA_ANIMATION_CONTROLLED_EFFECTS"
+    },
+    "m_nvalue": {
+     "caption": "Lookat Time (sec):"
+    },
+    "m_nvalue02": {
+     "caption": "Fov Factor"
+    },
+    "m_ttruth1": {
+     "caption": "Look at Self"
+    }
+   }
+  },
+  "56": {
+   "name": "IMPACT_EFFECTS",
+   "params": {
+    "_etarget01": {
+     "category": "Impact Effect",
+     "caption": "Additional Effect"
+    },
+    "m_ivalue00": {
+     "caption": "Impact Effect",
+     "items": "DAMAGE_POSE"
+    },
+    "m_nvalue": {
+     "category": "Impact Effect",
+     "caption": "Damage"
+    },
+    "m_ttruth1": {
+     "category": "Impact Effect",
+     "caption": "Apply Dam. Reaction"
+    },
+    "m_ttruth2": {
+     "category": "Impact Effect",
+     "caption": "Ignore Weapon sound"
+    },
+    "m_ttruth3": {
+     "category": "Impact Effect",
+     "caption": "Do Additional Effect"
+    },
+    "m_vvalue1": {
+     "caption": "Position"
+    },
+    "m_vvalue2": {
+     "caption": "Direction"
+    }
+   },
+   "enabled_when": {
+    "m_nvalue": "m_ttruth1",
+    "_etarget01": "m_ttruth3"
+   }
+  },
+  "57": {
+   "name": "SAFE_RAGDOLL_COLLISION",
+   "params": {
+    "m_nvalue": {
+     "caption": "Ragdoll Safe Time:"
+    }
+   }
+  },
+  "59": {
+   "name": "CAMERA_CUT",
+   "params": {
+    "m_ivalue00": {
+     "category": "Camera cut settings",
+     "subcategory": "Look At Position",
+     "caption": "Look at bone",
+     "items": "CHARACTER_BONE_TYPE"
+    },
+    "m_nvalue": {
+     "category": "Camera cut settings",
+     "caption": "Transition time",
+     "min": 0.0,
+     "max": 4.0
+    },
+    "m_nvalue02": {
+     "category": "Camera cut settings",
+     "subcategory": "Look From Position",
+     "caption": "Distance to look at",
+     "min": 0.0,
+     "max": 8.0
+    },
+    "m_nvalue03": {
+     "category": "Camera cut settings",
+     "caption": "Fov",
+     "min": 1.0,
+     "max": 130.0
+    },
+    "m_nvalue04": {
+     "category": "Camera cut settings",
+     "caption": "Time multiplier"
+    },
+    "m_nvalue05": {
+     "category": "Camera cut settings",
+     "subcategory": "Look From Position",
+     "caption": "Height above ground",
+     "min": 0.0,
+     "max": 10.0
+    },
+    "m_nvalue06": {
+     "category": "Camera cut settings",
+     "subcategory": "Modifiers",
+     "caption": "Shake time",
+     "min": 0.0,
+     "max": 5.0
+    },
+    "m_nvalue07": {
+     "category": "Camera cut settings",
+     "subcategory": "Modifiers",
+     "caption": "Shake time scale",
+     "min": 0.0,
+     "max": 10.0
+    },
+    "m_nvalue08": {
+     "category": "Camera cut settings",
+     "subcategory": "Modifiers",
+     "caption": "Shake size",
+     "min": 0.0,
+     "max": 1.0
+    },
+    "m_nvalue10": {
+     "category": "Camera cut settings",
+     "subcategory": "Look From Position",
+     "caption": "Angle to look at",
+     "min": -180.0,
+     "max": 180.0
+    },
+    "m_ttruth1": {
+     "category": "Camera cut settings",
+     "subcategory": "Look At Position",
+     "caption": "Look at attack target"
+    },
+    "m_ttruth2": {
+     "category": "Camera cut settings",
+     "subcategory": "Look From Position",
+     "caption": "Keep previous position"
+    }
+   }
+  },
+  "61": {
+   "name": "CAMERA_CUT_TO_CHARACTER_CAM",
+   "params": {
+    "m_nvalue": {
+     "category": "Camera cut settings",
+     "caption": "Transition time",
+     "min": 0.0,
+     "max": 4.0
+    },
+    "m_ttruth1": {
+     "category": "Camera cut settings",
+     "caption": "Look at Target Char"
+    }
+   }
+  },
+  "72": {
+   "name": "KNEE",
+   "params": {
+    "m_ivalue00": {
+     "category": "Stun knee",
+     "caption": "Knee value",
+     "items": "KNEE"
+    }
+   }
+  },
+  "73": {
+   "name": "RAGDOLL_MODIFIER",
+   "params": {
+    "m_nvalue": {
+     "caption": "Force",
+     "min": 0.0,
+     "max": 100.0
+    }
+   }
+  },
+  "80": {
+   "name": "DO_AUTO_ALIGN",
+   "params": {
+    "m_nvalue": {
+     "caption": "Distance",
+     "min": 0.0,
+     "max": 3.0
+    },
+    "m_nvalue02": {
+     "caption": "Time",
+     "min": 0.0,
+     "max": 1.0
+    }
+   }
+  },
+  "82": {
+   "name": "RUMBLE",
+   "params": {
+    "m_nvalue": {
+     "caption": "Time",
+     "min": 0.0,
+     "max": 3.0
+    },
+    "m_nvalue02": {
+     "caption": "Power",
+     "min": 0.0,
+     "max": 1.0
+    },
+    "m_ttruth1": {
+     "caption": "Fade Out"
+    }
+   }
+  },
+  "89": {
+   "name": "ACTIVATE_DEPTH_OF_FIELD",
+   "params": {
+    "_etarget00": {
+     "caption": "Ref Gfx Node"
+    },
+    "m_nvalue": {
+     "caption": "Blend Time",
+     "min": 0.0,
+     "max": 10.0
+    }
+   }
+  },
+  "90": {
+   "name": "DEACTIVATE_DEPTH_OF_FIELD",
+   "params": {
+    "m_nvalue": {
+     "caption": "Blend Time",
+     "min": 0.0,
+     "max": 10.0
+    }
+   },
+   "handler": null,
+   "note": "no handler case (engine_enums event_semantics)"
+  }
+ }
+}

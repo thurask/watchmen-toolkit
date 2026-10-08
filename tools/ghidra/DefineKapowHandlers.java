@@ -82,7 +82,7 @@ public class DefineKapowHandlers extends GhidraScript {
                 }
                 if (!note.isEmpty()) {
                     String old = fn.getComment();
-                    String tag = "Kapow handler: " + note;
+                    String tag = (note.startsWith("high:") || note.startsWith("medium:") ? "Kapow name evidence, " : "Kapow handler: ") + note;
                     if (old == null || !old.contains("Kapow handler:")) {
                         fn.setComment(old == null ? tag : old + "\n" + tag);
                     }

@@ -47,20 +47,26 @@ import variant_glb as _vg  # character-variant GLB builder
 #     binds = wl.ensure_binds('game.naz', 'OUT/binds')   # {'female': path, ...}
 
 
-def bind_from_skeleton_header(
-    header_bytes_or_path, template_npz=None, out_npz="/tmp/bind_file.npz"
-):
-    """ENGINE-EXACT file-only bind from any skeleton/mesh ModelRes header."""
+def _read_bytes(path):
+    """The file's bytes; the handle is closed before returning."""
+    with open(path, "rb") as fh:
+        return fh.read()
+
+
+def bind_from_skeleton_header(header_bytes_or_path, template_npz=None, out_npz="bind_file.npz"):
+    """ENGINE-EXACT file-only bind from any skeleton/mesh ModelRes header (bytes or a
+    path), written to `out_npz` (default: bind_file.npz in the current directory)."""
     import build_bind_file as _bbf, tempfile
 
-    if isinstance(header_bytes_or_path, (bytes, bytearray)):
-        import os as _os
-
-        fd, pth = tempfile.mkstemp(suffix=".header")
-        _os.write(fd, header_bytes_or_path)
-        _os.close(fd)
-        header_bytes_or_path = pth
-    return _bbf.build(header_bytes_or_path, template_npz, out_npz)
+    if not isinstance(header_bytes_or_path, (bytes, bytearray)):
+        return _bbf.build(header_bytes_or_path, template_npz, out_npz)
+    fd, pth = tempfile.mkstemp(suffix=".header")
+    try:
+        os.write(fd, header_bytes_or_path)
+        os.close(fd)
+        return _bbf.build(pth, template_npz, out_npz)
+    finally:
+        os.unlink(pth)
 
 
 FRAGMENT_KEYS = os.path.join(_HERE, "kapow_fragment_keys.pkl")
@@ -116,7 +122,10 @@ def ensure_binds(naz="game.naz", outdir=None, required=None, extract_dir=None):
     if missing and extract_dir:
         exroot = os.path.join(extract_dir, "extracted")
         _mindex = {}
-        for _p in _glob.glob(os.path.join(exroot, "**", "*.model"), recursive=True):
+        _hits = _glob.glob(os.path.join(exroot, "**", "*.model"), recursive=True)
+        # sorted (case-folded, '/'-separated): with two models of one name the pick
+        # must not depend on the order the file system lists them in
+        for _p in sorted(_hits, key=lambda x: (x.replace(os.sep, "/").lower(), x)):
             _mindex.setdefault(os.path.basename(_p), _p)  # e.g. Female_Skeleton.model
         for k in list(missing):
             asset = os.path.basename(_SKEL_ASSETS[k])  # strip any leading '/'
@@ -124,7 +133,8 @@ def ensure_binds(naz="game.naz", outdir=None, required=None, extract_dir=None):
             if src:
                 _bbf.build(src, None, missing[k])
                 have[k] = missing.pop(k)
-    if missing:
+    no_archive = bool(missing and extract_dir and not os.path.exists(str(naz)))
+    if missing and not no_archive:
         blocks = grab_blocks(naz)
         for bk, b in blocks.items():
             if "h" not in b or not missing:
@@ -141,7 +151,11 @@ def ensure_binds(naz="game.naz", outdir=None, required=None, extract_dir=None):
     if missing:
         print(
             "note: %d skeleton(s) not present in %s (expected for Part 1): %s"
-            % (len(missing), naz, ", ".join(sorted(missing))),
+            % (
+                len(missing),
+                ("the extract (archive %s not found, not read)" % naz if no_archive else naz),
+                ", ".join(sorted(missing)),
+            ),
             file=_sys.stderr,
         )
     absent_req = set(required or ()) - set(have)
@@ -210,7 +224,7 @@ def fragment_json(data):
 
 
 def fragment_json_file(path):
-    return _kj.to_json(path.lower(), open(path, "rb").read())
+    return _kj.to_json(path.lower(), _read_bytes(path))
 
 
 def asset_json(nm, data):
@@ -229,12 +243,45 @@ def decode_clip(anim_bytes):
     return _bake_mod.walk(anim_bytes)
 
 
-def bake(clipname, bind=None, upsample=2, bank=None):
+#: the file whose presence makes a set Part 1 (characters_export._is_part1 tests the same
+#: file in an extract folder)
+PART1_MARK = "/fragments/enemy/biker.fragment"
+
+
+def bake_track_names(clipname, bank=None, naz=None):
+    """(track_names, clip bytes or None) for a bake of `clipname` outside the character
+    export: the rule characters_export.track_names_for gives the clip's set.  "prefix" when
+    the archive the clip is read from is a Part 1 set (it holds Fragments/Enemy/
+    Biker.fragment), else "exact"; "exact" too when the clip comes from `bank`, which
+    names no set.  The clip bytes are returned when the archive was read for them."""
+    if bank is not None and bank.get(clipname) is not None:
+        return "exact", None
+    _naz = naz or _bake_mod.default_naz()
+    if not os.path.exists(_naz):
+        return "exact", None  # bake() reports the missing archive
+    marks = {PART1_MARK: False}
+    clip = _bake_mod.archive_clip(clipname, _naz, marks)
+    return ("prefix" if marks[PART1_MARK] else "exact"), clip
+
+
+def bake(clipname, bind=None, upsample=2, bank=None, naz=None, track_names=None):
     """Engine-exact palettes: conjugate convention, absolute root.
 
     bind: path to a bind npz, e.g. wl.ensure_binds(naz, outdir)['female'].
+    naz: the archive the clip is read from when `bank` does not have it (None:
+    `01_game.naz`, else `game.naz`, in the current directory).
+    track_names: bake_v4.bake's track lookup, "exact" or "prefix".  None (default): the
+    rule of the character export for the clip's set (bake_track_names): "prefix" for a
+    Part 1 archive, else "exact".
     Returns (palettes (F,NB,3,4), duration_s)."""
-    return _bake_mod.bake(clipname, upsample, bind=bind, conj=True, bank=bank)
+    if track_names is None:
+        track_names, clip = bake_track_names(clipname, bank, naz)
+        if clip is not None:
+            bank = dict(bank or {})
+            bank[clipname] = clip
+    return _bake_mod.bake(
+        clipname, upsample, bind=bind, conj=True, bank=bank, naz=naz, track_names=track_names
+    )
 
 
 def build_variant_glb(fragment_json_path, variant, out_glb, **kw):

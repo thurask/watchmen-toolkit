@@ -25,4 +25,4 @@ if _HERE not in _sys.path:
     # installed package for the rest of the host process.
     _sys.path.append(_HERE)
 
-__version__ = "1.3.0"
+__version__ = "1.4.0"

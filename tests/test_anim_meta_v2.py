@@ -334,7 +334,9 @@ def test_timeline_victim_holds_its_pose_until_the_goto_event_then_blends():
     """Special handling 3: the victim enters at its own pose; the anchor is
     applied from ABSOLUTE_GOTO_TARGET_POS (0.2 SECONDS), eased in over the
     state's ease-in, and dropped at the first LEAVE_ABSOLUTE_MODE."""
-    master = _rec(False, 6, m_imasterof=10, m_ianimationtype=8)
+    counter = asm.Node("c", asm.CLS_CRIT, "c")  # ACTION 12: the type is computed (0x5f277a)
+    counter.props = {"m_ianimationcriteria": 1, "m_ianimationaction": 12}
+    master = _rec(False, 6, events=[counter], m_imasterof=10, m_ianimationtype=0)
     victim = _rec(True, 3, events=[event(28, 3, 0.2), event(19, 0, 0.5), event(19, 2, 0.0)])
     t = am.pair_timeline(master, victim, vf={"duration_s": 4.0})
     assert t["master"] == {

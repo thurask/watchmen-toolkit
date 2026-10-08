@@ -390,7 +390,7 @@ def test_model_header_lists_every_buffer_in_stream_order():
         ("render", 0, 5, 44),
         ("render", 1, 5, 44),
         ("shadow", None, 9, 20),
-        ("proxy", None, 5, 44),
+        ("occluder", None, 5, 44),
     ]
     assert [b["name"] for b in bufs[:3]] == ["Body", "Leaf", "BodyLow"]
     assert [b["vb"] for b in bufs] == [0, 197, 394, 591, 692]
@@ -399,14 +399,16 @@ def test_model_header_lists_every_buffer_in_stream_order():
 
 
 def test_decode_model_writes_lod0_only_with_file_materials(tmp_path, obj_capture):
-    """LOD 0 only, no shadow hull, no proxy slab; the ix == 0 submesh is kept; the
-    material comes from the submesh record's texture-list index."""
+    """LOD 0 only, no shadow hull, no proxy slab; the ix == 0 submesh is kept and its
+    indices are read as a triangle strip (0x431206); the material comes from the
+    submesh record's texture-list index."""
     h, s = _lod_model()
     assert we.decode_model(h, s, tmp_path / "m.obj") is True
     assert obj_capture["mats"] == ["Trim_02", "Leaf_03"]
-    assert [sub[:4] for sub in obj_capture["subs"]] == [(0, 4, 0, 2), (4, 4, 2, 2)]
+    assert [sub[:4] for sub in obj_capture["subs"]] == [(0, 4, 0, 2), (4, 4, 2, 3)]
     assert sorted({v[2] for v in obj_capture["v"]}) == [0.0, 1.0]
-    assert obj_capture["tris"] == [(0, 1, 2), (0, 2, 3), (4, 5, 6), (4, 6, 7)]
+    # Leaf (primitive type 0): the strip 0 1 2 0 2 3 -> (0,1,2), (0,2,1), [2,0,2 dropped], (3,2,0)
+    assert obj_capture["tris"] == [(0, 1, 2), (0, 2, 3), (4, 5, 6), (4, 6, 5), (7, 6, 4)]
     assert obj_capture["uv"][2] == (1.0, 1.0) and obj_capture["n"][0] == (0.0, 0.0, 1.0)
 
 
@@ -465,13 +467,31 @@ def test_decode_model_mesh_exposes_colour_tangents_and_skin():
     assert m["joints"].tolist() == [[1, 2, 3, 4]] * 4  # idx0..3 = bytes +46, +45, +44, +47
     assert m["weights"].tolist() == [[0.75, 0.25, 0.0, 0.0]] * 4
     assert m["triangles"] == [(0, 1, 2), (0, 2, 3)]
+    # cross(n, t) = +y, stored bitangent = -y: s = -1.  For the engine-oriented
+    # texture w = s; for the green-inverted glTF texture (the default since 1.4.0) w = -s
+    t = we.gltf_tangents(m["normals"], m["tangent"], m["bitangent"], green_up=False)
+    assert t.tolist() == [[1.0, 0.0, 0.0, -1.0]] * 4
     t = we.gltf_tangents(m["normals"], m["tangent"], m["bitangent"])
-    assert t.tolist() == [[1.0, 0.0, 0.0, -1.0]] * 4  # cross(n, t) = +y, stored bitangent = -y
+    assert t.tolist() == [[1.0, 0.0, 0.0, 1.0]] * 4
     kinds = [
         x["kind"]
         for x in we.decode_model_mesh(h, s, kinds=("render", "shadow", "proxy"))["submeshes"]
     ]
-    assert kinds == ["render", "shadow", "proxy"]
+    assert kinds == ["render", "shadow", "occluder"]  # "proxy" = old name of "occluder"
+
+
+def test_console_format_10_joints_are_bytes_17_18_19_16():
+    """A big-endian skinned shadow hull (format 10, stride 28): the four joint bytes at
+    +16 are read in the order 17, 18, 19, 16 (equal to the PC copy on every console model;
+    the PS3 vertex programs read indices.yzwx), the weights are four halves at +20."""
+    vb = struct.pack(">3f", 1.0, 2.0, 3.0) + b"\0" * 4 + bytes([3, 0, 1, 2])
+    vb += struct.pack(">4e", 1, 0, 0, 0)
+    assert len(vb) == 28
+    buf = {"format": 10, "vertex_count": 1, "stride": 28, "vb": 0}
+    got = we.decode_vertex_attributes(vb, buf, ">")
+    assert got["joints"][0].tolist() == [0, 1, 2, 3]
+    assert got["weights"][0].tolist() == [1.0, 0.0, 0.0, 0.0]
+    assert we.CONSOLE_VERTEX_FORMATS[10]["joints"] == 16
 
 
 def test_model_effects_header_is_a_modelres(tmp_path, obj_capture):

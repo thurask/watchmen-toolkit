@@ -2,7 +2,10 @@
 """Engine-faithful interpreter for Watchmen AnimationClass state machines.
 
 Sources (all read from the game executable; docs/ENGINE_CONSTANTS.md):
-  command_get_valid_state   0x5f076f  round-robin state choice in a group
+  command_get_valid_state   0x5f076f  state choice in a group: scan from member 0,
+                                      or from a random member when the group has
+                                      "Choose Random State"; members already in the
+                                      evaluation's tested list are skipped
   StateGroupCriteriaMet     0x5c6002  owning groups' criteria AND own criteria list
   State.get_valid_transition 0x5f7873 / GetValidStateGroupTransition 0x5c6140
                                       own transitions, then the owning groups';
@@ -67,7 +70,7 @@ Interval test m_iintervaltype: 0=INTERVAL [min,max[  1=LESS_THAN (x < max)
 2=GREATER_THAN_OR_EQUAL (x >= min)
 """
 
-import json, math, os, random, struct
+import math, os, random, struct
 
 # ---------------------------------------------------------------- tree
 
@@ -81,18 +84,63 @@ CLS_TRANS = "AnimationTransitionWM"
 CLS_EVENT = "AnimationEventWM"
 CLS_FOLDER = "Folder"
 
+# AnimationStateGroup "Choose Random State" (+0x0c, read by command_get_valid_state)
+RANDOM_STATE = "_trandomizetransitiontostate"
+
 # transition sync markers: "Sync marker N (local/remote)", record +0x24.. (0x60d619)
 SYNC_LOCAL = ["m_nsupersynclocal%d" % i for i in range(1, 9)]
 SYNC_REMOTE = ["m_nsupersyncremote%d" % i for i in range(1, 9)]
 
 
+class Instance:
+    """One loaded instance of a fragment file (a fragment used by two hosts is two
+    instances).  `host` is the node it was spliced under (None for the file
+    load_tree was called with), `header` the file header fields when the JSON has
+    them, `ctx` the dict shared by every instance of one load_tree call:
+    {"top": Instance, "singletons": {name hash: [Instance, ...]}}."""
+
+    __slots__ = ("asset", "path", "header", "host", "roots", "ctx")
+
+    def __init__(self, asset, path, header, host, ctx):
+        self.asset, self.path, self.header, self.host, self.ctx = asset, path, header, host, ctx
+        self.roots = []
+
+    def singleton_hash(self):
+        """The id a singleton fragment is registered under: the name hash of its
+        header name, or of the file's base name when that is empty (engine
+        0x4a1d63 / 0x540afd); None for a fragment that is not a singleton."""
+        h = self.header
+        if not h or not h.get("singleton"):
+            return None
+        import kapow_props
+
+        stem = os.path.basename(self.path or self.asset or "").replace("\\", "/")
+        stem = stem[:-5] if stem.endswith(".json") else stem
+        name = h.get("name") or os.path.splitext(stem)[0]
+        return "%08x" % kapow_props.name_hash(name)
+
+
 class Node:
-    __slots__ = ("id", "cls", "name", "props", "children", "parent", "frag")
+    __slots__ = (
+        "id",
+        "cls",
+        "name",
+        "props",
+        "children",
+        "parent",
+        "frag",
+        "type",
+        "inst",
+        "spliced",
+    )
 
     def __init__(self, nid, cls, name):
         self.id, self.cls, self.name = nid, cls, name
         self.props, self.children, self.parent = {}, [], None
         self.frag = None  # asset path, set on the top-level nodes of a spliced fragment
+        self.type = None  # the type record's name as stored: "Class(Native)" or "Native"
+        self.inst = None  # the Instance this node was loaded with (load_tree)
+        self.spliced = False  # load_tree found the fragment this node names (assetName)
 
     def p(self, key, default=None):
         return self.props.get(key, default)
@@ -133,19 +181,9 @@ def _load_fragment_json(path):
     `m_...` names, and every lookup in this module is by the current names.
     Falls back to the JSON on disk when the binary is not there.
     """
-    frag = path[:-5] if path.endswith(".json") else path
-    if os.path.exists(frag):
-        try:
-            import kapow_json as _kj
+    import kapow_json as _kj
 
-            with open(frag, "rb") as fh:
-                j = _kj.to_json(frag.lower(), fh.read())
-            if j:
-                return j
-        except ImportError:
-            pass
-    with open(frag + ".json", encoding="utf-8") as fh:
-        return json.load(fh)
+    return _kj.load_fragment(path)
 
 
 def tree_from_json(j):
@@ -163,6 +201,7 @@ def tree_from_json(j):
         # collides with another preamble key (one per shipped class fragment)
         c = _base_cls(nf.get("type")) or cls.get(nf["id"], "?")
         n = Node(nf["id"], c, d.get("name", ""))
+        n.type = nf.get("type")
         n.props = d
         nodes[nf["id"]] = n
     roots = []
@@ -179,7 +218,31 @@ def tree_from_json(j):
     return roots, nodes
 
 
-def load_tree(path, resolve_fragments=True, _seen=None):
+HOSTS_GROUPS, HOSTS_ALL = "groups", "all"
+
+
+def _find_ci(base, rel):
+    """`base/rel` with every path part matched case-insensitively: the engine
+    finds an asset by a case-folding hash and compare (0x54ba59), so
+    "/tnt/Production/x.fragment" names the file extracted as "TNT/Production/...".
+    A file that exists only as `<name>.json` is returned without the suffix."""
+    p = base
+    for part in rel.replace("\\", "/").strip("/").split("/"):
+        try:
+            names = os.listdir(p)
+        except OSError:
+            return None
+        low = part.lower()
+        hit = sorted(x for x in names if x.lower() == low)
+        if not hit:
+            hit = sorted(x[:-5] for x in names if x.lower() == low + ".json")
+        if not hit:
+            return None
+        p = os.path.join(p, hit[0])
+    return p
+
+
+def load_tree(path, resolve_fragments=True, _seen=None, hosts=HOSTS_GROUPS, _host=None):
     """Build the node tree of one fragment; splice nested fragments.
 
     `path` may name the `.fragment` or its `.fragment.json`.
@@ -191,8 +254,27 @@ def load_tree(path, resolve_fragments=True, _seen=None):
     two groups appears twice; node ids are therefore unique only inside one
     fragment instance -- resolve references with resolve_ref(). `_seen` is the
     chain of fragments currently being loaded (cycle guard).
+
+    hosts: "groups" (default) splices under AnimationStateGroup nodes only, which
+    is all an animation class needs; "all" splices under every node that names a
+    fragment in `assetName`, as the engine does (FragmentNode::SetFragmentAssetByName
+    0x498db7 applies the fragment the moment the property is set); a callable
+    `hosts(node, asset) -> bool` is "all" with a filter.
+
+    Every node gets `.inst`, the Instance (file, header, host) it was loaded with.
     """
-    roots, nodes = tree_from_json(_load_fragment_json(path))
+    j = _load_fragment_json(path)
+    roots, nodes = tree_from_json(j)
+    ctx = _host.inst.ctx if _host is not None and _host.inst is not None else None
+    inst = Instance(None, path, j.get("header"), _host, ctx)
+    if ctx is None:
+        inst.ctx = ctx = {"top": inst, "singletons": {}}
+    inst.roots = roots
+    for n in nodes.values():
+        n.inst = inst
+    sh = inst.singleton_hash()
+    if sh is not None:
+        ctx["singletons"].setdefault(sh, []).append(inst)
     if resolve_fragments:
         _seen = tuple(_seen or ())
         base = path.replace(os.sep, "/")
@@ -200,12 +282,23 @@ def load_tree(path, resolve_fragments=True, _seen=None):
             base = os.path.dirname(base)
         for n in list(nodes.values()):
             asset = n.p("assetName")
-            if n.cls != CLS_GROUP or not asset or not isinstance(asset, str) or asset in _seen:
+            if not asset or not isinstance(asset, str) or asset in _seen:
+                continue
+            if hosts == HOSTS_GROUPS:
+                if n.cls != CLS_GROUP:
+                    continue
+            elif not asset.lower().endswith((".fragment", ".scene")):
+                continue
+            elif callable(hosts) and not hosts(n, asset):
                 continue
             sub = os.path.join(base, asset.lstrip("/"))
-            if os.path.exists(sub) or os.path.exists(sub + ".json"):
-                for r in load_tree(sub, True, _seen + (asset,)):
+            if not (os.path.exists(sub) or os.path.exists(sub + ".json")):
+                sub = _find_ci(base, asset)
+            if sub and (os.path.exists(sub) or os.path.exists(sub + ".json")):
+                n.spliced = True  # the fragment exists (it may hold no node)
+                for r in load_tree(sub, True, _seen + (asset,), hosts, n):
                     r.parent, r.frag = n, asset
+                    r.inst.asset = asset
                     n.children.append(r)
     return roots
 
@@ -258,23 +351,46 @@ def fragment_host(node):
     return None
 
 
-def resolve_ref(node, ref, index):
-    """Target node of an Entity reference stored on `node` (e.g. m_etostate).
+def _native_of(node):
+    ty = node.type or ""
+    return ty[ty.index("(") + 1 : -1] if ty.endswith(")") and "(" in ty else ty
 
-    {'ref': id} names a node of the same fragment instance. {'xref': [ids]} is a
-    PATH: the first id is looked up next to the referring node, every further id
-    inside the node found so far (a fragment instance), the last one is the
-    target; leading ids may name nodes outside the loaded tree. {'etag': 2} is
-    the slot a fragment's top-level nodes hang from, i.e. the state group that
-    instances the fragment ({'etag': 1} is "none"). Falls back to
-    the last id that exists anywhere, nearest instance first. None when nothing
-    matches (the reference leaves the loaded tree).
-    """
-    if not isinstance(ref, dict):
-        return None
-    if ref.get("etag") == 2:  # the fragment's own external slot = the node instancing it
-        return fragment_host(node)
-    ids = ref.get("xref") or ([ref["ref"]] if ref.get("ref") is not None else [])
+
+def is_fragment_host(node):
+    """True for a node that instances a fragment: its native class is FragmentNode
+    or a subclass (type record), or a fragment was spliced under it."""
+    return _native_of(node) in ("FragmentNode", "LoadBlock", "SceneNode", "StreamBlockNode") or any(
+        c.frag is not None for c in node.children
+    )
+
+
+def find_in_scope(children, nid):
+    """The engine's search for a fragment id below a node (0x53a5ff): depth-first
+    in child order; a nested fragment host can match but is not entered."""
+    stack = list(reversed(children))
+    while stack:
+        c = stack.pop()
+        if c.id == nid:
+            return c
+        if not is_fragment_host(c):
+            stack.extend(reversed(c.children))
+    return None
+
+
+def _walk_path(children, ids):
+    cur = None
+    for i in ids:
+        cur = find_in_scope(children, i)
+        if cur is None:
+            return None
+        children = cur.children
+    return cur
+
+
+def _legacy_path(node, ids, index):
+    """Resolution without fragment headers (JSON written before the header was
+    exported, or a path whose singleton is not in the loaded tree): the first id
+    that exists, nearest instance first, every further id inside it."""
 
     def at(i):  # a plain {id: node} index is accepted too
         hit = index.get(i)
@@ -297,6 +413,65 @@ def resolve_ref(node, ref, index):
         if at(i):
             return _nearest(node, at(i))
     return None
+
+
+def resolve_ref(node, ref, index):
+    """Target node of an Entity reference stored on `node` (e.g. m_etostate),
+    resolved as the engine's reader does (EntityType 0x500b81 / 0x505d84).
+
+    {'etag': 1}: none.  {'etag': 2}: the node the fragment is applied to, i.e.
+    the host that instances it.  {'ref': id} (tag 3): a node of the same fragment
+    instance.  {'xref4': ids, 'a': a} (tag 4): a path that starts at the scene
+    (a = 0) or at the fragment host enclosing `node`, a - 1 hosts further up; each
+    id is searched depth-first below the node found so far without entering a
+    nested fragment (find_in_scope).  {'xref': ids} (tag 5): ids[0] is the name
+    hash of a singleton fragment, the rest a path below its host.
+
+    Trees without fragment headers, and tag-5 paths whose singleton is not part
+    of the loaded tree, fall back to the nearest-instance rule (_legacy_path).
+    None when nothing matches (the reference leaves the loaded tree).
+    """
+    if not isinstance(ref, dict):
+        return None
+    if ref.get("etag") == 2:  # the fragment's own external slot = the node instancing it
+        return fragment_host(node)
+    inst = getattr(node, "inst", None)
+    ctx = inst.ctx if inst is not None else None
+    if ref.get("xref4") is not None:
+        ids = list(ref["xref4"])
+        if ctx is None or not ids:
+            return _legacy_path(node, ids, index)
+        a = ref.get("a") or 0
+        if a == 0:  # from the scene: below the SceneNode when the loaded file is a scene
+            top = []
+            for r in ctx["top"].roots:
+                top.extend(r.children if _native_of(r) == "SceneNode" else [r])
+            return _walk_path(top, ids)
+        # nearest host at or above the node (0x48e4fe), then a - 1 hosts up (0x48e4e2);
+        # the file load_tree was called with hangs from a host outside the tree
+        hosts = [n for n in _chain(node) if is_fragment_host(n)]
+        if a - 1 < len(hosts):
+            return _walk_path(hosts[a - 1].children, ids)
+        if a - 1 == len(hosts):
+            return _walk_path(ctx["top"].roots, ids)
+        return None
+    if ref.get("xref") is not None:
+        ids = list(ref["xref"])
+        insts = ctx["singletons"].get(ids[0]) if (ctx is not None and ids) else None
+        if not insts:
+            return _legacy_path(node, ids, index)
+        first = insts[0]  # the engine keeps the first FragmentNode registered (0x49aadf)
+        kids = first.host.children if first.host is not None else first.roots
+        return _walk_path(kids, ids[1:]) if len(ids) > 1 else None
+    if ref.get("ref") is None:
+        return None
+    if inst is not None:
+        hit = index.get(ref["ref"])
+        cands = hit if isinstance(hit, list) else ([hit] if hit is not None else [])
+        for c in cands:  # the load map of the fragment being read (0x53cb0d)
+            if c.inst is inst:
+                return c
+    return _legacy_path(node, [ref["ref"]], index)
 
 
 def find_class_root(roots):
@@ -654,7 +829,9 @@ def owned(node, classes):
 def members(group):
     """m_estatesandgroupslist of a state group: the states and groups whose
     nearest state-group ancestor it is. For the class root only its direct
-    children: how the engine picks the first state of a class is not read."""
+    children.  (The engine starts a class in its m_edefaultanimstate; when that
+    is a group it asks the group for a valid state, command_get_valid_state
+    0x5f076f -- Interpreter.start() does the same.)"""
     if group.cls == CLS_CLASS:
         return [k for k in group.children if k.cls in (CLS_STATE, CLS_GROUP)]
     return owned(group, (CLS_STATE, CLS_GROUP))
@@ -665,6 +842,87 @@ def _crit_nodes(node):
 
 
 criteria_of = _crit_nodes  # the criteria list of a state / group / transition
+
+
+# ANIMATION_TYPE the game derives when a state is initialised
+# (AnimationStateWM.initialize_external 0x5f0e63 -> DetermineAnimationType 0x5f277a)
+#: control action of an ACTION criterion -> ANIMATION_TYPE (0x5ebeb0)
+TYPE_BY_ACTION = {
+    7: 5,
+    0: 4,
+    2: 11,
+    20: 6,
+    11: 7,
+    12: 8,
+    3: 9,
+    4: 10,
+    6: 13,
+    17: 15,
+    18: 16,
+    13: 19,
+}
+#: damage poses for which initialize_external sets m_tupperattack (0x5f0e63)
+UPPER_DAMAGE_POSES = frozenset((1, 2, 3, 7, 8, 9, 13, 14, 15, 19, 21, 23, 25, 27))
+
+
+def _int32(v):
+    try:
+        v = int(v)
+    except (TypeError, ValueError):
+        return 0
+    return v - (1 << 32) if v >= (1 << 31) else v
+
+
+def criterion_animation_type(k):
+    """ANIMATION_TYPE one criterion gives (0 = none): a mapped ACTION, or ENUM
+    CHARACTER_MODE (variable 1) == STUNNED (3) -> 12 (0x5ebe9b).  An ANY_OF takes
+    the kind of its first child and the values of the ANY_OF node itself
+    (0x5f27d3-0x5f282e)."""
+    kind = k.p("m_ianimationcriteria") or 0
+    if kind == CRIT_ANY_OF:
+        kids = _crit_nodes(k) or [x for x in k.children if x.cls == CLS_CRIT]
+        if not kids:
+            return 0
+        kind = kids[0].p("m_ianimationcriteria") or 0
+    if kind == CRIT_ACTION:
+        return TYPE_BY_ACTION.get(_int32(k.p("m_ianimationaction") or 0), 0)
+    if kind == CRIT_ENUM and (k.p("m_ianimationenum") or 0) == 1:
+        return 12 if _int32(k.p("m_ianimationenumvalue") or 0) == 3 else 0
+    return 0
+
+
+def state_groups_innermost_first(state):
+    out, n = [], state.parent
+    while n is not None:
+        if n.cls == CLS_GROUP:
+            out.append(n)
+        n = n.parent
+    return out
+
+
+def determine_animation_type(state):
+    """The ANIMATION_TYPE DetermineAnimationType 0x5f277a computes for a state: the
+    first criterion with a non-zero result among the state's own criteria, then
+    those of each enclosing group, innermost first.  The game writes it over the
+    stored m_ianimationtype in initialize_external 0x5f0e63 (read from code; that
+    the handler runs for every state in the running game is inferred)."""
+    for owner in [state] + state_groups_innermost_first(state):
+        for k in _crit_nodes(owner):
+            t = criterion_animation_type(k)
+            if t:
+                return t
+    return 0
+
+
+def own_and_group_actions(state):
+    """m_ianimationaction of every top-level ACTION criterion of a state and of its
+    groups (negation ignored, ANY_OF not entered: as 0x5f0e63 tests HEAVY_PUNCH)."""
+    out = []
+    for owner in [state] + state_groups_innermost_first(state):
+        for k in _crit_nodes(owner):
+            if (k.p("m_ianimationcriteria") or 0) == CRIT_ACTION:
+                out.append(_int32(k.p("m_ianimationaction") or 0))
+    return out
 
 
 def group_criteria_met(node, env, page, entry):
@@ -876,7 +1134,11 @@ def _curve(state, raw, env=None):
 
 
 def _inv_curve(state, value, env=None):
-    """Inverse of _curve (MathLib.InversePowerSmooth, used by SetupNewPage on re-entry)."""
+    """Inverse of `_curve` (used by SetupNewPage on re-entry).  The engine's
+    `MathLib.InversePowerSmooth` 0x7917a7 is a closed form: r1 = (0.5·(2y)^(1/P))^(1/I),
+    r2 = (1 − 0.5·(2 − 2y)^(1/P))^(1/I); it returns r1 only if PowerSmooth(r1) is strictly
+    closer to y, else r2.  The bisection here agrees to 4e-8 for P ≥ 1; the closed form can
+    produce NaN for P < 1, so it is not used."""
     if not _soft(state, env) or value <= 0.0 or value >= 1.0:
         return min(1.0, max(0.0, value))
     lo, hi = 0.0, 1.0
@@ -995,7 +1257,8 @@ class Interpreter:
         self.pages = []  # body page stack (Update flag 0), newest last
         self.opages = []  # OVERLAY page stack (Update flag 1)
         self._act_overlay = False  # which stack the current pass evaluates
-        self.rr_index = {}  # group node -> round-robin cursor
+        self.rr_index = {}  # unused since the scan-start fix; kept for old callers
+        self._tested = None  # tested list of the transition evaluation in progress
         self.log = log if log is not None else []
         self.rng = rng if rng is not None else random.Random(seed)
         self.done_fallback = done_fallback
@@ -1010,24 +1273,33 @@ class Interpreter:
 
     # ---- engine: command_get_valid_state 0x5f076f
     def get_valid_state(self, group, entry=True):
+        """First acceptable member of `group`, scanning cyclically from member 0
+        (0x5f0792), or from a uniformly random member when the group has "Choose
+        Random State" (+0x0c; 0x5f07bb-0x5f07d7, the draw comes from `rng`).
+        While a transition evaluation is running, members already in its tested
+        list (_etestedstates, state +0x8c) are skipped and every member examined is
+        appended to it."""
         kids = members(group)
         if not kids:
             return None
         n = len(kids)
-        start = (self.rr_index.get(group, -1) + 1) % n
+        start = self.rng.randrange(n) if group.p(RANDOM_STATE, False) else 0
+        tested = self._tested
         for i in range(n):
             k = kids[(start + i) % n]
+            if tested is not None and any(k is x for x in tested):
+                continue
             if not k.p("enabled", True):
                 continue
+            if tested is not None:
+                tested.append(k)
             if not group_criteria_met(k, self.env, self._cur(), entry):
                 continue
             if k.cls == CLS_GROUP:
                 s = self.get_valid_state(k, entry)
                 if s is not None:
-                    self.rr_index[group] = (start + i) % n
                     return s
             else:
-                self.rr_index[group] = (start + i) % n
                 return k
         return None
 
@@ -1055,6 +1327,13 @@ class Interpreter:
         if entry is None:
             entry = not fallback
         tested = []  # _etestedstates: each target is tried once per evaluation
+        self._tested = tested  # get_valid_state skips / appends its members too
+        try:
+            return self._valid_transition(node, entry, fallback, tested)
+        finally:
+            self._tested = None
+
+    def _valid_transition(self, node, entry, fallback, tested):
         owner, first = node, True
         while owner is not None:
             for t in _trans_nodes(owner):
@@ -1295,7 +1574,10 @@ class Interpreter:
             for i, d in enumerate(durs):
                 if d > 0.0:
                     rate += posw[i] * slot_speed(slots[i]) / d
-        else:  # weights of an uncontrolled multi-slot blend are not established
+        else:
+            # an uncontrolled blend plays its FIRST child alone (lowest siblingOrder;
+            # command_evaluate_blends 0x59e905, see _slot_pos_weights): `slots` is in
+            # sibling order, so the rate is that slot's (the first with a duration)
             first = [(d, slot_speed(s)) for d, s in zip(durs, slots) if d > 0.0]
             d, sp = first[0] if first else (pg.duration, 1.0)
             rate = sp / d if d > 0 else 0.0
@@ -1432,10 +1714,22 @@ class Interpreter:
     def _slot_pos_weights(self, blend, slots):
         """Blend-position split inside one blend node: ctrl param
         m_iblendctrlparam mapped over the blend interval, slots placed at
-        m_nparentblendposition, linear between neighbours (09j blend trees)."""
+        m_nparentblendposition, linear between neighbours (09j blend trees).
+
+        Without a control parameter (0 = NONE) a blend with two or more slots
+        plays its FIRST child alone: weight 1.0 for the slot with the lowest
+        siblingOrder (file order among equals), 0.0 for the rest.  Read:
+        command_evaluate_blends 0x59e905 writes the blend properties on
+        m_echildlist[0] only; the child list is in sibling order (Init 0x59f8b0,
+        Node insert 0x48f556); SetAllSlotBlends 0x5b4ef7 sets every slot it was
+        not told about to weight 0 and a new source starts at 0 (0x594b36); the
+        mixer 0x596532 skips a source below 1e-5."""
         p = blend.p("m_iblendctrlparam")
-        if not p or len(slots) < 2:  # 0 = NONE
+        if len(slots) < 2:
             return {i: 1.0 for i in range(len(slots))}
+        if not p:  # 0 = NONE: first child only
+            first = min(range(len(slots)), key=lambda i: (slots[i].p("siblingOrder", 0) or 0, i))
+            return {i: (1.0 if i == first else 0.0) for i in range(len(slots))}
         pos = inv_lerp_clamped(
             self.env.values.get(p, 0.0),
             blend.p("m_nblendintervalstart", 0.0),
@@ -1472,13 +1766,11 @@ class Interpreter:
                 posw = self._slot_pos_weights(blend, slots)
                 lw = self._layer_weight(blend)
                 for i, slot in enumerate(slots):
-                    w = (
-                        sh
-                        * posw[i]
-                        * lw
-                        * float(slot.p("m_nweight", 1.0))
-                        * float(blend.p("m_nweight", 1.0))
-                    )
+                    # m_nweight (slot and blend) and m_npriority are not factors: no
+                    # reader of either was found in the executable, and every
+                    # m_nweight is 1.0 in the shipped classes (1,660 blends, 1,899
+                    # slots), so leaving them out changes no shipped result
+                    w = sh * posw[i] * lw
                     if w <= 1e-6:
                         continue
                     anim = slot.p("targetAnimation", slot.name)

@@ -37,10 +37,10 @@
   },
   {
    "off": "0x148 (328)",
-   "type": "u32",
-   "name": "version signature (0x593F430A)",
-   "engine": "never read by loader; FUN_0049db60 computes a CRC of '8' + asset-class versions and its result is discarded at 0x4a3b63",
-   "evidence": "inferred"
+   "type": "4 bytes",
+   "name": "unknown (bytes 0a 88 3f 59; NOT the version signature, which is the u32 at 0x020)",
+   "engine": "no reader found; the bytes are the same on the big-endian consoles, so not a platform-order integer. The block version signature (CRC of '8' + asset-class versions, FUN_0049db60, computed and discarded at 0x4a3b63) is the u32 at 0x020 (32): 0x79D3E0DA in Part 2 and PS3 Part 1, 0xEE1FB0A3 in PC / X360 Part 1",
+   "evidence": "bytes read from data; the earlier 'version signature (0x593F430A)' was an inference and is withdrawn"
   },
   {
    "off": "0x14C (332)",

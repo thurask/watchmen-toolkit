@@ -488,6 +488,37 @@
 "36": "GIMP_WITH_GAGBALL"
 }
 },
+"CHARACTER_BONE_TYPES": {
+"prefix": null,
+"registered_in": null,
+"source": "not a registered enum: the bone names CharacterRoot.SetupBoneMap 0x67a31e looks up, in the order it fills _bonetypetoboneidmap (23 strings read from the exe bytes); command_get_boneID 0x69b54a returns the map entry of a bone type and entry 18 (GamePivot) for a type out of range. Types 11 and 17 are the footstep bones",
+"out_of_range": 18,
+"items": {
+"0": "Head",
+"1": "Neck",
+"2": "Spine2",
+"3": "Spine1",
+"4": "Spine",
+"5": "Pelvis",
+"6": "L UpperArm",
+"7": "L Forearm",
+"8": "L Hand",
+"9": "L Thigh",
+"10": "L Calf",
+"11": "L Foot",
+"12": "R UpperArm",
+"13": "R Forearm",
+"14": "R Hand",
+"15": "R Thigh",
+"16": "R Calf",
+"17": "R Foot",
+"18": "GamePivot",
+"19": "L Clavicle",
+"20": "LUpArmTwist",
+"21": "R Clavicle",
+"22": "RUpArmTwist"
+}
+},
 "CHARACTER_ANIMATIONS": {
 "prefix": "CHARACTER_ANIMATION",
 "registered_in": "0x809e94",
@@ -641,6 +672,66 @@
 "16": "ACTION_LAYER_5",
 "32": "ACTION_LAYER_6"
 }
+},
+"ACHIEVEMENTS": {
+"prefix": "ACHIEVEMENTS",
+"registered_in": "0x80c150",
+"items": {
+"0": "STREETJUSTICE",
+"1": "MORALLYSUPERIOR",
+"2": "FRIENDSFOREVER",
+"3": "TAGEM",
+"4": "FOCUSFIRE",
+"5": "ELECTRICEXPLOSION",
+"6": "RRARARARGHGH",
+"7": "MARTIALARTIST",
+"8": "FERALFIGHTER",
+"9": "PINGPONG",
+"10": "UNENDINGCOMBO",
+"11": "GENTLEMAN",
+"12": "PSYCHO",
+"13": "HERO",
+"14": "TEAMWORK",
+"15": "THIEF",
+"16": "DETECTIVE",
+"17": "UNTOUCHABLE",
+"18": "TURBO",
+"19": "VIGILANTE",
+"20": "SHIELD",
+"21": "STRONGARM",
+"22": "RETALIATOR",
+"23": "EXTERMINATOR"
+}
+},
+"PLAYABLE_CHARACTERS": {
+"prefix": "PLAYABLE_CHARACTER",
+"registered_in": "0x80c150",
+"items": {
+"-1": "NONE",
+"0": "RORSCHACH",
+"1": "NITE_OWL",
+"2": "BOTH"
+}
+},
+"GAME_MODES": {
+"prefix": "GAME_MODE",
+"registered_in": "0x80c150",
+"items": {
+"0": "NONE",
+"1": "RORSCHACH",
+"2": "NITEOWL",
+"3": "COOP",
+"4": "MAINMENU"
+}
+},
+"AIAGENTFACTION": {
+"prefix": "",
+"registered_in": "0x4865b9",
+"items": {
+"0": "ALLYFACTION",
+"1": "ENEMYFACTION",
+"2": "NEUTRALFACTION"
+}
 }
 },
 "enum_variable_family": {
@@ -728,7 +819,7 @@
 "moves_character": false,
 "affects_partner": false,
 "handler": "0x6a533a",
-"evidence": "read from code (case skimmed for commands and field writes, not instruction by instruction)"
+"evidence": "read from code (the footstep block 0x6a533a was re-read for the sound table, re/wp6_audio.md 2.2, and its send - the character root as the voice's pivot - in the 2026-10-05 review)"
 },
 "7": {
 "name": "ANIMATION_DRIVEN",
@@ -872,7 +963,7 @@
 "moves_character": false,
 "affects_partner": false,
 "handler": "0x6ae002",
-"evidence": "read from code (case skimmed for commands and field writes, not instruction by instruction)"
+"evidence": "read from code (case read for the combat rules, re/wp3_combat.md)"
 },
 "24": {
 "name": "ALLOW_ATTACKS",
@@ -921,30 +1012,30 @@
 },
 "29": {
 "name": "FLASH_GRENADE",
-"effect": "Area attack: effect, game event, hit_soon + give_damage to characters found by a physics query (radius 3).",
+"effect": "Flash grenade: pays m_ngrenadecost, fires an effect and a game event, then a sphere query of radius 3.0 m; each character found that is not of the attacker's faction and passes is_attack_successful gets hit_soon + give_damage: damage (11.0 - distance) x modifier x global x uber for a playable target and 0 for any other, stun 3.0 s.",
 "value": "unused",
 "moves_character": false,
 "affects_partner": false,
 "handler": "0x6a62d8",
-"evidence": "read from code (case skimmed for commands and field writes, not instruction by instruction)"
+"evidence": "read from code"
 },
 "30": {
 "name": "ELECTRIFY_ARMOR",
-"effect": "Same block as FLASH_GRENADE, plus ElectricArmor.command_electric_armor_charge.",
+"effect": "Charges the electric armour and pays m_narmorcost (ElectricArmor.command_electric_armor_charge), then leaves the case before the grenade loop; the area damage is dealt by ElectricArmor.AreaDamage 0x72769f on entering StateActive.",
 "value": "unused",
 "moves_character": false,
 "affects_partner": false,
 "handler": "0x6a62d8",
-"evidence": "read from code (case skimmed for commands and field writes, not instruction by instruction)"
+"evidence": "read from code"
 },
 "31": {
 "name": "DISCHARGE_ARMOR",
-"effect": "Electric-armor discharge on the partner: rumble, hit_soon, force_anim_always, give_damage, lightning effect.",
+"effect": "Electric-armour discharge on the partner, only with charge power > 0, a partner and is_attack_successful: rumble, hit_soon, force_anim_always, give_damage of (attacker health + 10.0, or 0.4 x the victim's maximum health when the victim is playable) x modifier x global x uber with pose KNOCKDOWN_UPPER_STRAIGHT, lightning effect; then a zero-damage record with pose LIGHT_MIDDLE_STRAIGHT to the attacker itself; the charge power is set to 0.",
 "value": "unused",
 "moves_character": false,
 "affects_partner": true,
 "handler": "0x6a8865",
-"evidence": "read from code (case skimmed for commands and field writes, not instruction by instruction)"
+"evidence": "read from code"
 },
 "32": {
 "name": "COUNTER_ATTACK_WEAPON_STEAL",
@@ -1002,7 +1093,7 @@
 },
 "38": {
 "name": "THROW_BRANCH_POINT",
-"effect": "Throw branch: with a partner in special state 8 fires animation action 0x1e and sends hit_soon both ways; then ClearAttackData.",
+"effect": "Throw branch: with a partner in special handling BLOCK (8) fires animation action 0x1e and sends hit_soon both ways; then ClearAttackData.",
 "value": "unused",
 "moves_character": false,
 "affects_partner": true,
@@ -1025,7 +1116,7 @@
 "moves_character": false,
 "affects_partner": false,
 "handler": "0x6a533a",
-"evidence": "read from code (case skimmed for commands and field writes, not instruction by instruction)"
+"evidence": "read from code (the footstep block 0x6a533a was re-read for the sound table, re/wp6_audio.md 2.2, and its send - the character root as the voice's pivot - in the 2026-10-05 review)"
 },
 "41": {
 "name": "REVERSE_HEADING",
@@ -1034,7 +1125,8 @@
 "moves_character": false,
 "affects_partner": false,
 "handler": "0x6a8108",
-"evidence": "read from code"
+"evidence": "read from code",
+"heading_offset_rad": 3.14159274
 },
 "42": {
 "name": "NO_LONGER_IMMUNE_TO_ATTACK",
@@ -1106,7 +1198,8 @@
 "moves_character": false,
 "affects_partner": false,
 "handler": "0x6a80dc",
-"evidence": "read from code"
+"evidence": "read from code",
+"heading_offset_rad": 0.0
 },
 "50": {
 "name": "RIGHT_ROTATED_HEADING",
@@ -1146,21 +1239,23 @@
 },
 "54": {
 "name": "ROTATE_HEADING_90_LEFT",
-"effect": "Heading offset root +0x158 = +MathLib constant (data +0x40), then command_set_move_and_face_heading_to_actual_heading.",
+"effect": "Heading offset root +0x158 = +MathLib.pidiv2 (registered default 1.570796), then command_set_move_and_face_heading_to_actual_heading.",
 "value": "unused",
 "moves_character": false,
 "affects_partner": false,
 "handler": "0x6a80ef",
-"evidence": "read from code"
+"evidence": "read from code",
+"heading_offset_rad": 1.570796
 },
 "55": {
 "name": "ROTATE_HEADING_90_RIGHT",
-"effect": "Heading offset root +0x158 = -MathLib constant, then command_set_move_and_face_heading_to_actual_heading.",
+"effect": "Heading offset root +0x158 = -MathLib.pidiv2 (registered default 1.570796), then command_set_move_and_face_heading_to_actual_heading.",
 "value": "unused",
 "moves_character": false,
 "affects_partner": false,
 "handler": "0x6a80e0",
-"evidence": "read from code"
+"evidence": "read from code",
+"heading_offset_rad": -1.570796
 },
 "56": {
 "name": "IMPACT_EFFECTS",
@@ -1196,7 +1291,7 @@
 "moves_character": false,
 "affects_partner": false,
 "handler": "0x6aa7e4",
-"evidence": "read from code (case skimmed for commands and field writes, not instruction by instruction)"
+"evidence": "read from code (case 0x6aa7e4 re-read instruction by instruction for the effects table, FX_META.md / re/wp7_fx_camera_hud.md)"
 },
 "60": {
 "name": "STARTING_UBER_RAGE",
@@ -1254,7 +1349,7 @@
 },
 "66": {
 "name": "TRIGGER_START_INTERPOLATING",
-"effect": "In this handler: Underboss phase behaviour command_jump_anim_part_done{event id}.",
+"effect": "In this handler: Underboss phase behaviour command_jump_anim_part_done{event id}. In JumpOnCharacter: stores the jump end point.",
 "value": "unused",
 "moves_character": false,
 "affects_partner": false,
@@ -1263,7 +1358,7 @@
 },
 "67": {
 "name": "TRIGGER_END_INTERPOLATING",
-"effect": "In this handler: Underboss phase behaviour command_jump_anim_part_done{event id}.",
+"effect": "In this handler: Underboss phase behaviour command_jump_anim_part_done{event id}. In JumpOnCharacter: starts the landing shockwave.",
 "value": "unused",
 "moves_character": false,
 "affects_partner": false,
@@ -1272,7 +1367,7 @@
 },
 "68": {
 "name": "UNDERBOSS_JUMP_OFF_LAND_DONE",
-"effect": "Underboss phase behaviour command_jump_anim_part_done{event id}.",
+"effect": "Underboss phase behaviour command_jump_anim_part_done{event id}. In JumpOnCharacter: returns to StateActive; in StateFlameThrower: re-reads the target.",
 "value": "unused",
 "moves_character": false,
 "affects_partner": false,
@@ -1295,11 +1390,11 @@
 "moves_character": false,
 "affects_partner": false,
 "handler": "0x6a9349",
-"evidence": "read from code (case skimmed for commands and field writes, not instruction by instruction)"
+"evidence": "read from code (case re-read in the 2026-10-05 damage pass: it picks the throw target and writes the override heading entity, and deals no damage; COMBAT_META.md)"
 },
 "71": {
 "name": "UNDERBOSS_WOBBLE_DONE",
-"effect": "Underboss phase behaviour command_jump_anim_part_done{event id}.",
+"effect": "Underboss phase behaviour command_jump_anim_part_done{event id}. In UnderBossWobble: enters JumpOnCharacter; in StateFlameThrower: restarts the flamethrower.",
 "value": "unused",
 "moves_character": false,
 "affects_partner": false,
@@ -1349,7 +1444,7 @@
 "moves_character": false,
 "affects_partner": false,
 "handler": "0x6a533a",
-"evidence": "read from code (case skimmed for commands and field writes, not instruction by instruction)"
+"evidence": "read from code (the footstep block 0x6a533a was re-read for the sound table, re/wp6_audio.md 2.2, and its send - the character root as the voice's pivot - in the 2026-10-05 review)"
 },
 "77": {
 "name": "FOOT_DOWN_STOP",
@@ -1358,7 +1453,7 @@
 "moves_character": false,
 "affects_partner": false,
 "handler": "0x6a533a",
-"evidence": "read from code (case skimmed for commands and field writes, not instruction by instruction)"
+"evidence": "read from code (the footstep block 0x6a533a was re-read for the sound table, re/wp6_audio.md 2.2, and its send - the character root as the voice's pivot - in the 2026-10-05 review)"
 },
 "78": {
 "name": "LOOP_START",
@@ -1389,7 +1484,7 @@
 },
 "81": {
 "name": "UNDERBOSS_SUPPORT_EVENT",
-"effect": "Underboss combat behaviour command_recieve_anim_support_event.",
+"effect": "Underboss combat behaviour command_recieve_anim_support_event. Phase 3: disables the pipe and clears the weapon.",
 "value": "unused",
 "moves_character": false,
 "affects_partner": false,
@@ -1434,7 +1529,7 @@
 },
 "86": {
 "name": "DELAY_OPPONENT",
-"effect": "Sends command_delay to the current target (root +0x70).",
+"effect": "Sends command_delay to the current target (root +0x70). The receiver stamps _ndelaypunishtimer; a completed combo within 2.0 s of it does not force a punish.",
 "value": "unused",
 "moves_character": false,
 "affects_partner": true,

@@ -282,9 +282,15 @@ def test_placement_uses_the_engine_default_when_interact_is_not_authored():
 
 def test_placement_offset_is_in_the_master_nodes_frame():
     """The engine transforms the marker by the master NODE's matrix, so a master
-    whose GamePivot is turned at t=0 turns the offset and the partner with it."""
+    whose GamePivot is turned at t=0 turns the offset and the partner with it.
+
+    The sense is the engine's (a vector turns as conj(q) v q): a root quaternion
+    with yaw_start_deg = +90 takes +Z to -X, as the GLB's GamePivot node does
+    with its `interact` child.  This test pinned +X until the 1.4.0 review
+    measured the sense on real clips; tests/test_review_r6.py derives it from
+    a quaternion."""
     pl = am.placement(_facts((0, 1, 0), (0, 0, 2.0), yaw=90.0), _facts((0, 1, -2.0)))
-    assert pl["partner_offset_xz"] == [pytest.approx(2.0), pytest.approx(0.0, abs=1e-6)]
+    assert pl["partner_offset_xz"] == [pytest.approx(-2.0), pytest.approx(0.0, abs=1e-6)]
     assert pl["partner_yaw_deg"] == pytest.approx(-90.0)
 
 
@@ -348,7 +354,7 @@ def test_build_is_deterministic_and_json_clean(extract):
 
 
 def test_clip_extras_scales_event_times_to_the_written_animation(extract):
-    """The writer may retime a clip (locomotion speed sync); events must be
+    """The writer may retime a clip (the 30 fps fallback for a clip without a duration); events must be
     usable against the animation as written, not only the authored one."""
     m = am.build(str(extract))
     x = am.clip_extras(m, "rsh_com_att_finish_en1_a.animation", fps=10.0, frames=11)
@@ -417,6 +423,7 @@ def test_empty_fragment_does_not_take_the_class_tree_down():
 
 
 # -------------------------------------------------------------------- glb
+@pytest.mark.usefixtures("engine_frame")  # pins the engine numbers; true frame: test_frame.py
 def test_write_glb_embeds_names_parents_and_conventions(rig, tmp_path):
     """Importers key on these: without them every skeleton needs a hand-made
     joint layout."""

@@ -6,8 +6,8 @@
 # Engine grammar (readers: asset FUN_0054558c, object FUN_00544374/FUN_0054113c,
 # track FUN_005415bf, key FUN_00547f4c, spline key FUN_00547fdb) -- byte-packed,
 # no padding, no slop:
-#   [f32 durationSec][u32 flags][u32 nObjects]
-#   object: [str targetPath][u32 flag][u32 nIds][u32 id x nIds][str className][u32 nTracks]
+#   [f32 durationSec][u32 loopMode][u32 nObjects]
+#   object: [str targetPath][u32 hostsUp][u32 nIds][u32 id x nIds][str className][u32 nTracks]
 #   track:  [str property][u32 interpolation][u32 nKeys]
 #   key:    [f32 time][u32 interpolation][u32 dim][f32 value x dim]
 #           spline-capable tracks only: [u32 n][n x (f32 inT, inV, outT, outV)]
@@ -20,7 +20,40 @@
 # start key's out-handle and the end key's in-handle (FUN_0040f5a1).
 # Quaternion properties are keyed as EULER DEGREES (x, y, z + one pad float),
 # interpolated as a vector, then converted q = qx*qy*qz (FUN_00499733).
+#
+# loopMode (asset+0x94; describe function 0x53cfce names it "loopmode" with the
+# items below; PlayMsg 0x4a000d hands it to 0x49d705, update vfunc 17 0x49d7fe):
+#   0 loop, 1 oneshot, 2 oneshot_reverse, 3 loop_reverse, 4 pingpong.
+# hostsUp (obj+4; 0x5411dc -> 0x53c224): the ids are an entity path that starts
+# at the fragment host of the PLAYING PropertySequenceNode (nearest FragmentNode
+# at or above it, 0x48e4fe) after climbing hostsUp further hosts (0x48e4e2);
+# each id is then a child search that does not enter nested hosts (0x53a5ff).
+# It equals a fragment tag-4 reference's `a - 1`; the scene is never the base.
+# Target kind, derived at load (0x53ccab), not stored: class TextureSheet ->
+# "<texture path>#<0-based sheet index>" (0x5443e2); class derived from Asset ->
+# asset by path; ids present -> entity path; else path "_this_" = the sequence
+# node, any other path = a node NAME looked up depth-first under the node's
+# fragment host (0x543601 -> 0x48e3fd).
+# Linear keys use the data type's own interpolator (vtable +0x68): number
+# 0x4fa5bb a+(b-a)t, vector 0x4fbf8d per component, quaternion tracks the vector
+# one on the Euler keys (0x53aa43), integer 0x4fac1c a+trunc((b-a)t) (0x990ba0 is
+# cvttsd2si); every other type (truth, color, ...) has the base 0x47fc01, which
+# copies key A: linear on those is a hold.
+#
+# Action track (0x4ab2fe -> 0x4ab230, 0x4a5d5e, 0x49d529, 0x4999e7): every direct child
+# of the PropertySequenceNode with a script class, command_fire_action(entity) and
+# _ndelay (the TriggerAction* classes and DelayedEmitterActivator) is fired with itself
+# as argument when the position passes _ndelay (last <= delay < new).  Play sets the
+# mark to 0 (0x498192).  Nothing fires on a falling position; a delay equal to the
+# duration never fires; a loop wrap skips the rest.  actions_fired() is that test.
+# The position advances by speedFactor x the node's frame step (0x49d7fe).
 import math, os, struct, sys, json, threading
+
+
+def _read_bytes(path):
+    """The file's bytes; the handle is closed before returning."""
+    with open(path, "rb") as fh:
+        return fh.read()
 
 
 def rdname(b, p, maxl=64, bo="<"):
@@ -47,6 +80,34 @@ def detect_order(b):
 
 
 FORMAT = "kapow-sequence/2"
+#: header u32 at +4 = PropertySequenceAsset "loopmode" (item string 0xa35d40)
+LOOP_MODES = ("loop", "oneshot", "oneshot_reverse", "loop_reverse", "pingpong")
+#: data types whose linear interpolator blends (vtable +0x68); "integer" blends
+#: with truncation, every other type holds key A (base interpolator 0x47fc01)
+LERP_TYPES = ("number", "vector", "quaternion")
+#: asset type names (registered spellings, lower-cased): an object of one of
+#: these classes is engine kind 2 "asset by path".  The engine tests the class
+#: tree (derives from Asset, 0x53ccab); this fixed list stands in for it.
+ASSET_CLASSES = frozenset(
+    (
+        "fragment",
+        "texture",
+        "modelres",
+        "animation",
+        "propertysequenceasset",
+        "sound",
+        "mediastream",
+        "textres",
+        "font",
+        "particlesystemasset",
+        "pivotbook",
+        "grass",
+        "detailmeshasset",
+        "terrain",
+        "terraincoloringasset",
+        "aipathdata",
+    )
+)
 INTERPOLATION = ("inherited", "step", "linear", "spline")
 #: property data types whose tracks use spline keys (FUN_00539dd9)
 SPLINE_TYPES = ("number", "vector", "quaternion")
@@ -110,10 +171,122 @@ def _hermite(u, t0, v0, out, inn, t1, v1):
     return m0 * u + u * u * u * c + (d - m0 - c) * u * u + v0
 
 
+def _atol(s):
+    """C atol: optional blanks and sign, then leading digits (0 without any)."""
+    s = s.lstrip(" \t\n\v\f\r")
+    i = 1 if s[:1] in ("+", "-") else 0
+    j = i
+    while j < len(s) and "0" <= s[j] <= "9":
+        j += 1
+    return int(s[:j]) if j > i else 0
+
+
+def target_fields(cls, path, ids):
+    """How the engine binds an object (0x53ccab; kind is derived, not stored):
+    {"target_kind": "texture_sheet" | "asset" | "entity_path" | "self" | "name"}
+    plus `texture` and 0-based `sheet_index` (-1 without '#') for a TextureSheet
+    object (0x5443e2 splits the path on '#', atol of the rest)."""
+    if cls == "TextureSheet":
+        tex, sep, idx = (path or "").partition("#")
+        return {
+            "target_kind": "texture_sheet",
+            "texture": tex,
+            "sheet_index": _atol(idx) if sep else -1,
+        }
+    if cls.lower() in ASSET_CLASSES:
+        return {"target_kind": "asset"}
+    if ids:
+        return {"target_kind": "entity_path"}
+    return {"target_kind": "self" if path == "_this_" else "name"}
+
+
+def actions_fired(delays, last, new):
+    """Engine 0x49d529: the action-track entries fired by a position change."""
+    return [d for d in delays if last <= d < new]
+
+
+def play_position(seq, t, mode=None, dt=None, speed=1.0):
+    """Play position (seconds into the sequence) `t` seconds after Play, at
+    speed factor `speed` (the node's speedFactor; the step of a frame is speed x dt,
+    0x49d7fe), for loop mode `mode` (default: the file's `loop_mode`).  A negative
+    speed needs `dt`: the engine clamps neither branch on its far side.
+
+    Engine (start 0x49d705, per-frame update 0x49d7fe): modes 2 and 3 start at
+    `duration` running backwards, the others at 0 running forwards.  Running
+    past the end: 0 loop -> position 0.0 (a reset, the overshoot is dropped),
+    1 oneshot -> duration and stop, 4 pingpong -> duration and turn round.
+    Running below 0: 2 oneshot_reverse -> 0 and stop, 3 loop_reverse ->
+    duration, 4 pingpong -> 0 and turn round.
+
+    With `dt` (a fixed frame step) the frames are stepped exactly as the engine
+    does, floor(t / dt) of them; without it the result is the dt -> 0 limit
+    (loop = t mod duration, pingpong = a triangle wave)."""
+    dur = float(seq.get("duration") or 0.0)
+    if mode is None:
+        mode = seq.get("loop_mode", seq.get("h1")) or 0
+    if isinstance(mode, str):
+        mode = LOOP_MODES.index(mode)
+    if not 0 <= mode < len(LOOP_MODES):
+        raise ValueError("loop mode must be 0..4, not %r" % (mode,))
+    t = max(float(t), 0.0)
+    rev = mode in (2, 3)
+    speed = float(speed)
+    if dt is None:
+        if speed < 0.0:
+            raise ValueError("a negative speed needs dt")
+        t *= speed
+        if dur <= 0.0:
+            return 0.0
+        if mode == 1:
+            return min(t, dur)
+        if mode == 2:
+            return max(dur - t, 0.0)
+        if mode == 0:
+            return math.fmod(t, dur)
+        if mode == 3:
+            return dur - math.fmod(t, dur)
+        u = math.fmod(t, 2.0 * dur)
+        return u if u <= dur else 2.0 * dur - u
+    if dt <= 0.0:
+        raise ValueError("dt must be positive")
+    pos = dur if rev else 0.0
+    step = dt * speed
+    for _ in range(int(t / dt + 1e-9)):
+        if not rev:
+            p = pos + step
+            if p > dur:
+                if mode == 0:
+                    pos = 0.0
+                elif mode == 1:
+                    return dur  # stopped
+                elif mode == 4:
+                    pos, rev = dur, True
+                # any other mode: the engine leaves the position where it is
+            else:
+                pos = p
+        else:
+            p = pos - step
+            if p >= 0.0:
+                pos = p
+            elif mode == 2:
+                return 0.0  # stopped
+            elif mode == 3:
+                pos = dur
+            elif mode == 4:
+                pos, rev = 0.0, False
+    return pos
+
+
 def evaluate(track, t):
     """Value of a parsed track at time `t`, as the engine evaluates it
     (key search FUN_0053a9b0, dispatch FUN_0053aa43).  Returns a list of floats
-    (Euler degrees for quaternion tracks) or None for an empty track."""
+    (Euler degrees for quaternion tracks) or None for an empty track.
+
+    A linear segment blends only number, vector and quaternion values; an
+    integer goes a + trunc((b - a) * u) (0x4fac1c); every other type -- truth,
+    color, a non-spline track whose property is not in the name table -- holds
+    key A (0x47fc01).  Tracks of the scanning fallback parser carry no
+    `value_type` and are blended as before."""
     keys = track["keys"]
     if not keys:
         return None
@@ -130,7 +303,12 @@ def evaluate(track, t):
     mode = ka.get("mode") or track.get("type")
     va, vb = val(ka), val(kb)
     if mode == 2:
-        return [x + (y - x) * u for x, y in zip(va, vb)]
+        vt = track.get("value_type", "number")
+        if vt in LERP_TYPES:
+            return [x + (y - x) * u for x, y in zip(va, vb)]
+        if vt == "integer":
+            return [x + float(int((y - x) * u)) for x, y in zip(va, vb)]
+        return va  # hold: the type has no interpolator of its own
     if mode == 3 and "out" in ka and "in" in kb:
         n = min(len(ka["out"]), len(kb["in"]))
         return [
@@ -265,11 +443,13 @@ def _objects(b, p, no, bo):
     nt = struct.unpack_from(bo + "I", b, p)[0]
     if nt > 256:
         raise _Bad("object")
-    obj = {"class": cls, "flag": flag}
+    # hosts_up is the same number as the older key `flag`
+    obj = {"class": cls, "flag": flag, "hosts_up": flag}
     if path:
         obj["path"] = path
     if ids or not path:
         obj["ids"] = ids
+    obj.update(target_fields(cls, path, ids))
     obj["tracks"], rest = _tracks(b, p + 4, nt, bo, lambda q: _objects(b, q, no - 1, bo))
     return [obj] + rest
 
@@ -298,7 +478,9 @@ def parse_exact(b, order=None):
         "format": FORMAT,
         "duration": dur,
         "version": dur,  # historical name of the same float (it is seconds)
-        "h1": flags,
+        "h1": flags,  # older name of loop_mode
+        "loop_mode": flags,
+        "loop_mode_name": LOOP_MODES[flags] if flags < len(LOOP_MODES) else None,
         "nobjects": no,
         "objects": objs,
         "parsed_bytes": len(b),
@@ -455,7 +637,7 @@ def _parse_scan(b, order=None):
 
 
 if __name__ == "__main__":
-    b = open(sys.argv[1], "rb").read()
+    b = _read_bytes(sys.argv[1])
     d = parse(b)
     j = json.dumps(d, indent=1)
     if len(sys.argv) > 2:

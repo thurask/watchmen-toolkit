@@ -5,6 +5,7 @@ engine layouts documented in the modules under test.
 """
 
 import json
+import os
 import struct
 import sys
 from pathlib import Path
@@ -272,6 +273,25 @@ class Rig:
                 {"name": str(self.names[k]), "parent": int(self.par[k])} for k in range(self.NB)
             ],
         }
+
+
+@pytest.fixture(autouse=True)
+def no_leaked_options():
+    """A test leaves the WATCHMEN_* variables as it found them, so no test
+    depends on the order the suite runs in (a command that sets one must be
+    undone by the test, e.g. through monkeypatch)."""
+    before = {k: v for k, v in os.environ.items() if k.startswith("WATCHMEN_")}
+    yield
+    after = {k: v for k, v in os.environ.items() if k.startswith("WATCHMEN_")}
+    assert after == before, "WATCHMEN_* variables changed by the test"
+
+
+@pytest.fixture
+def engine_frame(monkeypatch):
+    """Write in the mirrored frame (`--frame mirrored`): the engine's numbers
+    verbatim, so a test can compare the file with its synthetic engine input.
+    The default (true-handed) frame is tested against it in test_frame.py."""
+    monkeypatch.setenv("WATCHMEN_FRAME", "mirrored")
 
 
 @pytest.fixture

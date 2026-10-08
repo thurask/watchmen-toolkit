@@ -77,6 +77,7 @@ def test_rest_pose_joint_matrices_are_identity(variant):
         assert np.allclose(M, np.eye(4), atol=1e-5), "joint %d rest matrix is not identity" % k
 
 
+@pytest.mark.usefixtures("engine_frame")  # pins the engine numbers; true frame: test_frame.py
 def test_joint_nodes_carry_the_bind_pose(rig, variant):
     """The joint node TRS must reproduce the bind world matrix from the npz.
 
@@ -92,6 +93,7 @@ def test_joint_nodes_carry_the_bind_pose(rig, variant):
         assert "rotation" in variant.j["nodes"][jn] or "translation" in variant.j["nodes"][jn]
 
 
+@pytest.mark.usefixtures("engine_frame")  # pins the engine numbers; true frame: test_frame.py
 def test_inverse_bind_matrices_invert_the_bind_pose(rig, variant):
     """IBM[k] @ B4[k] == I, using the matrices actually stored in the file.
 
@@ -108,6 +110,7 @@ def test_inverse_bind_matrices_invert_the_bind_pose(rig, variant):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.usefixtures("engine_frame")  # pins the engine numbers; true frame: test_frame.py
 def test_frame_zero_matches_world_anim_times_inverse_bind(rig, variant):
     """At animation frame 0, v' == worldAnim @ inverse(bind) @ v.
 
@@ -128,6 +131,7 @@ def test_frame_zero_matches_world_anim_times_inverse_bind(rig, variant):
     assert np.allclose(got, want, atol=1e-5)
 
 
+@pytest.mark.usefixtures("engine_frame")  # pins the engine numbers; true frame: test_frame.py
 @pytest.mark.parametrize("frame", [0, 1, 3])
 def test_every_frame_reproduces_its_palette(rig, variant, frame):
     """Each keyframe's joint matrices equal that frame's palette entry.
@@ -207,6 +211,7 @@ def rigged(rig, tmp_path):
     return parse_glb(out), locT, locQ
 
 
+@pytest.mark.usefixtures("engine_frame")  # pins the engine numbers; true frame: test_frame.py
 def test_rigged_rest_pose_equals_animation_frame_zero(rigged):
     """rig_glb's joint nodes must be authored at the clip's first keyframe.
 
@@ -238,6 +243,7 @@ def test_rigged_inverse_binds_are_identity(rigged):
     assert np.allclose(ibm, np.eye(4), atol=0)
 
 
+@pytest.mark.usefixtures("engine_frame")  # pins the engine numbers; true frame: test_frame.py
 def test_rigged_static_mode_emits_no_rig(rig, tmp_path):
     """static=True must emit mesh + materials only -- no skin, no armature.
 

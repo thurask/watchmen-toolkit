@@ -379,6 +379,9 @@ def main():
             nok += 1
     if not j["animations"]:
         del j["animations"]
+    import frame as _frame
+
+    _frame.finish_gltf(j, BIN)  # --frame / $WATCHMEN_FRAME (default: true-handed)
     j["buffers"].append({"byteLength": len(BIN)})
     jb = json.dumps(j, separators=(",", ":")).encode()
     while len(jb) % 4:
@@ -386,16 +389,17 @@ def main():
     bb = bytes(BIN)
     while len(bb) % 4:
         bb += b"\x00"
-    open(a.out, "wb").write(
-        b"glTF"
-        + struct.pack("<II", 2, 12 + 8 + len(jb) + 8 + len(bb))
-        + struct.pack("<I", len(jb))
-        + b"JSON"
-        + jb
-        + struct.pack("<I", len(bb))
-        + b"BIN\x00"
-        + bb
-    )
+    with open(a.out, "wb") as fh:
+        fh.write(
+            b"glTF"
+            + struct.pack("<II", 2, 12 + 8 + len(jb) + 8 + len(bb))
+            + struct.pack("<I", len(jb))
+            + b"JSON"
+            + jb
+            + struct.pack("<I", len(bb))
+            + b"BIN\x00"
+            + bb
+        )
     print("wrote %s | bones %d | %d animations | %d verts" % (a.out, NB, nok, len(V)))
 
 

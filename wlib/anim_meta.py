@@ -55,11 +55,20 @@ import math
 import os
 import re
 import struct
+import sys
 
 import anim_state_machine as asm
 import engine_enums as ee
+import frame as _frame
+import kapow_json as _kj
 
 FORMAT = "watchmen-anim-meta/2"
+# Content revision of the table (top-level "revision").  The format strings name
+# the layout; this number names what the build puts into it.  A resumed character
+# export rebuilds a cached anim_meta.json whose revision is missing or different
+# (characters_export.anim_meta_is_current), so a table from before a rule was
+# added or corrected is never reused.  Raise it with every change of content.
+REVISION = 5
 
 # Engine rules (criteria evaluation, event triggers, sync markers, start
 # position, fragment splicing, reference resolution) live in anim_state_machine;
@@ -158,6 +167,19 @@ def _groups_of(node):
             out.append(n)
         n = n.parent
     return out
+
+
+# ANIMATION_TYPE the game derives when a state is initialised
+# (AnimationStateWM.initialize_external 0x5f0e63 -> DetermineAnimationType 0x5f277a);
+# the rule itself lives in anim_state_machine, which combat_meta shares
+_TYPE_BY_ACTION = asm.TYPE_BY_ACTION  # 0x5ebeb0
+_criterion_type = asm.criterion_animation_type
+determine_animation_type = asm.determine_animation_type
+UPPER_DAMAGE_POSES = asm.UPPER_DAMAGE_POSES  # 0x5f0e63
+ANIMATION_TYPE_BASIS = (
+    "computed as initialize_external 0x5f0e63 does; that it runs for every state in the game"
+    " is inferred"
+)
 
 
 def allowed_enum_names(node, var, with_groups=True, env=None):
@@ -260,12 +282,54 @@ def _slots(state):
 
 
 def _slot_rows(state):
-    """[(clip, weight, layer, speedFactor, slot node)] of a state, engine order."""
+    """[(clip, weight, layer, speedFactor, slot node, top blend)] of a state, engine
+    order.  The top blend is the blend directly under the state that holds the slot (the
+    node the state's layer list names, asm.layer_lists); for a slot of a nested blend it
+    is the outermost blend above it."""
+    top = {id(b) for b in asm._top_blends(state)}
     out = []
     for b in state.descend(asm.CLS_BLEND):
+        t = b
+        while t is not None and id(t) not in top and t is not state:
+            t = t.parent
+        if t is None or t is state:
+            t = b
         for s in b.kids(asm.CLS_SLOT):
-            out.append((_slot_clip(s), s.p("m_nweight", 1.0), _label(b), asm.slot_speed(s), s))
+            out.append((_slot_clip(s), s.p("m_nweight", 1.0), _label(b), asm.slot_speed(s), s, t))
     return out
+
+
+def _layer_fields(b):
+    """Layer facts of a top blend `b` for a state clip row (SetupNewPage 0x5b7788,
+    UpdatePagePlayPos 0x5b61b9): its list index, the additive flag, the forced play
+    position and the layer weight control (left out when the control is 0 = NONE)."""
+    out = {
+        "layer_index": int(b.p("m_ilayerindex", 0) or 0),
+        "additive": bool(b.p("m_tlayeradditive", False)),
+        "force_playpos_1": bool(b.p("m_tforcedpos", False)),
+    }
+    v = b.p("m_ilayerweightctrlparam") or 0
+    if v:
+        out["layer_weight"] = {
+            "value": ee.name("ANIMATION_VALUE", v, "VALUE_%s" % v),
+            "start": b.p("m_nlayerweightintervalstart", 0.0),
+            "end": b.p("m_nlayerweightintervalend", 0.0),
+        }
+    return out
+
+
+def layer_use(rows):
+    """{clip: sorted subset of ["additive", "base", "upper"]} from the clip rows of one
+    state: "additive" = in an additive blend; "base" = in a non-additive blend of the
+    state's lowest layer index; "upper" = any other."""
+    low = min((r["layer_index"] for r in rows), default=0)
+    out = {}
+    for r in rows:
+        if not r.get("clip"):
+            continue
+        use = "additive" if r["additive"] else "base" if r["layer_index"] == low else "upper"
+        out.setdefault(r["clip"], set()).add(use)
+    return {c: sorted(u) for c, u in out.items()}
 
 
 def state_speed(state):
@@ -416,8 +480,39 @@ def _events(state, names=None, duration=None, basis=None, speed=None, start=None
                 rec["fires_first_pass"] = False
         if cap and cap != nm:
             rec["caption_name"] = cap
+        src = event_source(e)
+        if src:  # an event of a spliced SoundEvents/SE_<clip>.fragment list
+            rec["source"] = src
+        rec.update(_event_args(e, eid))
         out.append(rec)
     out.sort(key=_event_sort_key)
+    return out
+
+
+# ANIMATION_EVENT ids whose arguments name a sound (CharacterRootLogic
+# .command_animation_event_received: SOUND 0x6aba76, SPEAK 0x6a9f30)
+EV_SOUND, EV_SPEAK = 9, 37
+
+
+def _event_args(e, eid):
+    """The event's own arguments, under their property names.  `_etarget00`:
+    the Entity it targets (SOUND: the SoundDef) as stored -- {'ref': id} names
+    a node of the same fragment, {'xref': [instance, ..., id]} one of another
+    (sound_meta resolves both).  `m_ivalue00`: SOUND 0 = at the world position,
+    1 = follows the character; SPEAK = the speak id.  `m_ttruth1`: SOUND = the
+    speak flag (START_SPEAK to the face), SPEAK = stop the current line first.
+    Always present on SOUND / SPEAK events, elsewhere only when set."""
+    out = {}
+    tgt = e.p("_etarget00")
+    if isinstance(tgt, dict) and (tgt.get("ref") is not None or tgt.get("xref")):
+        out["_etarget00"] = tgt
+    elif eid == EV_SOUND:
+        out["_etarget00"] = None
+    v, t = e.p("m_ivalue00"), e.p("m_ttruth1")
+    if eid in (EV_SOUND, EV_SPEAK) or v:
+        out["m_ivalue00"] = v
+    if eid in (EV_SOUND, EV_SPEAK) or t:
+        out["m_ttruth1"] = bool(t)
     return out
 
 
@@ -432,14 +527,13 @@ def _path(n):
 
 # ------------------------------------------------------------------ classes
 def find_class_fragments(extract_out):
-    """{class name: path} for every AnimationClass fragment (faces excluded)."""
+    """{class name: path} for every body AnimationClass fragment.  The face
+    classes (`*Face`) are read by face_rule.find_face_fragments: they go into
+    the table's `face` block, not into `classes`."""
     root = os.path.join(extract_out, "extracted")
     hits = set()
     for ext in (".fragment", ".fragment.json"):  # the JSON alone is enough
-        for f in glob.glob(
-            os.path.join(root, "**", "CharacterAnimation", "AnimationClass*" + ext),
-            recursive=True,
-        ):
+        for f in _kj.glob_tree(root, "CharacterAnimation", "AnimationClass*" + ext):
             hits.add(f[: -len(".json")] if f.endswith(".json") else f)
     out = {}
     for f in sorted(hits):
@@ -450,10 +544,47 @@ def find_class_fragments(extract_out):
     return out
 
 
+CLS_FRAGMENT_NODE = "FragmentNode"
+
+
+def _class_hosts(n, _asset):
+    """Which nodes of an animation class instance a fragment: the state groups, and
+    the plain FragmentNodes a state holds (in shipped data all of them are
+    `SoundEvents/SE_<clip>.fragment` lists under a state or its `Events` folder;
+    FragmentNode::SetFragmentAssetByName 0x498db7 applies the fragment when the
+    property is set, so its events are the state's own)."""
+    return n.cls in (asm.CLS_GROUP, CLS_FRAGMENT_NODE)
+
+
 def load_class_tree(path, _open=()):
     """Roots of one AnimationClass fragment with every nested fragment spliced
-    in whole (asm.load_tree; kept as a name for format-2 callers)."""
-    return asm.load_tree(path, True, _open)
+    in whole (asm.load_tree; kept as a name for format-2 callers): the state-group
+    fragments and the event-list fragments of the states."""
+    return asm.load_tree(path, True, _open, hosts=_class_hosts)
+
+
+def event_source(e):
+    """Base name of the spliced event-list fragment an event node was read from
+    ("SE_<clip>.fragment"), or None for an event stored in the class tree itself."""
+    n = e
+    while n is not None and n.cls not in (asm.CLS_STATE, asm.CLS_GROUP, asm.CLS_CLASS):
+        if n.frag is not None and n.parent is not None and n.parent.cls == CLS_FRAGMENT_NODE:
+            return n.frag.replace("\\", "/").rsplit("/", 1)[-1]
+        n = n.parent
+    return None
+
+
+def missing_event_lists(nodes):
+    """Asset names of the FragmentNodes of a class tree whose fragment file was not
+    found, sorted, with repeats.  A fragment that exists but holds no node (the 17-byte
+    `SE_CounterAttackGroup.fragment`) is not missing."""
+    return sorted(
+        n.p("assetName")
+        for n in nodes
+        if n.cls == CLS_FRAGMENT_NODE
+        and isinstance(n.p("assetName"), str)
+        and not getattr(n, "spliced", False)
+    )
 
 
 def load_classes(extract_out):
@@ -521,7 +652,17 @@ def state_record(s, event_names=None, fact=None):
         "state_id": P("m_istateid"),
         "master_of": P("m_imasterof") or None,
         "clips": [
-            {"clip": c, "weight": w, "layer": l, "speed": sp} for c, w, l, sp, _n in _slot_rows(s)
+            dict(
+                {
+                    "clip": c,
+                    "weight": w,
+                    "layer": l,
+                    "speed": sp,
+                    "blend_position": n.p("m_nparentblendposition"),
+                },
+                **_layer_fields(b),
+            )
+            for c, w, l, sp, n, b in _slot_rows(s)
         ],
         "main_clip": _main_clip(s),
         "loop": bool(P("m_tislooping")),
@@ -533,7 +674,9 @@ def state_record(s, event_names=None, fact=None):
         "defines_rotation": bool(P("m_tanimationdefinesrotation")),
         "attack_state": bool(P("m_tisattackstate")),
         "special_handling": _named("ANIMATION_SPECIAL_CASE", P("m_ispecialhandling")),
-        "animation_type": _named("ANIMATION_TYPE", P("m_ianimationtype")),
+        "animation_type": _named("ANIMATION_TYPE", determine_animation_type(s)),
+        "animation_type_stored": _named("ANIMATION_TYPE", P("m_ianimationtype")),
+        "animation_type_basis": ANIMATION_TYPE_BASIS,
         "duration_s": dur,
         "speed": speed,
         "criteria": crit,
@@ -646,7 +789,11 @@ def find_clips(extract_out):
 
 
 def _yaw_deg(q):
-    """Heading of an XYZW quaternion that is (nearly) a pure yaw, else None."""
+    """Heading of an XYZW quaternion that is (nearly) a pure yaw, else None.
+
+    This is 2 * atan2(y, w) of the ENGINE quaternion.  The engine rotates a
+    vector as conj(q) v q and the GLB stores the conjugate, so the value is
+    MINUS the right-handed yaw of the GLB node's rotation (in either frame)."""
     x, y, z, w = (float(v) for v in q)
     if abs(x) + abs(z) > 0.05:
         return None
@@ -732,6 +879,8 @@ ENGINE_DEFAULT_PARTNER_OFFSET = (0.11, 0.04, 1.12)
 
 
 def _yaw_rot(deg, x, z):
+    """(x, z) turned by `deg` about +Y in the right-handed sense (+Z towards +X).
+    A yaw of this table (_yaw_deg) is the opposite turn: pass its negative."""
     c, s = math.cos(math.radians(deg)), math.sin(math.radians(deg))
     return c * x + s * z, -s * x + c * z
 
@@ -749,7 +898,10 @@ def placement(m, v):
         any actor, per frame : pos = start + R(start orient) * (GP(t) - GP(0))
 
     so the partner starts on the master's `interact` marker, turned 180 degrees,
-    and plays its own GamePivot motion RELATIVE to its first key.  The partner
+    and plays its own GamePivot motion RELATIVE to its first key.  The values
+    returned are those of t = 0 (the fixed marker); with a master that turns
+    while the partner is anchored the engine's anchor leaves it (pair_timeline:
+    anchor_drift_if_master_turns_m).  The partner
     clip's absolute GamePivot start is never read by the engine; it is reported
     under `check` because on most pairs it lands on the marker to the centimetre
     (the two halves were authored in one scene), which is an independent check.
@@ -768,9 +920,24 @@ def placement(m, v):
         else (ENGINE_DEFAULT_PARTNER_OFFSET[0], ENGINE_DEFAULT_PARTNER_OFFSET[2])
     )
     if myaw:
-        ox, oz = _yaw_rot(myaw, ox, oz)  # offset is in the master node's frame
+        # The offset is in the master node's frame.  A root quaternion whose
+        # _yaw_deg is a turns a vector by -a in the right-handed sense (engine
+        # vectors rotate as conj(q) v q), so the turn is _yaw_rot(-a): this is
+        # GamePivot(0) * interact(0) of the GLB hierarchy (data, 2026-10-05: 32
+        # turned solo clips agree to 0.1 mm, the other sign is off by up to
+        # 1.66 m).  That the master's node is the GamePivot frame is READ on PC
+        # (2026-10-05): the node orientation is the heading quaternion of
+        # m_nfaceheading, set inline each frame (CharacterVisual
+        # .UpdateAnimPoseAndCloth 0x6b015d); the heading integrates minus the
+        # GamePivot twist rate and the velocity is GamePivot-local
+        # (UpdatePagePlayPos 0x5b56a9, CharacterRoot.StateActive resume
+        # 0x56-0x58).  No shipped pair has a master turned at t = 0, so this
+        # branch never runs on the game's data.
+        ox, oz = _yaw_rot(-myaw, ox, oz)
     px, pz = mx + ox, mz + oz
-    gx, gz = -vx, -vz  # the partner clip's own start, turned 180 deg about +Y
+    # the partner clip's own start in the partner's start frame: turned by
+    # partner_yaw = 180 + myaw about +Y (exactly 180 on every shipped pair)
+    gx, gz = _yaw_rot(-(180.0 + myaw), vx, vz) if myaw else (-vx, -vz)
     out = {
         "space": "master clip space",
         "source": (
@@ -782,7 +949,7 @@ def placement(m, v):
         "partner_distance_m": round(math.hypot(px - mx, pz - mz), 4),
         # yaw of the partner's start frame: turn the partner clip by this
         "partner_yaw_deg": round(((180.0 + myaw) + 180.0) % 360.0 - 180.0, 2),
-        # = partner_start - R180 * GamePivot_p(0): add to the turned partner clip
+        # = partner_start - R(partner_yaw) * GamePivot_p(0): add to the turned partner clip
         "partner_origin_shift_xz": [round(px - gx, 4), round(pz - gz, 4)],
     }
     out["check"] = {
@@ -863,27 +1030,40 @@ def _pair_event(events, eid, rate, start=0.0, own_start=0.0):
 
 
 def _master_turn(mf, pl, t0, t1, t_ref=0.0):
-    """(max |yaw(t) - yaw(t_ref)| in degrees, anchor drift in metres if the
-    master's node followed that turn) of the master's GamePivot for t in
-    [t0, t1], seconds on the master's clip.  t_ref: where the master's state
-    starts (its node keeps the orientation it had there if it does not turn)."""
+    """(max |yaw(t) - yaw(0)| in degrees, anchor drift in metres) of the master's
+    GamePivot for t in [t0, t1], seconds on the master's clip.
+
+    The drift is the engine's departure from the fixed marker of placement():
+    the anchored partner is rigid in the master NODE's frame, the node is the
+    GamePivot frame (see placement), so in clip space
+
+        anchor(u) = GP(u) + R(yaw(u)) * (I0 - (GP(u) - GP(0)))
+        marker    = GP(0) + R(yaw(0)) * I0
+        drift     = max |anchor(u) - marker|
+
+    with I0 the UNTURNED interact offset and R(a) = _yaw_rot(-a).  Both the
+    turn and the drift are measured from t = 0, where the offset is defined;
+    t_ref (where the master's state starts) is accepted for older callers and
+    not used."""
     yaw, pos, dur = mf.get("_gp_yaw_deg"), mf.get("_gp_pos"), mf.get("duration_s")
     if not yaw or not dur or t1 < t0:
         return None, None
     n = len(yaw)
-    yaw_ref = _sample(yaw, min(max(t_ref / dur, 0.0), 1.0))
     us = [t0 / dur, t1 / dur] + [i / (n - 1) for i in range(n) if n > 1]
     us = [u for u in us if t0 / dur - 1e-9 <= u <= t1 / dur + 1e-9]
     off = (pl or {}).get("partner_offset_xz")
+    # the yaw placement() turned the offset by (0 for a start that is not a pure yaw)
+    yaw0 = float((mf.get("game_pivot") or {}).get("yaw_start_deg") or 0.0)
     turn, drift = 0.0, 0.0 if (pos and off) else None
+    if drift is not None:
+        ix, iz = _yaw_rot(yaw0, off[0], off[1])  # I0: partner_offset = R(yaw0) * I0
     for u in us:
-        a = _sample(yaw, u) - yaw_ref
+        a = _sample(yaw, u) - yaw[0]
         turn = max(turn, abs(a))
         if drift is not None:
             g = _sample(pos, u)
             dx, dz = g[0] - pos[0][0], g[2] - pos[0][2]
-            # anchor = M(t) * (I0 - delta): fixed frame gives I0, turned frame this
-            rx, rz = _yaw_rot(a, off[0] - dx, off[1] - dz)
+            rx, rz = _yaw_rot(-(yaw0 + a), ix - dx, iz - dz)
             drift = max(drift, math.hypot(dx + rx - off[0], dz + rz - off[1]))
     return round(turn, 2), (None if drift is None else round(drift, 3))
 
@@ -904,13 +1084,20 @@ def pair_timeline(mrec, prec, mf=None, vf=None, pl=None, start=None, alternative
     position is COPIED from the master's every frame until that reaches 1
     (UpdatePagePlayPos 0x5b5756-0x5b57d0).  So the pair is locked in play
     position: playpos(t) = master start + t * speed / clip duration.
-    The partner enters absolute mode at its OWN pose; the anchor is applied only
-    while its capsule flag +0xb8 is set -- from the start when Special handling
-    is NORMAL (0), otherwise from its ABSOLUTE_GOTO_TARGET_POS event (0x6a9dca)
-    -- and is then eased in from the entry pose over the blend time, which is
-    the page's ease-in = the state's ease_in_s (goto_slave_mode -> ForceToState
-    with ease -1).  LEAVE_ABSOLUTE_MODE (0x6ac8de) returns it to normal physics,
-    position kept.  Inferred: both states start in the same frame.
+    The partner enters absolute mode at its OWN pose and its visible node HOLDS
+    that entry pose: it gets no absolute update until its capsule flag +0xb8 is
+    set (UpdateAnimPoseAndCloth 0x6b015d draws the absolute target, which only
+    the non-slave attempt_move 0x67f727 and the master's DccJoint, gated on the
+    flag by DccUpdate 0x680654, write).  The flag is set from the start when
+    Special handling is NORMAL (0), otherwise by its ABSOLUTE_GOTO_TARGET_POS
+    event (0x6a9dca); the anchor is then eased in from the entry pose over the
+    blend time, which is the page's ease-in = the state's ease_in_s
+    (goto_slave_mode -> ForceToState with ease -1).  While anchored the partner
+    is rigid in the master NODE's frame (anchor_frame), so it swings with a
+    master that turns: `placement` is the fixed marker of t = 0 and
+    anchor_drift_if_master_turns_m the engine's departure from it.
+    LEAVE_ABSOLUTE_MODE (0x6ac8de) returns it to normal physics, position kept.
+    Inferred: both states start in the same frame.
 
     Times are seconds of play time since both states were entered (controller
     speed factors 1); `playpos` is the shared play position -- multiply by a
@@ -993,6 +1180,8 @@ def pair_timeline(mrec, prec, mf=None, vf=None, pl=None, start=None, alternative
         },
         "start_playpos": round(s0, 4),
         "playpos_per_second": None if rate is None else round(rate, 6),
+        # the anchored partner is rigid in this frame (0x6b9035, 0x6b015d): read
+        "anchor_frame": "master node",
         "anchor_rotation_unverified": False if not anchored else None,
         "master_yaw_change_deg": None,
         "anchor_drift_if_master_turns_m": None,
@@ -1068,8 +1257,34 @@ def _groups_accept(node, chartype):
     return all(accepts_partner(g, chartype) for g in _groups_of(node))
 
 
-def build(extract_out, binds=None, log=None):
-    """The whole table as one JSON-able dict (see module docstring)."""
+#: top-level key of a table whose combat / fx step failed:
+#: {"combat" | "fx": {"format": the block format that was attempted, "status":
+#: "attempted, failed", "reason": "<exception type>: <message>"}}.  The block and
+#: its `<block>_format` marker are absent; this entry says the build was tried with
+#: THIS toolkit's block format, so a resumed character export reuses the table
+#: (characters_export.anim_meta_is_current) instead of rebuilding it on every run.
+BUILD_FAILED_KEY = "build_failed"
+
+
+def _block_failed(failed, block, fmt, said, prefix):
+    """Record in `failed` why `block` is missing: the reason is what the step logged
+    ("  combat: skipped (KeyError: 'x')").  A step that returned nothing WITHOUT
+    reporting a failure (a hook switched off) leaves no entry."""
+    line = next((x for x in reversed(said) if x.startswith(prefix)), None)
+    if line is not None:
+        reason = line[len(prefix) :]
+        reason = reason[:-1] if reason.endswith(")") else reason
+        failed[block] = {"format": fmt, "status": "attempted, failed", "reason": reason}
+
+
+def build(extract_out, binds=None, log=None, frame=None):
+    """The whole table as one JSON-able dict (see module docstring), in the
+    output frame (`frame`, else frame.mode(): "true" unless --frame mirrored)."""
+    with _kj.tree_cache(os.path.join(extract_out, "extracted")):  # the extract is only read
+        return _build(extract_out, binds, log, frame)
+
+
+def _build(extract_out, binds, log, frame):
     log = log or (lambda *a: None)
     classes = load_classes(extract_out)
     clipfiles = find_clips(extract_out)
@@ -1105,6 +1320,10 @@ def build(extract_out, binds=None, log=None):
             "states": [r for _n, r in recs],
             "transitions": _transitions(c["nodes"]),
         }
+        gone = missing_event_lists(c["nodes"])
+        if gone:  # a state names an event-list fragment the data does not contain
+            out_classes[cn]["missing_event_lists"] = gone
+            log("  %s: %d event-list fragments not found: %s" % (cn, len(gone), ", ".join(gone)))
         log(
             "%-12s %4d states, %3d masters"
             % (cn, len(recs), sum(1 for _n, r in recs if r["master_of"]))
@@ -1129,7 +1348,11 @@ def build(extract_out, binds=None, log=None):
                 idx.setdefault(sid, []).append((n, kids))
         slaves[cn] = idx
 
-    contact = _ContactCheck(binds) if binds else None
+    contact = None
+    if binds:
+        import characters_export
+
+        contact = _ContactCheck(binds, characters_export.track_names_for(extract_out))
     pairs = []
     for cn, recs in sorted(states.items()):
         mtype = classes[cn]["chartype"]
@@ -1155,7 +1378,12 @@ def build(extract_out, binds=None, log=None):
                         ct = None
                         if contact and pl and mf and vf:
                             try:
-                                ct = contact(mf["file"], vf["file"], pl["partner_origin_shift_xz"])
+                                ct = contact(
+                                    mf["file"],
+                                    vf["file"],
+                                    pl["partner_origin_shift_xz"],
+                                    pl["partner_yaw_deg"],
+                                )
                             except Exception as ex:  # a bind this clip does not fit
                                 log("  contact %s: %s" % (rec["main_clip"], ex))
                         if pl is not None and ct is not None:
@@ -1228,12 +1456,14 @@ def build(extract_out, binds=None, log=None):
     clips = {}
     for cn, recs in states.items():
         for _n, r in recs:
+            use = layer_use(r["clips"])
             for sl in r["clips"]:
                 c = sl["clip"]
                 if not c:
                     continue
                 f = fact(c)
                 e = clips.setdefault(c, {"used_by": [], "loop": False, "events": [], "pairs": []})
+                e["layer_use"] = sorted(set(e.get("layer_use", [])) | set(use.get(c, [])))
                 if f and "duration_s" not in e:
                     e.update(
                         {
@@ -1258,8 +1488,11 @@ def build(extract_out, binds=None, log=None):
                         "speed": sl.get("speed"),
                     }
                 )
+                # the game loops a clip when a looping state plays it, as the state's main
+                # clip or as a member of its blend (an arm-layer overlay is partial-body)
+                if r["loop"] and "arm_layer" not in c.lower():
+                    e["loop"] = True
                 if c == r["main_clip"]:
-                    e["loop"] = e["loop"] or r["loop"]
                     if sl.get("speed") is not None and sl["speed"] not in e.setdefault(
                         "speeds", []
                     ):
@@ -1308,8 +1541,32 @@ def build(extract_out, binds=None, log=None):
         e["events"].sort(key=_event_sort_key)
         e["used_by"].sort(key=lambda x: (x["class"], x["path"]))
 
-    return {
+    # face controllers: per state / pair records + the top-level block (additive)
+    import face_rule
+
+    said = []  # what the optional steps logged: the reason of a failure is in there
+
+    def _log(*a):
+        said.append(str(a[0]) if a else "")
+        if log:
+            log(*a)
+
+    failed = {}  # block -> why its build failed (BUILD_FAILED_KEY)
+    try:
+        face = face_rule.build(extract_out, classes, states, pairs, sys.modules[__name__], _log)
+    except Exception as ex:  # decoration: must not take the animation table down
+        face = None
+        for _lst in states.values():  # drop what the step wrote before it failed
+            for _node, _rec in _lst:
+                _rec.pop("face", None)
+                _rec.pop("inflicts", None)
+        for _p in pairs:
+            _p.pop("face", None)
+        _log("  face: skipped (%s: %s)" % (type(ex).__name__, ex))
+        _block_failed(failed, "face", face_rule.FACE_FORMAT, said, "  face: skipped (")
+    out = {
         "format": FORMAT,
+        "revision": REVISION,
         "conventions": CONVENTIONS,
         # caption-learned names (format 1); the records use the exe's names
         "event_names": {
@@ -1328,6 +1585,146 @@ def build(extract_out, binds=None, log=None):
         "clips": dict(sorted(clips.items())),
         "pairs": pairs,
     }
+    if face is not None:
+        out["face_format"] = face_rule.FACE_FORMAT
+        out["face"] = face
+    # combat rules: per-state `combat`, per-pair `trigger`, top-level block (additive)
+    import combat_meta
+
+    combat = combat_meta.build_or_none(
+        extract_out, classes, states, pairs, sys.modules[__name__], _log
+    )
+    if combat is not None:
+        out["combat_format"] = combat_meta.COMBAT_FORMAT
+        out["combat"] = combat
+    else:
+        _block_failed(failed, "combat", combat_meta.COMBAT_FORMAT, said, "  combat: skipped (")
+    # the weapon class each clip is played with (criteria and weapon blends)
+    import parts_rule
+
+    for name, use in parts_rule.clip_weapon_use(out).items():
+        if name in out["clips"]:
+            out["clips"][name]["weapon_use"] = use
+    # effects / camera cuts / rumble: event payload, state `fx`, pair camera cuts (additive)
+    import fx_meta
+
+    fx_meta.attach(out, extract_out, classes, states, pairs, sys.modules[__name__], _log)
+    if out.get("fx_format") != fx_meta.FORMAT:
+        _block_failed(failed, "fx", fx_meta.FORMAT, said, "  fx_meta: skipped (")
+    if failed:
+        out[BUILD_FAILED_KEY] = failed
+    return _asset_names(apply_frame(out, frame), extract_out)
+
+
+def _asset_names(meta, extract_out):
+    """Strings that name a file of the export in the spelling of that file, the
+    stored one beside them under "stored" (canonical_names.respell_export; with
+    --names stored the table is left as it is)."""
+    import canonical_names
+
+    return canonical_names.respell_export(meta, extract_out)
+
+
+# ------------------------------------------------------------- coordinate frame
+# Keys that hold numbers in the GLB's frame (read from the clips' root tracks);
+# everything else spatial in the table is a raw engine value (CONVENTIONS_TRUE
+# "engine_values").
+_ROOT_POS_KEYS = ("pos_start", "pos_end")
+_ROOT_YAW_KEYS = ("yaw_start_deg", "yaw_end_deg")
+_PLACEMENT_XZ_KEYS = (
+    "master_start_xz",
+    "partner_start_xz",
+    "partner_offset_xz",
+    "partner_origin_shift_xz",
+)
+
+
+def reflect_root(r):
+    """A clip's game_pivot / interact record -> the other frame (in place)."""
+    for k in _ROOT_POS_KEYS:
+        if r.get(k) is not None:
+            r[k] = _frame.vec(r[k])
+    for k in _ROOT_YAW_KEYS:
+        if r.get(k) is not None:
+            r[k] = _frame.yaw_deg(r[k])
+    return r
+
+
+def reflect_placement(pl):
+    """A pair's placement record -> the other frame (in place): x of every xz
+    pair negated, the partner's yaw negated; distances do not change."""
+    for k in _PLACEMENT_XZ_KEYS:
+        if pl.get(k) is not None:
+            pl[k] = _frame.xz(pl[k])
+    if pl.get("partner_yaw_deg") is not None:
+        pl["partner_yaw_deg"] = _frame.yaw_deg(pl["partner_yaw_deg"])
+    chk = pl.get("check")
+    if isinstance(chk, dict) and chk.get("partner_game_pivot_start_xz") is not None:
+        chk["partner_game_pivot_start_xz"] = _frame.xz(chk["partner_game_pivot_start_xz"])
+    return pl
+
+
+def reflect_meta(meta):
+    """Reflect (x -> -x) every GLB-frame number of a table in place: the clips'
+    game_pivot / interact records and the pairs' placement.  Raw engine values
+    (impact vectors, event payloads, fx offsets, camera parameters) are not
+    touched.  Applying it twice gives the table back."""
+    seen = set()
+
+    def once(d):
+        if not isinstance(d, dict) or id(d) in seen:
+            return False
+        seen.add(id(d))
+        return True
+
+    for c in (meta.get("clips") or {}).values():
+        for k in ("game_pivot", "interact"):
+            if once(c.get(k)):
+                reflect_root(c[k])
+    for p in meta.get("pairs") or []:
+        if once(p.get("placement")):
+            reflect_placement(p["placement"])
+    return meta
+
+
+def _set_frame_text(meta, mode):
+    meta["conventions"] = conventions(mode)
+    cam = (meta.get("fx") or {}).get("camera")
+    if isinstance(cam, dict) and isinstance(cam.get("cut_placement"), dict):
+        import fx_meta
+
+        cam["cut_placement"] = fx_meta.cut_placement(mode, cam["cut_placement"])
+
+
+def apply_frame(meta, frame=None):
+    """A table as build() computes it (engine numbers = the mirrored frame) ->
+    the output frame, in place.  "mirrored": unchanged, no marker.  "true": the
+    GLB-frame numbers reflected, the conventions of that frame, and the marker
+    coordinate_frame = "right-handed-true" after `format`."""
+    if not _frame.is_true(frame):
+        return meta
+    reflect_meta(meta)
+    _set_frame_text(meta, "true")
+    return _frame.stamp_json(meta, "true")
+
+
+def to_frame(meta, frame=None):
+    """`meta` in the frame `frame` (default frame.mode()): the table itself when
+    it already is, else a converted deep copy.  A table without the marker is
+    in the mirrored frame (1.3.0 tables, --frame mirrored)."""
+    if not isinstance(meta, dict):
+        return meta
+    mode = _frame.mode(frame)
+    if _frame.frame_of(meta) == mode:
+        return meta
+    import copy
+
+    out = reflect_meta(copy.deepcopy(meta))
+    out.pop(_frame.MARKER_KEY, None)
+    out.pop(_frame.NOTE_KEY, None)
+    if "conventions" in out:
+        _set_frame_text(out, mode)
+    return _frame.stamp_json(out, mode)
 
 
 def skeletons(binddir):
@@ -1347,6 +1744,80 @@ def skeletons(binddir):
     return out
 
 
+#: What the four ragdoll animation values hold (CharacterVisual.command_update_ragdoll
+#: 0x6bc3e2); state criteria compare them (ANIMATION_VALUE ids).  Engine values: they
+#: are the same in both export frames.
+RAGDOLL_VALUES = [
+    {
+        "id": 6,
+        "name": "CHARACTER_PELVIS_ROTATION",
+        "unit": "deg",
+        "range": [-180, 180],
+        "rule": "atan2(E.up, E.(B x up)); E = world direction of -pelvis bone Y, B = "
+        "horizontal unit of -pelvis bone X; 0 = body +Z up, +90 = right side up, -90 = left "
+        "side up, +-180 = +Z down; exactly vertical body gives -90",
+        "source": "0x6bc3e2, ATan2 0x5aa394",
+    },
+    {
+        "id": 8,
+        "name": "CHARACTER_PELVIS_RAGDOLL_FREE",
+        "unit": "truth",
+        "range": [0, 1],
+        "rule": "expand volume fully grown for more than 0.15 s; for non-playable "
+        "characters also no playable character within 1.5 m horizontal",
+        "source": "0x6bc3e2",
+    },
+    {
+        "id": 10,
+        "name": "CHARACTER_PELVIS_VELOCITY",
+        "unit": "m/s",
+        "range": [0, None],
+        "rule": "length of the pelvis ragdoll body's linear velocity",
+        "source": "0x6bc3e2",
+    },
+    {
+        "id": 11,
+        "name": "CHARACTER_PELVIS_GROUND_HEIGHT",
+        "unit": "m",
+        "range": [0, None],
+        "rule": "pelvis to first non-Character hit of a downward capsule cast",
+        "source": "0x6bc3e2 (cast details not rechecked)",
+    },
+]
+
+
+def pelvis_rotation(q_pelvis_world):
+    """Animation value 6 (CHARACTER_PELVIS_ROTATION, degrees) for the pelvis bone's
+    world orientation (x, y, z, w), engine numbers -- what 0x6bc3e2 computes: with
+    A = the world direction of -bone X and E = that of -bone Y (vectors rotate as
+    conj(q) v q), B = A made horizontal and unit (zero for a vertical body),
+    D = B x up: 57.29578 * ATan2(E.up, E.D), where the engine's ATan2 (0x5aa394)
+    takes sign -1 for a first argument <= 0."""
+    x, y, z, w = (float(c) for c in q_pelvis_world)
+    n = math.sqrt(x * x + y * y + z * z + w * w) or 1.0
+    x, y, z, w = x / n, y / n, z / n, w / n
+    # rows of the matrix of conj(q) v q: the world directions of the bone axes
+    bx = (1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y))
+    by = (2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x))
+    a = (-bx[0], -bx[1], -bx[2])
+    e = (-by[0], -by[1], -by[2])
+    h = math.hypot(a[0], a[2])
+    # rounding noise is not a direction: an exactly vertical body has B = 0
+    b = (a[0] / h, 0.0, a[2] / h) if h > 1e-9 else (0.0, 0.0, 0.0)
+    d = (-b[2], 0.0, b[0])  # B x up
+    ny, nx = e[1], e[0] * d[0] + e[2] * d[2]
+    ny = 0.0 if abs(ny) < 1e-9 else ny
+    nx = 0.0 if abs(nx) < 1e-9 else nx
+    sign = 1.0 if ny > 0 else -1.0
+    if nx > 0:
+        ang = sign * math.atan(abs(ny / nx))
+    elif nx == 0:
+        ang = sign * math.pi / 2
+    else:
+        ang = sign * (math.pi - math.atan(abs(ny / nx)))
+    return 57.29578 * ang
+
+
 CONVENTIONS = {
     "units": "metres, seconds, degrees",
     "up_axis": "+Y (the engine is Y-up; no axis conversion is applied)",
@@ -1354,6 +1825,17 @@ CONVENTIONS = {
         "engine coordinates are written verbatim into right-handed glTF, so the "
         "export is a MIRROR IMAGE: with the character facing +Z its LEFT hand is "
         "at -X. Mirror X (and swap L/R) to get the real-world pose."
+    ),
+    "layers": (
+        "classes.*.states[].clips[] carry layer_index, additive, force_playpos_1 and "
+        "layer_weight of the blend directly under the state (read from code: "
+        "SetupNewPage 0x5b7788, UpdatePagePlayPos 0x5b61b9). clips[*].layer_use is the "
+        "sorted subset of ['additive', 'base', 'upper'] over the states that use the "
+        "clip; a clip no state uses has no layer_use. A clip whose layer_use lacks "
+        "'base' is never played alone: 'upper' clips replace only the bones they have "
+        "tracks for, by the layer weight (0x592c8d, 0x594cac); 'additive' clips are "
+        "applied as pose(t) composed with the inverse of pose(0), scaled by the bone "
+        "weight (0x594cac, 0x592a2f). Character GLBs bake every clip as an absolute pose."
     ),
     "playpos": (
         "0..1 fraction of the clip. An event's `time_unit` says what the game stores "
@@ -1386,6 +1868,14 @@ CONVENTIONS = {
         "animation-type names and ids are the executable's own (top-level `enums`); "
         "`caption_name` on an event is the name its editor caption carries when that "
         "differs, `event_names` the caption-learned table of format 1."
+    ),
+    "criteria_units": (
+        "criteria bounds are in the unit of the animation value: radians for DIRECTION and "
+        "ANGLE_TO_TARGET (measured -2.7..2.7 and -2..2), HEAD_ANGLE_TO_TARGET and "
+        "HEAD_VERTICAL_ANGLE_TO_TARGET (internal range -+pi/2), and by the code range also "
+        "VERTICAL_ANGLE_TO_TARGET and TARGET_ANGLE_TO_YOU (-+pi; no shipped criterion) -- "
+        "AnimationData.GetAnimationValueInternalMin/Max 0x5aa588 / 0x5aa5c2; degrees for "
+        "CHARACTER_PELVIS_ROTATION (measured -180..180)"
     ),
     "criteria": (
         "`criteria_tree` gives each criterion as data. Enum variable 11 is "
@@ -1424,21 +1914,35 @@ CONVENTIONS = {
         "`time_s` / `from_s` / `to_s` are seconds of play time from the start of both "
         "states; `playpos` / `from_playpos` / `to_playpos` the shared play position -- "
         "multiply by a clip's duration for the position on that clip's timeline. The "
-        "partner enters at its own pose and plays its GamePivot motion from there "
-        "('own_entry_pose') until its ABSOLUTE_GOTO_TARGET_POS event (goto_target), is "
+        "partner enters at its own pose and its visible node HOLDS that entry pose "
+        "('own_entry_pose'): it gets no absolute update until its capsule flag +0xb8 is "
+        "set (UpdateAnimPoseAndCloth 0x6b015d, attempt_move 0x67f727, DccUpdate "
+        "0x680654) -- it does not play its GamePivot motion in that phase. The flag is "
+        "set by its ABSOLUTE_GOTO_TARGET_POS event (goto_target); the partner is "
         "then eased from that entry pose onto the anchored trajectory over blend_s "
         "seconds = its state's ease-in ('blend_to_anchor': w = 1 - (t - t_goto) / "
         "blend_s, pos = w * entry + (1 - w) * anchored), stays 'anchored', and is "
         "'released' to normal physics at its first LEAVE_ABSOLUTE_MODE (position "
-        "kept). Special handling NORMAL (0) means anchored from the start. INFERRED: "
-        "the anchored trajectory itself is the constant anchor of `placement` (the "
-        "engine re-anchors every tick to the master's live node, which cancels the "
-        "master's own GamePivot translation but not a turn of its node); that both "
-        "states start in the same frame. NOT ESTABLISHED: whether a non-absolute "
-        "master's node turns with its GamePivot during the clip -- pairs where it "
-        "would matter carry anchor_rotation_unverified = true with "
+        "kept). Special handling NORMAL (0) means anchored from the start. While "
+        "anchored the partner is RIGID IN THE MASTER NODE'S FRAME (anchor_frame "
+        "'master node'; the node is the master's GamePivot frame): in that frame "
+        "partner node pos = I0 - (GP_m(t) - GP_m(0)) + R180 * (GP_p(t) - GP_p(0)), "
+        "orient = q_p(t) * half-turn about +Y, I0 = interact_m(0) or the default "
+        "offset. So the anchor cancels the master's own GamePivot translation and "
+        "SWINGS with a turn of the master. `placement` is the fixed marker at t = 0; "
+        "on a pair whose master turns more than 2 degrees while the partner is "
+        "anchored, anchor_rotation_unverified is true (the key name is kept from "
+        "earlier tables: the swing itself is read from code) with "
         "master_yaw_change_deg (largest GamePivot turn from t = 0 inside the anchored "
-        "window) and anchor_drift_if_master_turns_m."
+        "window) and anchor_drift_if_master_turns_m = the engine's largest departure "
+        "from that fixed marker. The clip data favour the fixed marker on most, not "
+        "all, of those pairs (measured: closer contact with the marker on 24 of 30 "
+        "turning pair rows, with the swing on 4), so treat contact there as "
+        "approximate either way. INFERRED: that both states start in the same frame. "
+        "The master's face heading follows CharacterRoot.StateActive's damping "
+        "(0x6b367a, MathLib.LinearDampSignedAngle 0x791500); it does not enter the "
+        "relative rule. NOT ESTABLISHED: LOOK_AT_TARGET during a pair; whether the "
+        "game shows the swing has not been checked in a capture."
     ),
     "transition_start": (
         "classes.*.transitions: `start.rule` and top-level transition_start_priority "
@@ -1464,7 +1968,11 @@ CONVENTIONS = {
     ),
     "body_space": (
         "body joints are keyed relative to GamePivot, which is 1.0 m above the "
-        "ground; world position = GamePivot track + joint position"
+        "ground and carries the actor's position AND heading: world = GamePivot(t) + "
+        "R(q_GamePivot(t)) * joint (the engine turns a vector as conj(q) v q; in the "
+        "GLB that is the GamePivot node's own rotation applied to the joint nodes, "
+        "which are written beside it, not under it). A clip whose GamePivot turns "
+        "turns the body with it"
     ),
     "motion_root": "GamePivot (absolute track, shared scene for paired clips)",
     "interact": (
@@ -1475,14 +1983,60 @@ CONVENTIONS = {
         "engine rule: the partner starts on the master's interact marker, its "
         "frame turned 180 deg about +Y, and moves by its own GamePivot track "
         "relative to that track's first key: partner_world(t) = partner_start + "
-        "R(partner_yaw) * (GamePivot_p(t) - GamePivot_p(0) + joint_p(t))"
+        "R(partner_yaw) * (GamePivot_p(t) - GamePivot_p(0) + R(q_p(t)) * joint_p(t)), "
+        "q_p = the partner clip's own GamePivot rotation (it comes on top of "
+        "partner_yaw; three partner clips start at -5 deg); master_world(t) = "
+        "GamePivot_m(t) + R(q_m(t)) * joint_m(t). The engine's start offset is 3-D "
+        "(interact_m(0).y is -0.042 on one primary pair); the table gives x and z. "
+        "Height: partner_start is that horizontal pair, so subtract only x and z of "
+        "GamePivot_p(0) -- each character keeps the height of its own GamePivot "
+        "track (about 1.0 m; the engine puts the partner's first key at the master "
+        "node's height + interact_m(0).y, which is the same where both clips start "
+        "at the same height)"
     ),
     "absolute_motion": (
         "any actor: pos(t) = start_pos + R(start_orient) * (GamePivot(t) - "
         "GamePivot(0)); orient(t) = GamePivot_orient(t) * start_orient"
     ),
     "frame_rate_scale": "1/2/3 = FULL/HALF/THIRD of the 30 fps engine rate",
+    "ragdoll_values": RAGDOLL_VALUES,
 }
+
+
+# The same block for files written in the true frame (the default).
+CONVENTIONS_TRUE = dict(CONVENTIONS)
+CONVENTIONS_TRUE["handedness"] = (
+    "right-handed, x = -engine x (coordinate_frame 'right-handed-true'): the export "
+    "shows the game as it is, not mirrored. With the character facing +Z its LEFT "
+    "hand is at +X, and the bone names L / R are truthful. Nothing has to be mirrored. "
+    "A file without a coordinate_frame key (toolkit 1.3.0, or --frame mirrored) holds "
+    "the engine's left-handed numbers verbatim and is a mirror image."
+)
+CONVENTIONS_TRUE["engine_values"] = (
+    "values copied from the game files are NOT converted and stay in "
+    + _frame.ENGINE_NOTE
+    + ". They are: a state's impact.position / impact.direction, event payload "
+    "vectors (m_vvalue*), fx local_position / local_direction / local_orientation, "
+    "the camera-cut parameters and the formulas of fx.camera.cut_placement, the "
+    "camera rig, sweep angles and face.attachment.head_model_yaw_deg. In the GLB's "
+    "frame are: clips[*].game_pivot / interact (pos_*, yaw_*) and pairs[*].placement."
+)
+
+
+CONVENTIONS_TRUE["yaw"] = (
+    "yaw_start_deg / yaw_end_deg and partner_yaw_deg are the engine's heading angle "
+    "(2 * atan2(y, w) of its root quaternion), sign changed for this frame. A value a "
+    "is a right-handed rotation of MINUS a degrees about +Y in the GLB: every clip yaw "
+    "equals minus the yaw of the GLB's own GamePivot / interact rotation (measured). "
+    "In this frame a positive value turns the facing direction from +Z towards -X, the "
+    "character's right, clockwise seen from above. R(partner_yaw) in pair_space is "
+    "that rotation; +-180 is the same turn in either sense."
+)
+
+
+def conventions(frame=None):
+    """The `conventions` block for files in `frame` (default frame.mode())."""
+    return CONVENTIONS_TRUE if _frame.is_true(frame) else CONVENTIONS
 
 
 def skeleton_extras(names, parents):
@@ -1506,8 +2060,8 @@ def skeleton_extras(names, parents):
         "roots": [i for i, p in enumerate(par) if p < 0],
         "joint_space": (
             "flat: every joint node is a child of `root`; its transform is the "
-            "joint's world transform RELATIVE TO GamePivot. GamePivot and interact "
-            "carry the absolute scene tracks."
+            "joint's world transform RELATIVE TO GamePivot (interact included). "
+            "GamePivot alone carries the absolute scene track."
         ),
         "attach_joints": attach,
     }
@@ -1528,12 +2082,18 @@ def _find_clip(meta, name):
     return (c, clips[c]) if c else (None, None)
 
 
+# pair keys of the fx / combat blocks that go into a clip's glTF extras (the pair's
+# `fx` lists and the per-state `fx` / `combat` blocks stay in anim_meta.json: they are
+# keyed by state, and a clip is shared by several states)
+CLIP_PAIR_EXTRA_KEYS = ("camera_cuts", "camera_return", "trigger")
+
+
 def clip_extras(meta, name, fps=None, frames=None):
     """glTF `extras` for one animation, or None when the game data does not
     know the clip (synthetic GRIP / face poses).
 
-    fps/frames describe the animation AS WRITTEN (the writer may resample or
-    apply the engine's locomotion speed sync); events are given both as the
+    fps/frames describe the animation AS WRITTEN (the writer may resample it);
+    events are given both as the
     game's play position and as a time in the written animation.
     """
     key, c = _find_clip(meta, name)
@@ -1572,6 +2132,8 @@ def clip_extras(meta, name, fps=None, frames=None):
         # slot speed factors the game plays this clip at (as a state's main clip)
         "speeds": c.get("speeds", []),
     }
+    if c.get("weapon_use"):
+        out["weapon_use"] = c["weapon_use"]
     prs = []
     for ref in c.get("pairs", []):
         p = meta["pairs"][ref["pair"]]
@@ -1590,6 +2152,12 @@ def clip_extras(meta, name, fps=None, frames=None):
                 "timeline": p.get("timeline"),
             }
         )
+        # blocks other modules add to a pair (fx_meta: the procedural camera of a
+        # finisher / counter, on the pair clock; combat_meta: what starts the pair).
+        # Copied only when the table has them: older tables give the same extras.
+        for k in CLIP_PAIR_EXTRA_KEYS:
+            if p.get(k):
+                prs[-1][k] = p[k]
     prs = [x for x in prs if x["primary"]] or prs
     # one entry per distinct (role, other clip, other class); states differ only
     seen, uniq = set(), []
@@ -1604,19 +2172,23 @@ def clip_extras(meta, name, fps=None, frames=None):
 
 class _ContactCheck:
     """Optional geometric cross-check of a pair's placement: bake both halves,
-    put them in the shared scene, and measure how close they actually get."""
+    put them in the shared scene, and measure how close they actually get.
+    `track_names` is bake_v4.bake's track lookup; build() passes the rule of the
+    character export for the set (characters_export.track_names_for)."""
 
     _KEY = {
         "RSH": "rsh",
         "NTO": "nto",
         "EN1": "medium",
         "EN2": "large",
+        "EN3": "small",  # Part 1 only (characters_export.CLIP_PREFIX_P1)
         "EN4": "female",
         "BS2": "bs2",
     }
 
-    def __init__(self, binddir):
+    def __init__(self, binddir, track_names="exact"):
         self.binddir, self._bind, self._clip = binddir, {}, {}
+        self.track_names = track_names
 
     def _load(self, f):
         import numpy as np
@@ -1625,8 +2197,12 @@ class _ContactCheck:
         if f in self._clip:
             return self._clip[f]
         nm = _clip_key(os.path.basename(f))
-        key = self._KEY[nm[:3].upper()]
+        key = self._KEY.get(nm[:3].upper())
+        if key is None:
+            raise KeyError("no skeleton is known for clip prefix %s" % nm[:3].upper())
         bp = os.path.join(self.binddir, "bind_%s_file_v1.npz" % key)
+        if not os.path.exists(bp):
+            raise OSError("bind_%s_file_v1.npz is not in %s" % (key, self.binddir))
         if key not in self._bind:
             b = np.load(bp, allow_pickle=True)
             names = [str(x) for x in b["names"]]
@@ -1634,7 +2210,7 @@ class _ContactCheck:
             B4[:, :3, :3], B4[:, :3, 3] = b["Rb"], b["tb"]
             self._bind[key] = (names, B4)
         names, B4 = self._bind[key]
-        pal, _dur = bake_v4.bake(nm, 1, bind=bp, bank={nm: f})
+        pal, _dur = bake_v4.bake(nm, 1, bind=bp, bank={nm: f}, track_names=self.track_names)
         P4 = np.concatenate(
             [pal.astype(float), np.tile([0, 0, 0, 1.0], (pal.shape[0], pal.shape[1], 1, 1))], 2
         )
@@ -1649,11 +2225,19 @@ class _ContactCheck:
             for i in body
             if names[i].endswith(("Hand", "Foot", "Head", "Calf", "Forearm"))
         ]
-        W = T[:, body] + T[:, names.index("GamePivot")][:, None]
+        # world = GamePivot(t) + R(q_GamePivot(t)) * joint: the bake is GamePivot-local
+        # and unrotated (GamePivot, interact and Bip are roots of the bind), and the
+        # engine turns the body with GamePivot (UpdatePagePlayPos 0x5b56a9; data: the
+        # interact marker is world-fixed only with this rotation)
+        gp = names.index("GamePivot")
+        M = np.einsum("fab,bc->fac", P4[:, gp], B4[gp])
+        W = np.einsum("fab,fkb->fka", M[:, :3, :3], T[:, body]) + M[:, None, :3, 3]
         self._clip[f] = (W, eff)
         return self._clip[f]
 
-    def __call__(self, mfile, vfile, shift=(0.0, 0.0)):
+    def __call__(self, mfile, vfile, shift=(0.0, 0.0), yaw_deg=180.0):
+        """shift, yaw_deg: placement()'s partner_origin_shift_xz and
+        partner_yaw_deg (the turn of the partner clip; +-180 on shipped pairs)."""
         import numpy as np
 
         (A, ae), (V, ve) = self._load(mfile), self._load(vfile)
@@ -1667,7 +2251,15 @@ class _ContactCheck:
             return X[i0] * (1 - a) + X[i1] * a
 
         A = rs(A)
-        V = rs(V) * np.array([-1.0, 1.0, -1.0]) + np.array([shift[0], 0.0, shift[1]])
+        V = rs(V)
+        if abs(abs(float(yaw_deg)) - 180.0) < 1e-9:
+            V = V * np.array([-1.0, 1.0, -1.0])
+        else:  # R(partner_yaw) = _yaw_rot(-yaw)
+            c, sn = math.cos(math.radians(-yaw_deg)), math.sin(math.radians(-yaw_deg))
+            V = np.stack(
+                [c * V[..., 0] + sn * V[..., 2], V[..., 1], c * V[..., 2] - sn * V[..., 0]], -1
+            )
+        V = V + np.array([shift[0], 0.0, shift[1]])
         d1 = np.linalg.norm(A[:, ae][:, :, None] - V[:, None], axis=-1).reshape(F, -1).min(1)
         d2 = np.linalg.norm(V[:, ve][:, :, None] - A[:, None], axis=-1).reshape(F, -1).min(1)
         d = np.minimum(d1, d2)
@@ -1679,8 +2271,11 @@ class _ContactCheck:
 
 
 # ---------------------------------------------------------------------- CLI
-def write(extract_out, out_json, binds=None, log=print):
-    meta = build(extract_out, binds=binds, log=log)
+def write(extract_out, out_json, binds=None, log=print, frame=None):
+    import extract_out as _xo
+
+    _xo.require(extract_out)  # a mistyped folder is an error, not an empty table
+    meta = build(extract_out, binds=binds, log=log, frame=frame)
     with open(out_json, "w", encoding="utf-8", newline="\n") as fh:
         json.dump(meta, fh, indent=1)
     return meta
@@ -1711,6 +2306,5 @@ def main(argv):
 
 
 if __name__ == "__main__":
-    import sys
 
     sys.exit(main(sys.argv))

@@ -1,0 +1,582 @@
+{
+ "format": "watchmen-filter-exposed-properties/1",
+ "source": "KapowMultiDEDRM.exe (PC): the FilterExposedProperties handler of each class (the editor's property filter), re-read for these three classes; editor data, not game behaviour",
+ "default_rule_0x5aa639": "EnginePropertyExposed(name): true iff the name is name, id, typename, script or enabled",
+ "classes": {
+  "TriggerActionGeneral": {
+   "handler": "0x85e3e8",
+   "default_rule": "0x5aa639 for every property except m_iactiontype and _bfireaction, which keep their registered state",
+   "control": "m_iactiontype",
+   "enum": "TRIGGER_ACTION_GENERAL",
+   "always": {
+    "_ndelay": {
+     "readonly": 1
+    }
+   },
+   "by_value": {
+    "0": {
+     "name": "ENABLE",
+     "applies": {
+      "m_etarget1": {
+       "caption": "Target node"
+      }
+     }
+    },
+    "1": {
+     "name": "DISABLE",
+     "applies": {
+      "m_etarget1": {
+       "caption": "Target node"
+      }
+     }
+    },
+    "2": {
+     "name": "FLIP_ENABLED",
+     "applies": {
+      "m_etarget1": {
+       "caption": "Target node"
+      }
+     }
+    },
+    "3": {
+     "name": "SET_VISIBLE",
+     "applies": {
+      "m_etarget1": {
+       "caption": "Target node"
+      }
+     }
+    },
+    "4": {
+     "name": "SET_INVISIBLE",
+     "applies": {
+      "m_etarget1": {
+       "caption": "Target node"
+      }
+     }
+    },
+    "5": {
+     "name": "FLIP_VISIBLE",
+     "applies": {
+      "m_etarget1": {
+       "caption": "Target node"
+      }
+     }
+    },
+    "6": {
+     "name": "RESET_CONDITION",
+     "applies": {
+      "m_etarget1": {
+       "caption": "Target node"
+      },
+      "m_ttruth1": {
+       "caption": "Reset Children"
+      }
+     }
+    },
+    "7": {
+     "name": "STOP_SEQUENCER",
+     "applies": {
+      "m_etarget1": {
+       "caption": "Sequence node"
+      }
+     }
+    },
+    "8": {
+     "name": "TRIG",
+     "applies": {
+      "m_etarget1": {
+       "caption": "Node to send Trig"
+      }
+     }
+    },
+    "9": {
+     "name": "CHANGE_MOVEMENT_TYPE",
+     "applies": {
+      "m_etarget1": {
+       "caption": "Target node"
+      },
+      "m_iinteger1": {
+       "control": "autodropdown",
+       "caption": "Movement type",
+       "items": "MOVEMENT_TYPES"
+      }
+     }
+    },
+    "10": {
+     "name": "SET_GFX_NODE_DEFAULT",
+     "applies": {
+      "m_sstring1": {
+       "readonly": 1
+      }
+     }
+    },
+    "11": {
+     "name": "SET_GFX_NODE_SPECIFIC",
+     "applies": {
+      "m_sstring1": {
+       "readonly": 1
+      }
+     }
+    },
+    "12": {
+     "name": "PLAY_MOVIE",
+     "applies": {
+      "m_etarget1": {
+       "caption": "Cut scene movie"
+      }
+     }
+    },
+    "13": {
+     "name": "START_SEQUENCER",
+     "applies": {
+      "m_etarget1": {
+       "caption": "Sequence node"
+      },
+      "m_ttruth1": {
+       "caption": "Only if Not playing"
+      }
+     }
+    },
+    "14": {
+     "name": "AMOUNT_RESET",
+     "applies": {
+      "m_etarget1": {
+       "caption": "Counter node"
+      }
+     }
+    },
+    "15": {
+     "name": "AMOUNT_INCREMENT",
+     "applies": {
+      "m_etarget1": {
+       "caption": "Counter node"
+      }
+     }
+    },
+    "16": {
+     "name": "AMOUNT_DECREMENT",
+     "applies": {
+      "m_etarget1": {
+       "caption": "Counter node"
+      }
+     }
+    },
+    "17": {
+     "name": "USE_TRIGGER_FREEZE",
+     "applies": {
+      "m_etarget1": {
+       "caption": "Use trigger fragment"
+      }
+     }
+    },
+    "18": {
+     "name": "USE_TRIGGER_UNFREEZE",
+     "applies": {
+      "m_etarget1": {
+       "caption": "Use trigger fragment"
+      }
+     }
+    },
+    "19": {
+     "name": "SET_IMPASSABLE",
+     "applies": {
+      "m_etarget1": {
+       "caption": "Static AI path"
+      },
+      "m_ttruth1": {
+       "caption": "impassible"
+      }
+     }
+    },
+    "20": {
+     "name": "ACTIVATE_WAYPOINTS",
+     "applies": {
+      "m_etarget1": {
+       "caption": "Start Waypoint"
+      }
+     }
+    },
+    "21": {
+     "name": "SET_TIME_MULTIPLIER",
+     "applies": {
+      "m_nnumber1": {
+       "caption": "Timemultiplier"
+      }
+     }
+    },
+    "22": {
+     "name": "ACTIVATE_DEPTH_OF_FIELD",
+     "applies": {
+      "m_etarget1": {
+       "caption": "Ref GFX Node"
+      },
+      "m_iinteger2": {
+       "caption": "Character"
+      },
+      "m_nnumber1": {
+       "caption": "Fade Time"
+      }
+     }
+    },
+    "23": {
+     "name": "DEACTIVATE_DEPTH_OF_FIELD",
+     "applies": {
+      "m_iinteger2": {
+       "caption": "Character"
+      },
+      "m_nnumber1": {
+       "caption": "Fade Time"
+      }
+     }
+    },
+    "24": {
+     "name": "SET_SEARCHLIGHT_TARGET",
+     "applies": {
+      "m_etarget1": {
+       "caption": "Searchlight"
+      },
+      "m_etarget2": {
+       "caption": "Look at Target"
+      }
+     }
+    }
+   },
+   "other_value": {
+    "applies": {
+     "m_etarget1": {
+      "caption": "Target node"
+     }
+    }
+   },
+   "run_time": {
+    "handler": "0x85f77b ActionExecute",
+    "no_op_values": [
+     10,
+     11,
+     12
+    ],
+    "note": "10 and 11 call the empty body 0x48d561; 12 (PLAY_MOVIE) has no branch; m_sstring1 is never read at run time (the filter writes 'NOT IMPLEMENTED YET' into it for 10 and 11)"
+   }
+  },
+  "TriggerActionParticle": {
+   "handler": "0x86038f",
+   "default_rule": "0x5aa639 for every property except m_iactiontype and _bfireaction, which keep their registered state",
+   "control": "m_iactiontype",
+   "enum": "TRIGGER_ACTION_CATEGORY_PARTICLE",
+   "always": {
+    "_ndelay": {
+     "readonly": 1
+    }
+   },
+   "by_value": {
+    "0": {
+     "name": "DO_PARTICLE_EFFECT",
+     "applies": {
+      "m_etarget1": {
+       "caption": "Particle Slot"
+      },
+      "m_etarget2": {
+       "caption": "Node to Offset from"
+      },
+      "m_nnumber1": {
+       "caption": "Rotation X",
+       "min": -180.0,
+       "max": 179.0
+      },
+      "m_nnumber2": {
+       "caption": "Rotation Y",
+       "min": -180.0,
+       "max": 179.0
+      },
+      "m_nnumber3": {
+       "caption": "Rotation Z",
+       "min": -180.0,
+       "max": 179.0
+      },
+      "m_ttruth1": {
+       "caption": "Use Activator Pos"
+      },
+      "m_vvector1": {
+       "caption": "Particle Position"
+      }
+     }
+    },
+    "1": {
+     "name": "START_PARTICLE",
+     "applies": {
+      "m_etarget1": {
+       "caption": "Particle Emitter"
+      }
+     }
+    },
+    "2": {
+     "name": "STOP_PARTICLE",
+     "applies": {
+      "m_etarget1": {
+       "caption": "Particle Emitter"
+      }
+     }
+    }
+   },
+   "variants_of_0": {
+    "m_ttruth1 true": {
+     "m_etarget1": {
+      "caption": "Particle Slot"
+     },
+     "m_nnumber1": {
+      "caption": "Rotation X offset",
+      "min": -180.0,
+      "max": 179.0
+     },
+     "m_nnumber2": {
+      "caption": "Rotation Y offset",
+      "min": -180.0,
+      "max": 179.0
+     },
+     "m_nnumber3": {
+      "caption": "Rotation Z offset",
+      "min": -180.0,
+      "max": 179.0
+     },
+     "m_ttruth1": {
+      "caption": "Use Activator Pos"
+     },
+     "m_vvector1": {
+      "caption": "Pos offset from Activator"
+     }
+    },
+    "m_ttruth1 false, m_etarget2 set": {
+     "m_etarget1": {
+      "caption": "Particle Slot"
+     },
+     "m_etarget2": {
+      "caption": "Node to Offset from"
+     },
+     "m_nnumber1": {
+      "caption": "Rotation X offset",
+      "min": -180.0,
+      "max": 179.0
+     },
+     "m_nnumber2": {
+      "caption": "Rotation Y offset",
+      "min": -180.0,
+      "max": 179.0
+     },
+     "m_nnumber3": {
+      "caption": "Rotation Z offset",
+      "min": -180.0,
+      "max": 179.0
+     },
+     "m_ttruth1": {
+      "caption": "Use Activator Pos"
+     },
+     "m_vvector1": {
+      "caption": "Position offset"
+     }
+    }
+   },
+   "never_applies": [
+    "m_etarget3",
+    "m_iinteger1",
+    "m_nnumber4",
+    "m_nnumber5"
+   ],
+   "run_time": {
+    "handler": "0x861445 ActionExecute, 0x853887 DoParticleEffect, 0x853cdf, 0x853d05",
+    "note": "the members each action reads at run time are exactly the 'applies' sets"
+   }
+  },
+  "TriggerUseFragment": {
+   "handler": "0x873568",
+   "default_rule": "enabled = propertyinstance+0x10 != 0 (0x873568); what +0x10 holds is not established",
+   "control": "m_iusetype of the child node named 'TriggerUse' (0x86ecf8 FindTrigger: member +0x14 of a TriggerUse, member +0 of a TriggerConditionVisibility); -1 when there is none",
+   "enum": "USE_TYPES",
+   "by_value": {
+    "-1": {
+     "name": "NONE",
+     "applies": {
+      "m_tisfrozen": {},
+      "m_tallowincombat": {},
+      "m_tspecialcombathandling": {},
+      "m_iactivatortype": {},
+      "m_eactivatedaction": {}
+     }
+    },
+    "0": {
+     "name": "PICK_LOCK",
+     "applies": {
+      "m_tisfrozen": {},
+      "m_tallowincombat": {},
+      "m_tspecialcombathandling": {},
+      "m_ilocksegmentcount": {},
+      "m_eactivatedaction": {
+       "caption": "Unlock action"
+      },
+      "m_estartaction": {},
+      "_ipinheight<k>": {
+       "condition": "m_ilocksegmentcount >= k, k = 1..10"
+      }
+     }
+    },
+    "1": {
+     "name": "SQUEEZE_UNDER",
+     "applies": {
+      "m_tisfrozen": {},
+      "m_tallowincombat": {},
+      "m_tspecialcombathandling": {},
+      "m_iactivatortype": {},
+      "m_eactivatedaction": {}
+     }
+    },
+    "2": {
+     "name": "JUMP_DOWN",
+     "applies": {
+      "m_tisfrozen": {},
+      "m_tallowincombat": {},
+      "m_tspecialcombathandling": {},
+      "m_iactivatortype": {},
+      "m_eactivatedaction": {}
+     }
+    },
+    "3": {
+     "name": "CLIMB",
+     "applies": {
+      "m_tisfrozen": {},
+      "m_tallowincombat": {},
+      "m_tspecialcombathandling": {},
+      "m_iactivatortype": {},
+      "m_eactivatedaction": {}
+     }
+    },
+    "4": {
+     "name": "PULL",
+     "applies": {
+      "m_tisfrozen": {},
+      "m_tallowincombat": {},
+      "m_tspecialcombathandling": {},
+      "m_iactivatortype": {},
+      "m_eactivatedaction": {}
+     }
+    },
+    "5": {
+     "name": "TURN_VALVE",
+     "applies": {
+      "m_tisfrozen": {},
+      "m_tallowincombat": {},
+      "m_tspecialcombathandling": {},
+      "m_iactivatortype": {},
+      "m_eactivatedaction": {},
+      "m_ereleasedaction": {},
+      "m_epartnertriggerfragment": {},
+      "m_esequence": {}
+     }
+    },
+    "6": {
+     "name": "GRAPPLING",
+     "applies": {
+      "m_tisfrozen": {},
+      "m_tallowincombat": {},
+      "m_tspecialcombathandling": {},
+      "m_egrappleendpivot": {}
+     }
+    },
+    "7": {
+     "name": "PICK_UP",
+     "applies": {
+      "m_tisfrozen": {},
+      "m_tallowincombat": {},
+      "m_tspecialcombathandling": {},
+      "m_iactivatortype": {},
+      "m_eactivatedaction": {}
+     }
+    },
+    "8": {
+     "name": "LIFT",
+     "applies": {
+      "m_tisfrozen": {},
+      "m_tallowincombat": {},
+      "m_tspecialcombathandling": {},
+      "m_eactivatedaction": {}
+     }
+    },
+    "9": {
+     "name": "PULL_LEVER",
+     "applies": {
+      "m_tisfrozen": {},
+      "m_tallowincombat": {},
+      "m_tspecialcombathandling": {},
+      "m_iactivatortype": {},
+      "m_eactivatedaction": {},
+      "m_ereleasedaction": {},
+      "m_epartnertriggerfragment": {},
+      "m_esequence": {}
+     }
+    },
+    "10": {
+     "name": "PULL_SWITCH",
+     "applies": {
+      "m_tisfrozen": {},
+      "m_tallowincombat": {},
+      "m_tspecialcombathandling": {},
+      "m_iactivatortype": {},
+      "m_eactivatedaction": {}
+     }
+    },
+    "11": {
+     "name": "JUMP",
+     "applies": {
+      "m_tisfrozen": {},
+      "m_tallowincombat": {},
+      "m_tspecialcombathandling": {},
+      "m_eactivatedaction": {}
+     }
+    },
+    "12": {
+     "name": "GRAPPLING_DOWN",
+     "applies": {
+      "m_tisfrozen": {},
+      "m_tallowincombat": {},
+      "m_tspecialcombathandling": {},
+      "m_egrappleendpivot": {}
+     }
+    },
+    "13": {
+     "name": "SLIDE_DOOR_LEFT",
+     "applies": {
+      "m_tisfrozen": {},
+      "m_tallowincombat": {},
+      "m_tspecialcombathandling": {},
+      "m_iactivatortype": {},
+      "m_eactivatedaction": {},
+      "m_ereleasedaction": {},
+      "m_epartnertriggerfragment": {},
+      "m_esequence": {}
+     }
+    },
+    "14": {
+     "name": "SLIDE_DOOR_RIGHT",
+     "applies": {
+      "m_tisfrozen": {},
+      "m_tallowincombat": {},
+      "m_tspecialcombathandling": {},
+      "m_iactivatortype": {},
+      "m_eactivatedaction": {},
+      "m_ereleasedaction": {},
+      "m_epartnertriggerfragment": {},
+      "m_esequence": {}
+     }
+    },
+    "15": {
+     "name": "FORCE_OPEN_DOOR",
+     "applies": {
+      "m_tisfrozen": {},
+      "m_tallowincombat": {},
+      "m_tspecialcombathandling": {},
+      "m_iactivatortype": {},
+      "m_eactivatedaction": {}
+     }
+    }
+   }
+  }
+ }
+}

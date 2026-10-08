@@ -120,7 +120,7 @@ start = r_0                                                             for p <=
 
 Remote values need not increase (shipped: `(0,1.0),(1.0,0)` maps p to 1 - p).
 
-Not established: behaviour with "Sync PlayPos?" set and no marker filled (the lists are empty and `R[0]` is read anyway).
+With "Sync PlayPos?" set and marker 1 < 0 the lists are empty (the markers are nested: k is used only if 1..k−1 are ≥ 0), `m_nsupersyncmin` / `max` are never written, and the value `TransitionPlayPos` reads is not list data. Not present in shipped data; value not established.
 It does not occur in shipped data: all 145 sync transitions in Part 2 PC have at least two markers.
 
 ## 4. How a transition picks the target's start play position — read

@@ -26,6 +26,12 @@ if _D not in sys.path:
 from parse_model_nodes import parse
 
 
+def _read_bytes(path):
+    """The file's bytes; the handle is closed before returning."""
+    with open(path, "rb") as fh:
+        return fh.read()
+
+
 def qmul(a, b):
     ax, ay, az, aw = a
     bx, by, bz, bw = b
@@ -91,7 +97,7 @@ def fk_conj(names, pos, quat, parent):
 def build(header_path, template_npz, out_npz):
     """template_npz=None -> engine palette order = file bone list rotated by one
     (palette[k] = bones[(k-1) % N]; verified female/gimp)."""
-    mb = open(header_path, "rb").read()
+    mb = _read_bytes(header_path)
     names, pos, quat, parent = parse(mb)
     pos[0] = 0
     quat[0] = np.array([0, 0, 0, 1.0])

@@ -443,7 +443,11 @@ def test_mesh_vertex_attributes_follow_the_model_buffers(monkeypatch):
     assert at["has_color"] == [True]
     assert np.array_equal(at["normals"], np.tile([0, 0, 1], (4, 1)))
     assert at["colors"].dtype == np.uint8 and at["colors"].tolist() == [[10, 20, 30, 40]] * 4
-    assert at["tangents"].tolist() == [[1.0, 0.0, 0.0, -1.0]] * 4
+    # w = -sign(dot(cross(n, t), b)): the handedness for the green-inverted glTF
+    # normal texture (1.3.0 had -1 here; the sign was settled by rendering against
+    # the engine's pixel math)
+    assert at["tangents"].tolist() == [[1.0, 0.0, 0.0, 1.0]] * 4
+    assert at["has_alpha"] == [False]
     assert rig_glb.mesh_vertex_attributes(h, s, [(0, 3, 0, 1, 56)]) is None  # does not line up
     assert rig_glb.mesh_vertex_attributes(h[:40], s, subs) is None  # not a header-driven model
     # no authored colours -> the buffer only holds the writer's default
@@ -454,6 +458,7 @@ def test_mesh_vertex_attributes_follow_the_model_buffers(monkeypatch):
     assert rig_glb.mesh_vertex_attributes(h, s, subs)["colors"] is None
 
 
+@pytest.mark.usefixtures("engine_frame")  # pins the engine numbers; true frame: test_frame.py
 def test_glb_gets_normal_tangent_and_colour_as_valid_accessors(tmp_path):
     h, s = _skinned_model()
     at = rig_glb.mesh_vertex_attributes(h, s, [(0, 4, 0, 2, 56)])
@@ -465,11 +470,14 @@ def test_glb_gets_normal_tangent_and_colour_as_valid_accessors(tmp_path):
     c = c[A["COLOR_0"]]
     assert (n["type"], n["componentType"], n["count"]) == ("VEC3", 5126, 4)
     assert (t["type"], t["componentType"], t["count"]) == ("VEC4", 5126, 4)
-    assert (c["type"], c["componentType"], c.get("normalized")) == ("VEC4", 5121, True)
+    # COLOR_0 is float, rgb sRGB -> linear (1.3.0 wrote normalized bytes)
+    assert (c["type"], c["componentType"], c.get("normalized")) == ("VEC4", 5126, None)
     assert "normalized" not in n and "normalized" not in t
     T = np.asarray(g.accessor(A["TANGENT"]), float)
-    assert np.allclose(np.linalg.norm(T[:, :3], axis=1), 1.0) and set(T[:, 3]) == {-1.0}
-    assert np.asarray(g.accessor(A["COLOR_0"])).tolist() == [[10, 20, 30, 40]] * 4
+    assert np.allclose(np.linalg.norm(T[:, :3], axis=1), 1.0) and set(T[:, 3]) == {1.0}
+    C = np.asarray(g.accessor(A["COLOR_0"]), float)
+    assert np.allclose(C, rig_glb.linear_vertex_colors(np.array([[10, 20, 30, 40]] * 4, np.uint8)))
+    assert np.allclose(C[0, 3], 40 / 255.0) and C[0, 0] < 10 / 255.0
     for v in g.j["bufferViews"]:
         assert v["byteOffset"] % 4 == 0
 
@@ -511,6 +519,7 @@ def test_malformed_attribute_data_is_left_out_not_repaired(tmp_path):
     assert rig_glb.unit_normals(np.array([[np.nan, 0, 1.0]])) is None
 
 
+@pytest.mark.usefixtures("engine_frame")  # pins the engine numbers; true frame: test_frame.py
 def test_winding_follows_the_normals_only_when_normals_are_written(tmp_path):
     h, s = _skinned_model()
     at = rig_glb.mesh_vertex_attributes(h, s, [(0, 4, 0, 2, 56)])
@@ -529,6 +538,7 @@ def test_winding_follows_the_normals_only_when_normals_are_written(tmp_path):
     assert not rig_glb.winding_reversed(P, at["normals"], [(0, 1, 2)])
 
 
+@pytest.mark.usefixtures("engine_frame")  # pins the engine numbers; true frame: test_frame.py
 def test_tangents_are_written_as_stored_unless_orthogonalised(tmp_path):
     n = np.tile(np.array([0, 0, 1.0], np.float32), (4, 1))
     skew = np.tile(np.array([0.8, 0.0, 0.6, 1.0], np.float32), (4, 1))  # |n.t| = 0.6, as shipped
@@ -828,7 +838,8 @@ def test_jiggle_cache_directory_names_the_model_and_its_constants(monkeypatch):
     default = ce.jiggle_cache_dir("/out/_bake/female")
     pinned = ce.jiggle_cache_dir("/out/_bake/female", "pinned")
     pivot = ce.jiggle_cache_dir("/out/_bake/female", "pivot")
-    assert default == pinned != pivot
+    assert default == ce.jiggle_cache_dir("/out/_bake/female", "solver")  # the default model
+    assert len({default, pinned, pivot}) == 3
     assert pinned.startswith("/out/_bake/female_j_pinned-engine-")
     assert pivot.startswith("/out/_bake/female_j_pivot-capture-")
     assert "/out/_bake/female_j" not in (pinned, pivot)  # the 1.2.0 directory is never read
@@ -918,7 +929,7 @@ def test_option_values_are_range_checked():
         with pytest.raises(argparse.ArgumentTypeError):
             we._model_lod_arg(bad)
     assert we._language_arg("5") == 5
-    for bad in ("6", "-1", "uk"):
+    for bad in ("6", "-1", "xx"):
         with pytest.raises(argparse.ArgumentTypeError):
             we._language_arg(bad)
     h, s = _skinned_model()

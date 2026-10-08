@@ -8,7 +8,7 @@ fragments).  Bakes are cached per skeleton in <outdir>/_bake/<key>/ so the
 export is resumable and variants of the same skeleton share the work.
 """
 
-import os, sys, json, glob
+import os, sys, glob
 import numpy as np
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -75,18 +75,142 @@ ENEMY_FRAGS_P1 = [
 CLIP_PREFIX_P1 = {"large": ("EN1", "EN2"), "small": ("EN1", "EN3")}
 
 
+def _read_bytes(path):
+    """The file's bytes; the handle is closed before returning."""
+    with open(path, "rb") as fh:
+        return fh.read()
+
+
+def _find_fragment(root, stem):
+    import kapow_json
+
+    return kapow_json.find_fragment(root, stem)
+
+
+def _load_fragment(path):
+    """Fragment JSON, parsed from the binary `.fragment` when it is there (a
+    `.fragment.json` left by an older extractor is never preferred)."""
+    import kapow_json
+
+    return kapow_json.load_fragment(path)
+
+
+def bind_mismatches(extract_out):
+    """{bind key: reason} for every bind in <extract_out>/binds that was NOT built
+    from this extract: its skeleton model is on disk and gives other bones or
+    another rest pose, or the extract has no such skeleton at all (a Part 2 bind in
+    a Part 1 extract).  The test reads the content -- no path or folder name."""
+    import contextlib, io, shutil, tempfile
+    import build_bind_file
+    import watchmenlib as wl
+
+    bdir = os.path.join(extract_out, "binds")
+    have = {
+        k: os.path.join(bdir, "bind_%s_file_v1.npz" % k)
+        for k in wl._SKEL_ASSETS
+        if os.path.exists(os.path.join(bdir, "bind_%s_file_v1.npz" % k))
+    }
+    if not have:
+        return {}
+    midx = _model_index(extract_out)
+    out = {}
+    tmp = tempfile.mkdtemp(prefix="wm_bindcheck_")
+    try:
+        for k, p in sorted(have.items()):
+            base = midx.get(os.path.basename(wl._SKEL_ASSETS[k])[:-6])
+            if not base or not os.path.exists(base + ".model"):
+                if midx:
+                    out[k] = "the extract has no %s" % os.path.basename(wl._SKEL_ASSETS[k])
+                continue
+            ref = os.path.join(tmp, k + ".npz")
+            try:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    build_bind_file.build(base + ".model", None, ref)
+                a, b = np.load(p, allow_pickle=True), np.load(ref, allow_pickle=True)
+            except (Exception, SystemExit):
+                continue  # not checkable: say nothing rather than guess
+            if [str(x) for x in a["names"]] != [str(x) for x in b["names"]]:
+                out[k] = "other bone list than %s" % os.path.basename(base + ".model")
+                continue
+            dev = max(
+                float(np.abs(a["tb"] - b["tb"]).max()), float(np.abs(a["Rb"] - b["Rb"]).max())
+            )
+            if dev > 1e-4:
+                out[k] = "rest pose differs from %s by up to %.4g" % (
+                    os.path.basename(base + ".model"),
+                    dev,
+                )
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    return out
+
+
+#: why a mesh piece has no NORMAL / TANGENT / COLOR_0 -- the case the log line of
+#: the character names (variant_glb.buffer_vertex_attrs returns None)
+VERTEX_ATTRS_REASON = (
+    "the model header does not locate the vertex buffer of these pieces; viewers "
+    "compute flat or smooth normals"
+)
+#: why a console piece has NORMAL / TANGENT but no COLOR_0 (buffer_vertex_attrs:
+#: "color_not_decoded")
+VERTEX_COLOUR_REASON = (
+    "console pieces whose colour byte order is not known: Xbox 360 and PS3 store the "
+    "colour bytes in a different order, the console of the source is not known (no "
+    "derived_x360 / derived_ps3 path, WATCHMEN_CONSOLE not set) and the model's data "
+    "does not show which; NORMAL and TANGENT are written"
+)
+
+
+def not_decoded_extras(part_lists, ragdoll_why=None, dropped=None, attrs_wanted=True):
+    """asset.extras.watchmen.not_decoded of a character GLB: what the game data
+    holds and this export does NOT -- so that a gap is stated, never silent.  None
+    when nothing is missing (every PC Part 2 character).
+      vertex_attributes  pieces without NORMAL / TANGENT / COLOR_0 (the header
+                         does not locate the buffer:
+                         variant_glb.buffer_vertex_attrs)
+      vertex_colour      console pieces of a model whose colour byte order is not
+                         known: NORMAL / TANGENT written, COLOR_0 (and the
+                         vertex-alpha blend) not
+      ragdoll            why there is no ragdoll rig / .ragdoll.json
+      pieces             mesh pieces no loader could decode (char_lib.note_dropped)"""
+    out = {}
+    n = k = c = 0
+    for parts in part_lists:
+        for pt in parts or ():
+            n += 1
+            at = getattr(pt, "attrs", None)
+            k += at is not None
+            c += bool(at is not None and at.get("color_not_decoded"))
+    if attrs_wanted and k < n:
+        out["vertex_attributes"] = {
+            "missing": ["NORMAL", "TANGENT", "COLOR_0"],
+            "pieces": n,
+            "pieces_without": n - k,
+            "reason": VERTEX_ATTRS_REASON,
+        }
+    if attrs_wanted and c:
+        out["vertex_colour"] = {
+            "missing": ["COLOR_0"],
+            "pieces": n,
+            "pieces_without": c,
+            "reason": VERTEX_COLOUR_REASON,
+        }
+    if ragdoll_why:
+        out["ragdoll"] = {"reason": ragdoll_why}
+    if dropped:
+        out["pieces"] = list(dropped)
+    return {"not_decoded": out} if out else None
+
+
 def _is_part1(extract_out):
-    return os.path.exists(
-        os.path.join(
-            extract_out,
-            "extracted",
-            "TNT",
-            "Production",
-            "Fragments",
-            "Enemy",
-            "Biker.fragment.json",
-        )
-    )
+    d = os.path.join(extract_out, "extracted", "TNT", "Production", "Fragments", "Enemy")
+    return any(os.path.exists(os.path.join(d, "Biker.fragment" + e)) for e in ("", ".json"))
+
+
+def track_names_for(extract_out):
+    """Part 1 keeps the prefix-insensitive track lookup (not established for Part 1; see
+    bake_v4)."""
+    return "prefix" if _is_part1(extract_out) else "exact"
 
 
 # RESTORATION overrides (material -> texture name), applied per variant.
@@ -121,6 +245,9 @@ HEAD_SWAPS = {
 
 # char -> WeaponDB collections (engine: WeaponDB.fragment CharacterModelCollection
 # groups per enemy class; players disarm+use any common weapon -> '*').
+# For the enemies this is only the FALLBACK: char_weapon_colls reads the two
+# collections from the character's own CharacterDef.  (The table gave ThugBig no
+# two-handed collection; its CharacterDef names ThugsWeapons_2H.)
 # Attach rule (decomp part_0023 + Bs2CharVisual): the engine BoneAttacher snaps
 # the weapon model (grip authored at origin) onto the 'Attach RHand' bone;
 # TwilightLady's TW_weapon is data-driven instead (HandAttach node:
@@ -138,20 +265,60 @@ CHAR_WEAPON_COLLS = {
 }
 ATTACH_BONE = "Attach RHand"
 
-TEX_OVERRIDES = {
-    ("Dominatrices", "Dominatrix_5"): {"FemaleSkinBody_White": "FemaleSkinBody_Black"},
-    ("Dominatrices", "Dominatrix_7"): {"FemaleSkinBody_White": "FemaleSkinBody_Black"},
-    ("Dominatrices", "Dominatrix_10"): {"FemaleSkinBody_White": "FemaleSkinBody_Black"},
-    # Dominatrix_3 reconstruction: dark dominatrix body skin (pre-release).
-    ("Dominatrices", "Dominatrix_3"): {"FemaleSkinBody_White": "FemaleSkinBody_Dominatrix1"},
-}
+_WEAPON_COLLS = {}
+
+
+def char_weapon_colls(extract_out, cname):
+    """The weapon collections of a character: "*" for a player, else the names
+    its CharacterDef points at -- `m_emodelcollbash1h` / `m_emodelcollbash2h`,
+    the two collections CharacterRoot.command_set_weapon 0x694378 draws from --
+    resolved in WeaponDB.fragment.  Falls back to CHAR_WEAPON_COLLS when the
+    fragment does not name them (an extract whose fragments cannot be parsed)."""
+    table = CHAR_WEAPON_COLLS.get(cname)
+    if table == "*":
+        return table
+    key = (os.path.abspath(extract_out), cname)
+    if key not in _WEAPON_COLLS:
+        got = None
+        fragroot = os.path.join(extract_out, "extracted", "TNT", "Production", "Fragments")
+        try:
+            wf, cf = _find_fragment(fragroot, "WeaponDB"), _find_fragment(fragroot, cname)
+            if wf and cf:
+                names = {}
+                for n in _load_fragment(wf).get("nodes_full") or []:
+                    for rec in n.get("props") or []:
+                        if len(rec) == 3 and rec[0] == "name" and isinstance(rec[2], str):
+                            names[n.get("id")] = rec[2]
+                for n in _load_fragment(cf).get("nodes_full") or []:
+                    if not str(n.get("type") or "").startswith("CharacterDef"):
+                        continue
+                    p = {r[0]: r[2] for r in n.get("props") or [] if len(r) == 3}
+                    if "m_emodelcollbash1h" not in p and "m_emodelcollbash2h" not in p:
+                        continue
+                    got = []
+                    for k in ("m_emodelcollbash1h", "m_emodelcollbash2h"):
+                        x = p[k].get("xref") if isinstance(p.get(k), dict) else None
+                        if x and names.get(x[-1]) and names[x[-1]] not in got:
+                            got.append(names[x[-1]])
+                    break
+        except (OSError, ValueError, KeyError, IndexError):
+            got = None
+        _WEAPON_COLLS[key] = tuple(got) if got is not None else table
+    return _WEAPON_COLLS[key]
+
+
+# Whole-texture replacements by material name.  Empty since the variants' texture
+# SHEETS are read from the fragment (variant_sheets): the dark skin of Dominatrix_5 /
+# 7 / 10 is the "Black" sheet of FemaleSkinBody_White their nodes name, and the
+# reconstructed Dominatrix_3 wears its "Dominatrix1" sheet (SYNTH_VARIANTS).
+TEX_OVERRIDES = {}
 
 # --- Synthetic (reconstructed) variants (2026-07-16) ---------------------------
 # The Dominatrices fragment ships variants 1,2,4..10 -- there is NO Dominatrix_3
 # in the shipped data. Pre-release screenshots show a _3 identical to Dominatrix_2
 # but with Twilight Lady's hair (the TwilightLadyHair submesh of BS2_WithoutWeapon,
 # no standalone hair model exists) tinted the FimaleGimpMask brown, and the dark
-# FemaleSkinBody_Dominatrix1 body skin (via TEX_OVERRIDES above). discover() clones
+# FemaleSkinBody_Dominatrix1 body skin (the "Dominatrix1" sheet). discover() clones
 # the base variant (minus its own hair mesh); export() grafts the hair submesh +
 # fabricated brown texture. Disable with WATCHMEN_NO_SYNTH=1.
 SYNTH_VARIANTS = {
@@ -161,8 +328,178 @@ SYNTH_VARIANTS = {
         hair_from=("BS2_WithoutWeapon", "TwilightLadyHair"),
         hair_tint_from="FimaleGimpMask1",
         hair_mat="TwilightLadyHair_Brown",
+        sheets={"/art/characters/dominatrix/textures/FemaleSkinBody_White.bmp": "Dominatrix1"},
     ),
 }
+
+
+def is_reconstruction(stem, vname):
+    """True for a variant the game data does not contain (SYNTH_VARIANTS)."""
+    return (stem, vname) in SYNTH_VARIANTS
+
+
+def reconstruction_extras(stem, vname):
+    """asset.extras.watchmen.reconstruction of such a variant's GLB, else None."""
+    sv = SYNTH_VARIANTS.get((stem, vname))
+    if not sv:
+        return None
+    return {
+        "reconstruction": {
+            "shipped": False,
+            "base": sv["base"],
+            "note": "not a variant of the shipped game: %s.fragment has no node of this "
+            "name.  Rebuilt by the toolkit from %s (hair taken from %s, tinted; body skin "
+            "sheet %s) after pre-release screenshots.  WATCHMEN_NO_SYNTH=1 leaves it out."
+            % (
+                stem,
+                sv["base"],
+                "/".join(sv.get("hair_from") or ()),
+                ", ".join(sorted((sv.get("sheets") or {}).values())) or "-",
+            ),
+        }
+    }
+
+
+_FRAG_NODES = {}
+
+
+def variant_nodes(extract_out, stem):
+    """The model nodes of an enemy fragment, in the engine's child-list order ->
+    [{"name", "models": [asset path or ""], "sheets": textureSheetsDescription}].
+
+    One fragment holds several nodes of the same name (18 `Heavy`, 11
+    `KnotTop_Large` ...): each is one outfit -- its own model list and its own
+    texture sheets.  The game hands them out in turn (CharacterModelCollection.
+    command_get_model 0x66ca15: the member used least so far, the first on a tie)."""
+    key = (os.path.abspath(extract_out), stem)
+    if key not in _FRAG_NODES:
+        fragroot = os.path.join(extract_out, "extracted", "TNT", "Production", "Fragments")
+        hit = _find_fragment(fragroot, stem)
+        nodes = []
+        if hit:
+            try:
+                d = _load_fragment(hit)
+            except (OSError, ValueError):
+                d = {}
+            for n in d.get("nodes_full") or []:
+                p = {}
+                for rec in n.get("props") or []:
+                    if len(rec) == 3:
+                        p[rec[0]] = rec[2]
+                if isinstance(p.get("modelNames"), list) and p["modelNames"]:
+                    desc = p.get("textureSheetsDescription")
+                    so = p.get("siblingOrder")
+                    nodes.append(
+                        {
+                            "name": p.get("name") or stem,
+                            "models": [str(m or "") for m in p["modelNames"]],
+                            "sheets": desc if isinstance(desc, str) else "",
+                            "sibling_order": so if isinstance(so, int) else 0,
+                        }
+                    )
+        # the engine's child list is sorted by siblingOrder (Node insert 0x48f556);
+        # the sort is stable, so equal orders keep the file order
+        nodes.sort(key=lambda n: n["sibling_order"])
+        _FRAG_NODES[key] = nodes
+    return _FRAG_NODES[key]
+
+
+def sheet_records(description):
+    """textureSheetsDescription -> [(model slot, pivot, lod, texture path, sheet id)].
+    "2," then "slot,pivot,lod,<path>,<id>," per record (version 1: "1," and
+    "slot,pivot,<path>,<id>,"; parsers 0x4a56c2 / 0x4a544a, getter 0x49f95e)."""
+    tok = str(description or "").split(",")
+    n = 5 if tok[0].strip() == "2" else 4 if tok[0].strip() == "1" else 0
+    out = []
+    for i in range(1, len(tok) - n + 1, n) if n else ():
+        try:
+            lod = int(tok[i + 2]) if n == 5 else 0
+            out.append((int(tok[i]), int(tok[i + 1]), lod, tok[i + n - 2], int(tok[i + n - 1])))
+        except ValueError:
+            break
+    return out
+
+
+_TEX_SHEETS = {}
+
+
+def _asset_file(extract_out, rel):
+    """<extract_out>/extracted/<rel parts>: the exact spelling when it exists, else the
+    file whose parts match without regard to letter case (the engine's lookup), else the
+    exact path (which then does not exist)."""
+    import anim_state_machine
+
+    exact = os.path.join(extract_out, "extracted", *rel)
+    if os.path.exists(exact) or not rel:
+        return exact
+    return (
+        anim_state_machine._find_ci(os.path.join(extract_out, "extracted"), "/".join(rel)) or exact
+    )
+
+
+def _texture_sheets(extract_out, path):
+    """watchmen_extract.texture_sheets of the Texture asset `path` ([] if missing)."""
+    import watchmen_extract as we
+
+    key = (os.path.abspath(extract_out), we.texture_key(path))
+    if key not in _TEX_SHEETS:
+        rel = [x for x in path.replace("\\", "/").split("/") if x not in ("", ".", "..")]
+        got = []
+        try:
+            with open(_asset_file(extract_out, rel), "rb") as fh:
+                hdr = fh.read()
+            got = we.texture_sheets(hdr, "<") or we.texture_sheets(hdr, ">")
+        except OSError:
+            pass
+        _TEX_SHEETS[key] = got
+    return _TEX_SHEETS[key]
+
+
+def variant_sheets(extract_out, stem, vname, node=None):
+    """Texture sheets the variant's fragment nodes select ->
+    {model base name (lower): {texture key: sheet name}}, non-first sheets only.
+
+    A record applies to the meshes of its model slot whose texture is the record's
+    path, and picks the sheet with that uniqueID; an unknown id, or no record,
+    leaves the texture's first sheet (BaseModel 0x4a56c2, sheet lookup 0x524caf).
+    The last record for a (slot, texture) wins, as in the engine's loop.
+    node: index among the nodes named `vname` -- that outfit only.  None: every
+    model takes its sheets from the first node (file order) that lists it, which
+    is what a GLB holding all the variant's models needs."""
+    import watchmen_extract as we
+
+    nodes = [n for n in variant_nodes(extract_out, stem) if n["name"] == vname]
+    if node is not None:
+        nodes = nodes[node : node + 1]
+    out, seen = {}, set()
+    for n in nodes:
+        per = {}
+        for slot, _pivot, _lod, path, sid in sheet_records(n["sheets"]):
+            if not 0 <= slot < len(n["models"]) or not n["models"][slot]:
+                continue
+            mdl = os.path.basename(n["models"][slot].replace("\\", "/"))
+            mdl = mdl.rsplit(".", 1)[0].lower()
+            per.setdefault(mdl, {})[we.texture_key(path)] = (path, sid)
+        for m in n["models"]:
+            mdl = os.path.basename(m.replace("\\", "/")).rsplit(".", 1)[0].lower()
+            if not mdl or mdl in seen:
+                continue
+            seen.add(mdl)
+            for tkey, (path, sid) in sorted(per.get(mdl, {}).items()):
+                sheets = _texture_sheets(extract_out, path)
+                sh = we.select_sheet(sheets, sid)
+                if sheets and sh is not sheets[0] and sh.get("name"):
+                    out.setdefault(mdl, {})[tkey] = sh["name"]
+    sv = SYNTH_VARIANTS.get((stem, vname))
+    if sv and sv.get("sheets") and not os.environ.get("WATCHMEN_NO_RESTORE"):
+        base = [n for n in variant_nodes(extract_out, stem) if n["name"] == sv["base"]]
+        for n in base[:1]:
+            for m in n["models"]:
+                mdl = os.path.basename(m.replace("\\", "/")).rsplit(".", 1)[0].lower()
+                for path, name in sv["sheets"].items():
+                    if mdl:
+                        out.setdefault(mdl, {})[we.texture_key(path)] = name
+    return out
 
 
 def _brown_hair_layers(texroots, hair_mat, tint_mat):
@@ -206,10 +543,23 @@ def _brown_hair_layers(texroots, hair_mat, tint_mat):
 
 
 def _model_index(extract_out):
+    """model base name -> base path.  Two models may share a name (AirVent_01): the
+    one whose path sorts first is taken, whatever order the file system lists in."""
     idx = {}
-    for p in glob.glob(os.path.join(extract_out, "extracted", "**", "*.model"), recursive=True):
+    hits = glob.glob(os.path.join(extract_out, "extracted", "**", "*.model"), recursive=True)
+    for p in sorted(hits, key=lambda q: (q.replace(os.sep, "/").lower(), q)):
         idx.setdefault(os.path.basename(p)[:-6], p[:-6])
     return idx
+
+
+def _model_ref_base(extract_out, ref, midx):
+    """Base path of a fragment's model reference: the asset path itself
+    ('/art/characters/.../X.model') when that file was extracted, else by name."""
+    rel = [x for x in ref.replace("\\", "/").split("/") if x not in ("", ".", "..")]
+    base = os.path.join(extract_out, "extracted", *rel)[:-6]
+    if rel and rel[-1].lower().endswith(".model") and os.path.exists(base + ".model"):
+        return base
+    return midx.get(rel[-1][:-6] if rel else "")
 
 
 def discover(extract_out):
@@ -221,11 +571,11 @@ def discover(extract_out):
     if _is_part1(extract_out):
         stems += ENEMY_FRAGS_P1
     for stem in stems:
-        hits = glob.glob(os.path.join(fragroot, "**", stem + ".fragment.json"), recursive=True)
-        if not hits:
+        hit = _find_fragment(fragroot, stem)
+        if not hit:
             print("  ! fragment %s not found" % stem)
             continue
-        d = json.load(open(hits[0]))
+        d = _load_fragment(hit)
         vs = {}
         for i in d.get("instances", []):
             refs = i.get("model_ref")
@@ -235,6 +585,7 @@ def discover(extract_out):
             if name == "(preamble)":
                 name = stem
             basenames = [r.rsplit("/", 1)[-1].replace(".model", "") for r in refs]
+            refbase = {b: _model_ref_base(extract_out, r, midx) for b, r in zip(basenames, refs)}
             skel = [b for b in basenames if b in SKEL_BIND]
             meshes = [b for b in basenames if b not in SKEL_BIND]
             # runtime head selection: keep ONE head, prefer *_NoSKL (non-NoSKL
@@ -256,8 +607,8 @@ def discover(extract_out):
                         break
                 if key is None:
                     continue
-            models = [midx[b] for b in meshes if b in midx]
-            missing = [b for b in meshes if b not in midx]
+            models = [refbase[b] for b in meshes if refbase.get(b)]
+            missing = [b for b in meshes if not refbase.get(b)]
             if missing:
                 print("  ! %s/%s: missing meshes %s" % (stem, name, missing))
             if models:
@@ -307,7 +658,18 @@ def ensure_bind(key, extract_out, naz="game.naz"):
 
     # extract_dir lets ensure_binds build from the skeleton .model headers
     # already on disk -- a completed extract needs no naz to make binds.
-    return wl.ensure_binds(naz, bdir, extract_dir=extract_out)[key]
+    try:
+        got = wl.ensure_binds(naz, bdir, extract_dir=extract_out)
+    except RuntimeError:  # no skeleton at all in the extract and the archive
+        got = {}
+    if key not in got:
+        raise FileNotFoundError(
+            "no bind for skeleton %r: its skeleton model is not in %s/extracted and the archive"
+            " %r %s; name the game archive as the third argument (characters EXTRACT_OUT OUT_DIR"
+            " NAZ)"
+            % (key, extract_out, naz, "has none" if os.path.exists(str(naz)) else "does not exist")
+        )
+    return got[key]
 
 
 LERP_ERR_DEG = 8.0  # max tolerated mid-frame world-rotation error (glTF LERP)
@@ -355,6 +717,83 @@ def _lerp_err(pal, bind_B4):
     return float(np.degrees(np.arccos(tr)).max())
 
 
+def bind_digest(bind):
+    """sha1 of what a bake reads from bind npz `bind` (Rb, tb, tloc, par, names): equal for
+    two binds that bake the same, whatever their zip bytes."""
+    import hashlib
+
+    h = hashlib.sha1()
+    with np.load(bind, allow_pickle=True) as z:
+        for k in ("Rb", "tb", "tloc", "par", "names"):
+            a = z[k]
+            if a.dtype.kind in "OUS":
+                data = "\0".join(str(x) for x in a.ravel()).encode("utf-8")
+            elif a.dtype.kind in "iu":
+                data = np.ascontiguousarray(a, "<i8").tobytes()
+            else:
+                data = np.ascontiguousarray(a, "<f8").tobytes()
+            h.update(("%s %s\n" % (k, a.shape)).encode())
+            h.update(data)
+    return h.hexdigest()
+
+
+def clip_digest(clip):
+    """sha1 of clip file `clip`."""
+    import hashlib
+
+    with open(clip, "rb") as fh:
+        return hashlib.sha1(fh.read()).hexdigest()
+
+
+def bake_is_current(path, clip=None, track_names=None, bind=None):
+    """Is the cached bake `path` one this toolkit would write?  Yes when it carries the pose
+    rule of this baker (bake_v4.POSE_RULE) and was read with this baker's name scan: it
+    stores `scan` = bake_v4.NAME_SCAN_START, or its clip file `clip` reads the same with
+    the scan that bakes without `scan` used (bake_v4.scan_start_matters; without `clip`
+    the scan is not tested).  A bake written by another rule (or before the rule was
+    stored) is baked again.  So is one whose stored `track_names` differs from the
+    argument `track_names` (the track lookup the caller would bake with); the lookup is
+    not tested when either is missing.  Identity: with `clip` the bake must store the
+    sha1 of that clip file (`clip_sha`, clip_digest), with `bind` (a bind_digest) the
+    digest of the bind it was baked with (`bind_sha`); a bake without them, or of other
+    bytes, is baked again."""
+    import bake_v4
+
+    try:
+        with np.load(path) as z:
+            if "rule" not in z.files or int(z["rule"]) != bake_v4.POSE_RULE:
+                return False
+            if "twist_align" in z.files and int(z["twist_align"]) != 1:
+                return False  # baked without the twist pass
+            if track_names is not None and "track_names" in z.files:
+                if str(z["track_names"]) != track_names:
+                    return False  # baked with the other track lookup
+            if bind is not None and ("bind_sha" not in z.files or str(z["bind_sha"]) != bind):
+                return False  # another bind (or not recorded)
+            if clip is not None and (
+                "clip_sha" not in z.files or str(z["clip_sha"]) != clip_digest(clip)
+            ):
+                return False  # other clip bytes (or not recorded)
+            if "scan" in z.files:
+                return int(z["scan"]) == bake_v4.NAME_SCAN_START
+        if clip is None:
+            return True
+        with open(clip, "rb") as fh:
+            return not bake_v4.scan_start_matters(fh.read(400))
+    except Exception:  # torn or foreign file: bake again
+        return False
+
+
+def newest_bake_time(cdir):
+    """Modification time of the newest raw bake in cache folder `cdir` (None without one)."""
+    times = [
+        os.path.getmtime(f)
+        for f in glob.glob(os.path.join(cdir, "*.npz"))
+        if not f.endswith(".tmp.npz")
+    ]
+    return max(times) if times else None
+
+
 def bake_cache(key, bind, extract_out, outdir, budget=None):
     """Bake every <prefix>_* clip for this skeleton into <outdir>/_bake/<key>/.
     Resumable (skips existing .npy).  Returns (done, remaining).
@@ -363,6 +802,7 @@ def bake_cache(key, bind, extract_out, outdir, budget=None):
     import bake_v4
 
     bake_v4._load_bind(bind)
+    _tn = track_names_for(extract_out)
     bv = np.load(bind, allow_pickle=True)
     _NB = len(bv["Rb"])
     _B4 = np.tile(np.eye(4), (_NB, 1, 1))
@@ -377,12 +817,12 @@ def bake_cache(key, bind, extract_out, outdir, budget=None):
     for pref in prefs:
         animroot = os.path.join(extract_out, "extracted", "Animation", pref)
         for dp, dn, fn in os.walk(animroot):
+            dn.sort()  # result must not depend on the file system's listing order
             if os.sep + "FACE" in dp or dp.endswith("FACE"):
                 continue
-            for f in fn:
+            for f in sorted(fn):
                 if f.endswith(".animation"):
                     clips[f[:-10].strip()] = os.path.join(dp, f)
-    bake_v4._bank_lookup = lambda nm: open(clips[nm], "rb").read() if nm in clips else None
     cdir = os.path.join(outdir, "_bake", key)
     os.makedirs(cdir, exist_ok=True)
     import time
@@ -390,20 +830,21 @@ def bake_cache(key, bind, extract_out, outdir, budget=None):
     t0 = time.time()
     done = 0
     todo = 0
+    _bsha = bind_digest(bind)
     for nm in sorted(clips):
         dst = os.path.join(cdir, nm + ".npz")
-        if os.path.exists(dst):
+        if os.path.exists(dst) and bake_is_current(dst, clips[nm], _tn, _bsha):
             done += 1
             continue
         if budget and time.time() - t0 > budget:
             todo += 1
             continue
         try:
-            pal2, dur = bake_v4.bake(nm, 2)
+            pal2, dur = bake_v4.bake(nm, 2, bank=clips, track_names=_tn)
             if _lerp_err(pal2, _B4) <= LERP_ERR_DEG:
                 pal = pal2[::2]  # 1x is safe
             else:
-                pal4, _ = bake_v4.bake(nm, 4)
+                pal4, _ = bake_v4.bake(nm, 4, bank=clips, track_names=_tn)
                 if _lerp_err(pal4, _B4) <= LERP_ERR_DEG:
                     pal = pal4[::2]  # keep 2x
                 else:
@@ -417,6 +858,12 @@ def bake_cache(key, bind, extract_out, outdir, budget=None):
                 pal=pal.astype(np.float32),
                 dur=np.float32(dur),
                 fps=np.float32(bake_v4.fps_for(len(pal), dur)),
+                rule=np.int32(bake_v4.POSE_RULE),
+                scan=np.int32(bake_v4.NAME_SCAN_START),
+                twist_align=np.int32(1),  # bake(twist_align=None): applied
+                track_names=np.str_(_tn),
+                bind_sha=np.str_(_bsha),  # identity: which bind and clip bytes
+                clip_sha=np.str_(clip_digest(clips[nm])),
             )
             os.replace(dst + ".tmp.npz", dst)  # atomic: chunked runs get killed
             done += 1
@@ -463,6 +910,186 @@ def grip_anims(anims, bn, par):
     return out
 
 
+def anim_meta_is_current(m, extract_out):
+    """True when a stored anim_meta table `m` is what this toolkit would write:
+    its own format and content revision, and the format marker of every block the
+    build adds (face, combat, fx).  A table from before one of those blocks, or with an older one,
+    is not reused by a resumed export -- it would keep the old tables for good."""
+    import anim_meta
+    import combat_meta
+    import face_rule
+    import frame
+    import fx_meta
+
+    return (
+        isinstance(m, dict)
+        and m.get("format") == anim_meta.FORMAT
+        and m.get("revision") == anim_meta.REVISION  # content, not layout: see anim_meta
+        and frame.frame_of(m) == frame.mode()  # a table in the other frame is rebuilt
+        and (
+            _block_current(m, "face", face_rule.FACE_FORMAT)
+            or not face_rule.find_face_fragments(extract_out)
+        )
+        and _block_current(m, "combat", combat_meta.COMBAT_FORMAT)
+        and _block_current(m, "fx", fx_meta.FORMAT)
+    )
+
+
+def _block_current(m, block, fmt):
+    """The table has block `block` in format `fmt`, or records that building it in
+    that format was attempted and failed (anim_meta.BUILD_FAILED_KEY): a failure
+    is the same on every run over the same extract, so it is not retried."""
+    import anim_meta
+
+    if m.get(block + "_format") == fmt:
+        return True
+    failed = m.get(anim_meta.BUILD_FAILED_KEY)
+    failed = failed.get(block) if isinstance(failed, dict) else None
+    return isinstance(failed, dict) and failed.get("format") == fmt
+
+
+def anim_meta_failures(m):
+    """["combat: attempted, failed: <reason>", ...] of a table (anim_meta.BUILD_FAILED_KEY)."""
+    import anim_meta
+
+    failed = m.get(anim_meta.BUILD_FAILED_KEY) if isinstance(m, dict) else None
+    return [
+        "%s: %s: %s" % (k, v.get("status", "attempted, failed"), v.get("reason"))
+        for k, v in sorted(failed.items() if isinstance(failed, dict) else ())
+        if isinstance(v, dict)
+    ]
+
+
+#: bump when what the GLB writers put into a file changes for the same inputs and options
+GLB_REVISION = 1
+#: per output folder: {GLB path relative to the folder: the options it was written with}
+OPTIONS_FILE = "_glb_options.json"
+OPTIONS_FORMAT = "watchmen-glb-options/1"
+
+
+def _env_flag(name):
+    return (os.environ.get(name) or "").strip()
+
+
+def writer_options(**over):
+    """What the GLB writers' output depends on besides the game files and the bakes:
+    the coordinate frame, materials, naming, vertex attributes, the environment switches
+    WATCHMEN_MATERIAL_OPTS / NORMALS / CONSOLE / NO_SYNTH / NO_RESTORE and GLB_REVISION.
+    `over` adds the options of one command (characters_options)."""
+    import canonical_names
+    import frame
+    import materials
+    import variant_glb as vg
+
+    o = {
+        "glb_revision": GLB_REVISION,
+        "frame": frame.mode(),
+        "materials": materials.mode(),
+        "names": canonical_names.mode(),
+        "vertex_attrs": vg.vertex_attrs_enabled(),
+    }
+    for k in ("MATERIAL_OPTS", "NORMALS", "CONSOLE", "NO_SYNTH", "NO_RESTORE"):
+        o["env_" + k.lower()] = _env_flag("WATCHMEN_" + k)
+    o.update(over)
+    return o
+
+
+def characters_options(
+    jiggle_model=None,
+    face_rule=None,
+    face_idle=None,
+    parts=None,
+    ragdoll=None,
+    meta=None,
+    world=None,
+):
+    """writer_options of a `characters` GLB: plus the jiggle cache signature (model,
+    constants, the extract's PhysicsWorld values), face rule and idle cycle, parts mode,
+    ragdoll, and the format and revision of the animation table embedded in the clips."""
+    import face_rule as _fr
+    import jiggle_d6
+    import parts_rule
+
+    return writer_options(
+        jiggle=jiggle_d6.cache_signature(jiggle_model, props=world),
+        face_rule=_fr.rule(face_rule),
+        face_idle=bool(_fr.idle_enabled(face_idle)),
+        parts=parts_rule.mode(parts),
+        ragdoll=ragdoll_enabled(ragdoll),
+        anim_meta=[meta.get("format"), meta.get("revision")] if isinstance(meta, dict) else None,
+    )
+
+
+def read_glb_options(root):
+    """{relative GLB path: options} recorded in folder `root` ({} without a record)."""
+    import json
+
+    try:
+        with open(os.path.join(root, OPTIONS_FILE), encoding="utf-8") as fh:
+            doc = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(doc, dict) or doc.get("format") != OPTIONS_FORMAT:
+        return {}
+    files = doc.get("files")
+    return files if isinstance(files, dict) else {}
+
+
+def _rel(out, root):
+    return os.path.relpath(out, root).replace(os.sep, "/")
+
+
+def record_glb_options(out, root, options):
+    """Record that GLB `out` (under folder `root`) was written with `options` (atomic)."""
+    import json
+
+    files = read_glb_options(root)
+    files[_rel(out, root)] = options
+    path = os.path.join(root, OPTIONS_FILE)
+    with open(path + ".tmp", "w", encoding="utf-8", newline="\n") as fh:
+        json.dump(
+            {"format": OPTIONS_FORMAT, "files": dict(sorted(files.items()))},
+            fh,
+            indent=1,
+            sort_keys=True,
+        )
+    os.replace(path + ".tmp", path)
+
+
+def glb_is_current(out, bakes=None, options=None, root=None):
+    """Does a resumed export skip `out`?  Yes when the file exists, is in the
+    coordinate frame of this run (frame.mode()), is not older than `bakes`, the time
+    of the newest raw bake of its skeleton (newest_bake_time; None = not tested), and,
+    when `options` is given, was recorded in `root`/_glb_options.json as written with
+    exactly these options (writer_options; a GLB without a record is written again).  A
+    GLB written with the other --frame or other options is rewritten, so one folder
+    holds one set of options; a GLB older than a bake holds clips of a cache that has
+    been baked again since."""
+    import frame
+
+    if not os.path.exists(out):
+        return False
+    if bakes is not None and os.path.getmtime(out) < bakes:
+        print("  %s is older than a bake of its skeleton: rewriting" % out)
+        return False
+    if frame.glb_frame(out) not in (None, frame.mode()):
+        print("  %s is in the other coordinate frame: rewriting" % out)
+        return False
+    if options is not None:
+        old = read_glb_options(root or os.path.dirname(out)).get(
+            _rel(out, root or os.path.dirname(out))
+        )
+        if old != options:
+            if old is None:
+                why = "no record of its options"
+            else:
+                diff = sorted(k for k in set(old) | set(options) if old.get(k) != options.get(k))
+                why = "written with other %s" % ", ".join(diff)
+            print("  %s: %s: rewriting" % (out, why))
+            return False
+    return True
+
+
 def animation_meta(extract_out, outdir):
     """The game's animation metadata table (anim_meta.build), written once to
     <outdir>/anim_meta.json and reused by later (resumed) runs.  None when the
@@ -476,8 +1103,13 @@ def animation_meta(extract_out, outdir):
         try:
             with open(path, encoding="utf-8") as fh:
                 m = json.load(fh)
-            if m.get("format") == anim_meta.FORMAT:
-                return m
+            if anim_meta_is_current(m, extract_out):
+                for line in anim_meta_failures(m):  # reused although a block is missing
+                    print(
+                        "  anim_meta: reusing %s without the %s block (%s); delete the file"
+                        " to try again" % (path, line.split(":", 1)[0], line.split(": ", 1)[1])
+                    )
+                return m  # (a table without the face / combat / fx block is rebuilt)
         except (OSError, ValueError):
             pass
     try:
@@ -493,36 +1125,152 @@ def animation_meta(extract_out, outdir):
         json.dump(m, fh, indent=1)
     os.replace(path + ".tmp", path)
     print("  anim_meta: %s -> %s" % (anim_meta.summary(m), path))
+    unchecked = pairs_without_contact_check(m)
+    if unchecked:
+        print(
+            "  anim_meta: %d of %d placed pairs have no contact check (a bind or a skeleton"
+            " key is missing)" % (len(unchecked), sum(1 for p in m["pairs"] if p.get("placement")))
+        )
+    for line in anim_meta_failures(m):
+        print("  anim_meta: %s (the table is written without that block and reused)" % line)
     return m
 
 
-def jiggle_cache_dir(cdir, jiggle_model=None):
+def pairs_without_contact_check(m):
+    """Indices of the pairs of an anim_meta table that have a placement but no
+    `placement.check.contact`: the contact check could not bake one of the two clips."""
+    return [
+        i
+        for i, p in enumerate((m or {}).get("pairs") or [])
+        if p.get("placement") and "contact" not in (p["placement"].get("check") or {})
+    ]
+
+
+def ensure_all_binds(keys, extract_out, naz="game.naz"):
+    """Build every missing bind of `keys` now ({key: reason} for those that fail), so the
+    animation table that is written next can run its contact check on every pair: the
+    `bs2` bind used to be built after the table, on the first run of an export."""
+    failed = {}
+    for key in sorted(keys):
+        try:
+            ensure_bind(key, extract_out, naz)
+        except Exception as ex:
+            failed[key] = "%s: %s" % (type(ex).__name__, ex)
+    return failed
+
+
+def jiggle_cache_dir(cdir, jiggle_model=None, props=None):
     """Directory of the jiggled-palette memo of bake cache `cdir`.  Its name
-    carries the jiggle model, mode and constants (jiggle_d6.cache_signature), so a
-    directory baked with another model -- including the bare `<key>_j` of 1.2.0 --
-    is never read.  Old directories are simply unused and can be deleted."""
+    carries the jiggle model, mode and constants (jiggle_d6.cache_signature), and the
+    extract's PhysicsWorld values `props` when they differ from the shipped ones, so a
+    directory baked with another model or other values -- including the bare `<key>_j`
+    of 1.2.0 -- is never read.  Old directories are simply unused and can be deleted."""
     from jiggle_d6 import cache_signature
 
-    return cdir + "_j_" + cache_signature(jiggle_model)
+    return cdir + "_j_" + cache_signature(jiggle_model, props=props)
 
 
-def export(extract_out, outdir, naz="game.naz", budget=None, only=None, jiggle_model=None):
-    """Write <outdir>/<Char>/<Variant>.glb.  Resumable: existing glbs skipped,
-    bakes cached.  budget: seconds of baking per skeleton per call.
-    jiggle_model: 'pinned' / 'pivot' (None = jiggle_d6.DEFAULT_MODEL).  Existing
-    glbs are NOT rebuilt when the model changes: delete them to re-export."""
+def bake_fps(d):
+    """The rate a cached bake `d` (an opened npz) is written at: its stored header-exact `fps`,
+    else bake_v4.fps_for(frames, dur).  No clip gets a multiplier (variant_glb, "Clip
+    timing")."""
+    import bake_v4
+
+    if "fps" in d.files:
+        return float(d["fps"])
+    return bake_v4.fps_for(len(d["pal"]), float(d["dur"]))
+
+
+#: clip names the retired walk / run multipliers applied to: a jiggle memo of one of them
+#: without a stored `fps` was solved at 2.3 / 2.6 x the clip's rate
+_LEGACY_MULTIPLIED = ("walk_cycle", "run_cycle")
+
+
+def jiggle_memo_is_current(memo, bake, clip, fps):
+    """Is the jiggled palette `memo` of clip `clip` usable with raw bake `bake` written at
+    `fps`?  It must exist, be no older than the bake and have been solved at `fps`: a memo
+    stores the rate it was solved at; one without it is from before the rate was stored and
+    is used only for a clip that was never written at another rate."""
+    if not (os.path.exists(memo) and os.path.getmtime(memo) >= os.path.getmtime(bake)):
+        return False
+    try:
+        with np.load(memo) as z:
+            if "fps" in z.files:
+                return abs(float(z["fps"]) - float(np.float32(fps))) <= 1e-6 * max(1.0, fps)
+    except Exception:  # torn or foreign file: solve again
+        return False
+    return not any(k in clip for k in _LEGACY_MULTIPLIED)
+
+
+def clip_loops(meta, name):
+    """The game's loop flag of clip `name` in an anim_meta table (False when unknown)."""
+    import variant_glb
+
+    return variant_glb.clip_loops(meta, name)
+
+
+def export(
+    extract_out,
+    outdir,
+    naz="game.naz",
+    budget=None,
+    only=None,
+    jiggle_model=None,
+    face_rule=None,
+    face_idle=None,
+    parts=None,
+    ragdoll=None,
+):
+    """Write <outdir>/<Char>/<Variant>.glb.  Resumable: an existing glb is kept when
+    glb_is_current says so -- same coordinate frame, not older than the newest raw bake
+    of its skeleton, and recorded in <outdir>/_glb_options.json as written with the
+    options of this run (characters_options); any other is written again.  Bakes are
+    cached.  budget: seconds of baking per skeleton per call.
+    jiggle_model: 'solver' / 'pivot' / 'pinned' (None = jiggle_d6.DEFAULT_MODEL, 'solver';
+    'pinned' reproduces the jiggle of 1.2.0 - 1.3.0).
+    face_rule: "engine" (default; $WATCHMEN_FACE_RULE) = the face track of the
+    game's face animation classes on every body clip, and the game's own
+    face-rigged head on the characters whose fragment only lists a static one;
+    "legacy" = the name-based faces and static heads of 1.3.0.  face_idle: see
+    variant_glb.write_glb.
+    parts: "game" (default; $WATCHMEN_PARTS) = the GLB shows what the game shows
+    for the variant -- the models of the collection's first member, no weapon --
+    and keeps the other members' models and the weapons as alternatives outside
+    the scene (parts_rule; node "alternatives"); "all" = every listed model and every weapon
+    at once, as up to 1.3.0.
+    ragdoll: True (default; $WATCHMEN_RAGDOLL=0 turns it off) = the ragdoll rig of the
+    variant's slot-0 model as helper nodes in the GLB (node "ragdoll", outside the
+    scene) and <Variant>.ragdoll.json beside it (ragdoll_rig)."""
     import char_lib, variant_glb as vg
+    import extract_out as _xo
+    import parts_rule
+
+    _xo.require(extract_out)  # a mistyped folder is an error, not an empty export
+    _game_parts = parts_rule.mode(parts) == "game"
+    import face_rule as _fr
+
+    _engine = _fr.rule(face_rule) == "engine"
 
     chars = discover(extract_out)
     texroots = [os.path.join(extract_out, "textures")]
-    if _is_part1(extract_out) and "part1" not in str(naz).replace("\\", "/").lower():
+    for _k, _why in sorted(bind_mismatches(extract_out).items()):
         print(
-            "  WARNING: extract looks like Part 1 but naz=%r (Part 2?). Part 1 rest "
-            "poses DIFFER -- delete <extract_out>/binds and pass the Part 1 source "
-            "(e.g. part1_pc/Watchmen/derived_pc) as the 3rd argument." % str(naz)
+            "  WARNING: binds/bind_%s_file_v1.npz does not match this extract (%s). Rest "
+            "poses DIFFER between Part 1 and Part 2 -- delete <extract_out>/binds and run "
+            "again (binds are rebuilt from the extract's own skeleton models)." % (_k, _why)
         )
     pending = 0
+    # every bind first: the animation table's contact check bakes with them
+    for _k, _why in ensure_all_binds(
+        {k for vs in chars.values() for k, _ in vs.values()}, extract_out, naz
+    ).items():
+        print("  bind %s: not built before the animation table (%s)" % (_k, _why))
     meta = animation_meta(extract_out, outdir)
+    from jiggle_d6 import load_world_props
+
+    world = load_world_props(extract_out)  # this extract's PhysicsWorld
+    opts = characters_options(jiggle_model, face_rule, face_idle, parts, ragdoll, meta, world)
+    kept = 0
     for cname, vs in sorted(chars.items()):
         if only and cname != only:
             continue
@@ -538,22 +1286,25 @@ def export(extract_out, outdir, naz="game.naz", budget=None, only=None, jiggle_m
                 pending += todo
                 continue
             cdir = os.path.join(outdir, "_bake", key)
+            baked = newest_bake_time(cdir)
             anims = None  # lazy-load once per key
             for vname, (k2, models) in sorted(vs.items()):
                 if k2 != key:
                     continue
                 out = os.path.join(outdir, cname, vname + ".glb")
-                if os.path.exists(out):
+                if glb_is_current(out, baked, opts, outdir):
+                    kept += 1
                     continue
+                char_lib.dropped_pieces(reset=True)
                 os.makedirs(os.path.dirname(out), exist_ok=True)
                 if anims is None:
                     # 2026-07-13 perf: npz members are lazy — when a jiggle
                     # memo exists, read pal from the memo ONLY (raw npz is
                     # opened just for dur/fps), halving mount I/O per skeleton.
                     anims = []
-                    from jiggle_d6 import apply_jiggle
+                    from jiggle_d6 import apply_jiggle, cache_file
 
-                    jdir = jiggle_cache_dir(cdir, jiggle_model)  # disk memo (chunked runs)
+                    jdir = jiggle_cache_dir(cdir, jiggle_model, world)  # disk memo (chunked runs)
                     os.makedirs(jdir, exist_ok=True)
                     jn = 0
                     jig_todo = []  # anim indices needing a jiggle attempt
@@ -565,19 +1316,9 @@ def export(extract_out, outdir, naz="game.naz", budget=None, only=None, jiggle_m
                             continue
                         nm = os.path.basename(f)[:-4]
                         d = np.load(f)
-                        if "fps" in d:
-                            fps = float(d["fps"])  # header-exact
-                        else:
-                            dur = float(d["dur"])
-                            fps = len(d["pal"]) / (dur / 3.0) if dur > 0 else 30
-                        # 2026-08-17: apply the capture-verified runtime
-                        # movement sync (AnimSlot.SetSpeed on locomotion
-                        # cycles) here too -- `watchmen char` (variant_glb.
-                        # build) already did; the bulk path left walk/run at
-                        # authored timing, so the two writers disagreed.
-                        fps *= vg.speed_mult(nm)
-                        jf = os.path.join(jdir, nm + ".npz")
-                        if os.path.exists(jf):
+                        fps = bake_fps(d)  # header-exact, for every clip
+                        jf = os.path.join(jdir, cache_file(nm, jiggle_model, clip_loops(meta, nm)))
+                        if jiggle_memo_is_current(jf, f, nm, fps):
                             anims.append((nm, np.load(jf)["pal"], fps))
                             jn += 1
                         else:
@@ -588,13 +1329,20 @@ def export(extract_out, outdir, naz="game.naz", budget=None, only=None, jiggle_m
                     for i in jig_todo:
                         nm, pal, fps = anims[i]
                         try:
-                            jp = apply_jiggle(pal, fps, bind, model=jiggle_model)
+                            jp = apply_jiggle(
+                                pal,
+                                fps,
+                                bind,
+                                model=jiggle_model,
+                                loop=clip_loops(meta, nm),
+                                props=world,
+                            )
                         except Exception:
                             if jn == 0:
                                 break  # skeleton without jiggle bones
                             continue
-                        jf = os.path.join(jdir, nm + ".npz")
-                        np.savez(jf + ".tmp.npz", pal=jp.astype(np.float32))
+                        jf = os.path.join(jdir, cache_file(nm, jiggle_model, clip_loops(meta, nm)))
+                        np.savez(jf + ".tmp.npz", pal=jp.astype(np.float32), fps=np.float32(fps))
                         os.replace(jf + ".tmp.npz", jf)
                         anims[i] = (nm, jp, fps)
                         jn += 1
@@ -605,6 +1353,16 @@ def export(extract_out, outdir, naz="game.naz", budget=None, only=None, jiggle_m
                 face = None
                 midx = _model_index(extract_out)
                 usemodels = list(models)
+                # the collection member the game hands out first (parts_rule):
+                # its models are the character, the other members' are alternatives
+                members = parts_rule.members(extract_out, vname)
+                shown_models, alt_models = list(models), []
+                if _game_parts:
+                    names = [os.path.basename(m) for m in models]
+                    keep, _alt = parts_rule.split(names, members)
+                    shown_models = [m for m in models if os.path.basename(m) in keep]
+                    alt_models = [m for m in models if os.path.basename(m) not in keep]
+                    usemodels = list(shown_models)
                 for m in list(usemodels):
                     base = os.path.basename(m)
                     if base in HEAD_SWAPS and HEAD_SWAPS[base] in midx:
@@ -627,7 +1385,64 @@ def export(extract_out, outdir, naz="game.naz", budget=None, only=None, jiggle_m
                     face = _face_attach(
                         midx[extra[0]], extra[1], bind, bn, cname, extract_out, outdir
                     )
-                parts = char_lib.load_parts(usemodels, bn)
+                if face is None and _engine:
+                    # the head the game itself attaches (CharacterHeadModel type
+                    # -> head collection); the static copy leaves the body mesh
+                    gh = _fr.game_head(extract_out, vname, [os.path.basename(m) for m in usemodels])
+                    if gh is not None and gh["head"] in midx:
+                        static = [m for m in usemodels if os.path.basename(m) == gh["static"]][0]
+                        usemodels.remove(static)
+                        face = _face_attach(
+                            midx[gh["head"]],
+                            "Head",
+                            bind,
+                            bn,
+                            cname,
+                            extract_out,
+                            outdir,
+                            align_ref=static,
+                        )
+                        face["game_head"] = gh
+                        # the rigged head brings its own eyes: the body's
+                        # separate eye model would be a second pair
+                        # (bare names: the two eye models may point at different
+                        # copies of the texture, e.g. knottops/ and bikers/ EnemyEye)
+                        fmats = {str(pt[5]) for pt in face["parts"]}
+                        for m in list(usemodels):
+                            if "eyes" not in os.path.basename(m).lower():
+                                continue
+                            if all(str(pt[5]) in fmats for pt in char_lib.load_parts([m], bn)):
+                                usemodels.remove(m)
+                                gh["dropped_body_models"] = gh.get("dropped_body_models", []) + [
+                                    os.path.basename(m)
+                                ]
+                # the texture sheets this variant's nodes select (outfit colours).
+                # Several outfits: each takes its sheets from ITS OWN node, and the
+                # models that differ between outfits become nodes of their own
+                # (parts_rule.outfits) so that an outfit can be switched cleanly.
+                vsheets = variant_sheets(extract_out, cname, vname)
+                outfit_nodes, msheets, common_names = [], {}, None
+                if _game_parts and len(members) > 1:
+                    msheets = {
+                        m["index"]: variant_sheets(extract_out, cname, vname, node=m["index"] - 1)
+                        for m in members
+                    }
+                    vsheets = msheets.get(1, {})
+                    _names = [os.path.basename(m) for m in models]
+                    _used = {os.path.basename(m) for m in usemodels}
+                    _skip = [
+                        n
+                        for n in _names
+                        if n not in _used and n in {os.path.basename(m) for m in shown_models}
+                    ]
+                    common_names, outfit_nodes = parts_rule.outfits(
+                        _names, members, msheets, skip=_skip
+                    )
+                    if not any(os.path.basename(m) in common_names for m in usemodels):
+                        common_names, outfit_nodes = None, []  # nothing would be left
+                    else:
+                        usemodels = [m for m in usemodels if os.path.basename(m) in common_names]
+                parts = char_lib.load_parts(usemodels, bn, sheets=vsheets)
                 # synthetic variant: graft a hair submesh from another model,
                 # retextured (Dominatrix_3 = Twilight Lady hair, brown-tinted).
                 sv = SYNTH_VARIANTS.get((cname, vname))
@@ -637,9 +1452,9 @@ def export(extract_out, outdir, naz="game.naz", budget=None, only=None, jiggle_m
                         # (collapsed-UV tangent sanitation now happens for every
                         # normal-mapped part in variant_glb.write_glb.)
                         hp = [
-                            (v, si, sw, t, uv, sv["hair_mat"])
-                            for (v, si, sw, t, uv, mat) in char_lib.load_parts([midx[hmodel]], bn)
-                            if mat == hmat
+                            vg.keep_attrs(pt, (pt[0], pt[1], pt[2], pt[3], pt[4], sv["hair_mat"]))
+                            for pt in char_lib.load_parts([midx[hmodel]], bn)
+                            if pt[5] == hmat
                         ]
                         if hp:
                             parts = list(parts) + hp
@@ -661,44 +1476,201 @@ def export(extract_out, outdir, naz="game.naz", budget=None, only=None, jiggle_m
                             tex[mat] = layers
                             print("  restore: %s/%s %s -> %s" % (cname, vname, mat, repl))
                 if face is not None:
-                    tex.update(char_lib.find_textures(face["parts"], texroots))
+                    tex.update(_face_textures(face, texroots, extract_out))
                 atts = char_attachments(cname, bind, bn, extract_out)
                 for _, apts in atts:
                     tex.update(char_lib.find_textures(apts, texroots))
+                alt_parts, outfit_parts, prec = [], [], None
+                if _game_parts:
+                    _by = {os.path.basename(m): m for m in models}
+                    for _node, _k, _m, _sh in outfit_nodes:
+                        ap = char_lib.load_parts([_by[_m]], bn, sheets=msheets.get(_k, {}))
+                        if ap:
+                            outfit_parts.append((_node, ap, _sh))
+                            tex.update(char_lib.find_textures(ap, texroots))
+                    for a in alt_models if common_names is None else ():
+                        ap = char_lib.load_parts([a], bn)
+                        if ap:
+                            alt_parts.append(("ALT " + os.path.basename(a), ap))
+                            tex.update(char_lib.find_textures(ap, texroots))
+                    names = [os.path.basename(m) for m in models]
+                    prec = parts_rule.record(
+                        members,
+                        names,
+                        [os.path.basename(m) for m in shown_models],
+                        [os.path.basename(a) for a in alt_models],
+                    )
+                    if common_names is not None:
+                        _have = {n for n, _p, _s in outfit_parts}
+                        prec = parts_rule.outfit_record(
+                            prec,
+                            [
+                                n
+                                for n in common_names
+                                if n in {os.path.basename(m) for m in usemodels}
+                            ],
+                            [x for x in outfit_nodes if x[0] in _have],
+                            msheets,
+                        )
+                    always = [n for n, _ in atts] if cname == "TwilightLady" else []
+                    prec["weapons"] = parts_rule.weapon_record(
+                        [n for n, _ in atts],
+                        weapon_sets(extract_out),
+                        char_weapon_colls(extract_out, cname),
+                        always,
+                    )
                 grips = grip_anims(anims, bn, bv["par"])
-                # atomic write: chunked runs get SIGTERM'd mid-call; a
-                # partial glb must not survive (export skips existing files).
+                _rwhy = []
+                rag = ragdoll_helpers(extract_out, key, models, bind, out, ragdoll, why=_rwhy)
+                # what this GLB does not carry is stated in it and in the log
+                _nd = not_decoded_extras(
+                    [parts, (face or {}).get("parts")]
+                    + [a for _, a in atts]
+                    + [a for _, a in alt_parts]
+                    + [a for _, a, _s in outfit_parts],
+                    _rwhy[0] if _rwhy else None,
+                    char_lib.dropped_pieces(reset=True),
+                    vg.vertex_attrs_enabled(),
+                )
+                if _nd and "vertex_attributes" in _nd["not_decoded"]:
+                    _va = _nd["not_decoded"]["vertex_attributes"]
+                    print(
+                        "  note: %s/%s: no NORMAL / TANGENT / COLOR_0 on %d of %d mesh pieces "
+                        "(the header does not locate the buffer)"
+                        % (cname, vname, _va["pieces_without"], _va["pieces"])
+                    )
+                if _nd and "vertex_colour" in _nd["not_decoded"]:
+                    _vc = _nd["not_decoded"]["vertex_colour"]
+                    print(
+                        "  note: %s/%s: no COLOR_0 on %d of %d mesh pieces (console pieces "
+                        "whose colour byte order is not known: set WATCHMEN_CONSOLE=x360 or "
+                        "ps3)" % (cname, vname, _vc["pieces_without"], _vc["pieces"])
+                    )
+                # write_glb writes <out>.tmp and renames it: chunked runs get
+                # SIGTERM'd mid-call and a partial glb must not survive (export
+                # skips existing files); the log names the final file.
                 vg.write_glb(
                     parts,
                     anims + grips,
-                    out + ".tmp",
+                    out,
                     bind,
                     textures=tex,
                     face=face,
                     attachments=atts,
                     meta=meta,
+                    face_rule=face_rule,
+                    face_idle=face_idle,
+                    alt_parts=alt_parts,
+                    parts_record=prec,
+                    outfit_parts=outfit_parts,
+                    asset_extras=__import__("fx_meta").with_attachments(
+                        dict(reconstruction_extras(cname, vname) or {}, **(_nd or {})) or None,
+                        extract_out,
+                        cname,
+                        bn,
+                        meta,
+                    ),
+                    ragdoll=rag,
                 )
-                os.replace(out + ".tmp", out)
+                record_glb_options(out, outdir, opts)
+    if kept:
+        print("  kept %d existing GLB(s) written with these options" % kept)
     return pending
+
+
+def ragdoll_enabled(value=None):
+    """Export the ragdoll rig?  `value`, else $WATCHMEN_RAGDOLL ("0" = off), else on."""
+    if value is not None:
+        return bool(value)
+    return os.environ.get("WATCHMEN_RAGDOLL", "1") not in ("0", "off", "false", "no")
+
+
+def ragdoll_source_model(extract_out, key, models):
+    """Path of the model whose articulated body the game instantiates for a
+    variant = the model in slot 0 of its list (Character vtable slot 41, 0x4bee1e):
+    the skeleton model for the enemies, the body model itself for the players and
+    the Twilight Lady.  None when it is not on disk."""
+    import watchmenlib as wl
+
+    midx = _model_index(extract_out)
+    if key in ("rsh", "nto"):
+        base = models[0] if models else None
+    elif key == "bs2":
+        base = midx.get("BS2_WithoutWeapon")
+    else:
+        base = midx.get(os.path.basename(wl._SKEL_ASSETS.get(key, ""))[:-6])
+    path = base + ".model" if base else None
+    return path if path and os.path.exists(path) else None
+
+
+def ragdoll_helpers(extract_out, key, models, bind, out, enabled=None, why=None):
+    """ragdoll_rig.glb_helpers for one variant (None when switched off or the
+    model has no rig); writes <out stem>.ragdoll.json as a side effect.  Without a
+    rig one line says why, and the reason is appended to the list `why`.  The byte
+    order is the one the model header states (console headers are big-endian)."""
+    if not ragdoll_enabled(enabled):
+        return None
+    import json
+    import ragdoll_rig
+
+    def _none(reason):
+        expected = reason.endswith((ragdoll_rig.NO_LAYOUT, ragdoll_rig.NO_BODY))
+        print(
+            "  %s no ragdoll rig for %s: %s"
+            % ("note:" if expected else "WARNING:", os.path.basename(out), reason)
+        )
+        if why is not None:
+            why.append(reason)
+        return None
+
+    src = ragdoll_source_model(extract_out, key, models)
+    if not src:
+        return _none("the slot-0 model of bind %r is not in the extract" % key)
+    try:
+        mb = _read_bytes(src)
+        order = ragdoll_rig.byte_order(mb)
+        rig, reason = ragdoll_rig._build(mb, order)
+    except Exception as e:  # the rig is optional, the character is not
+        return _none("%s not read: %s" % (os.path.basename(src), e))
+    if rig is None:
+        return _none("%s: %s" % (os.path.basename(src), reason))
+    mat = None
+    pb = os.path.join(extract_out, "extracted", "pivotbooks", "default.pb")
+    if os.path.exists(pb):
+        try:
+            mat = ragdoll_rig.material_from_pivot_book(_read_bytes(pb), ragdoll_rig.sheet_for(key))
+        except (KeyError, ValueError) as e:
+            print("  ! pivot book %s: %s" % (pb, e))
+    bv = np.load(bind, allow_pickle=True)
+    names = [str(x) for x in bv["names"]]
+    doc = ragdoll_rig.sidecar(
+        rig,
+        names,
+        material=mat,
+        source_model=os.path.relpath(src, os.path.join(extract_out, "extracted")).replace(
+            os.sep, "/"
+        ),
+        group=ragdoll_rig.group_for(key),
+        glb=os.path.basename(out),
+    )
+    side = out[:-4] + ".ragdoll.json"
+    with open(side + ".tmp", "w", encoding="utf-8", newline="\n") as f:
+        json.dump(doc, f, separators=(",", ":"))
+    os.replace(side + ".tmp", side)
+    helpers = ragdoll_rig.glb_helpers(rig, names, bv["Rb"], bv["tb"], material=mat)
+    helpers["extras"]["sidecar"] = os.path.basename(side)
+    helpers["extras"]["source_model"] = doc["source_model"]
+    return helpers
 
 
 def weapon_sets(extract_out):
     """WeaponDB.fragment -> {collection name: [model base paths]} (file-only)."""
-    hits = glob.glob(
-        os.path.join(
-            extract_out,
-            "extracted",
-            "TNT",
-            "Production",
-            "Fragments",
-            "**",
-            "WeaponDB.fragment.json",
-        ),
-        recursive=True,
+    hit = _find_fragment(
+        os.path.join(extract_out, "extracted", "TNT", "Production", "Fragments"), "WeaponDB"
     )
-    if not hits:
+    if not hit:
         return {}
-    d = json.load(open(hits[0]))
+    d = _load_fragment(hit)
     props = {n["id"]: {k: v for k, t, v in n["props"]} for n in d["nodes_full"]}
     colls = {
         i: p["name"]
@@ -714,7 +1686,9 @@ def weapon_sets(extract_out):
             m = p["modelNames"][0].lstrip("/")
             base = os.path.join(ex, *m.split("/"))[:-6]  # strip .model
             if not os.path.exists(base + ".model"):
-                cand = glob.glob(os.path.join(ex, "**", os.path.basename(m)), recursive=True)
+                cand = sorted(
+                    glob.glob(os.path.join(ex, "**", os.path.basename(m)), recursive=True)
+                )
                 if not cand:
                     continue
                 base = cand[0][:-6]
@@ -737,6 +1711,7 @@ def _weapon_attach_parts(model_base, slot, bind, bn, offset=None):
     optionally composed with an authored (localPos, localOrient) offset
     (TwilightLady's TW_weapon).  Verts -> body bind space, all weights on slot."""
     import watchmen_extract as we, struct as st
+    import variant_glb as _vga
 
     bv = np.load(bind, allow_pickle=True)
     Rb, tbb = bv["Rb"][slot], bv["tb"][slot]
@@ -746,9 +1721,14 @@ def _weapon_attach_parts(model_base, slot, bind, bn, offset=None):
         Ro = _q2m_conj(q)
         M = Rb @ Ro
         t = Rb @ np.asarray(p, float) + tbb
-    mh = open(model_base + ".model", "rb").read()
-    ms = open(model_base + ".model.stream", "rb").read()
-    order = ">" if len(we.find_descriptors(mh, ">")) > len(we.find_descriptors(mh, "<")) else "<"
+    mh = _read_bytes(model_base + ".model")
+    ms = _read_bytes(model_base + ".model.stream")
+    plat = we.console_platform_for(model_base + ".model")  # the console colour order
+    import char_lib as _cl
+
+    # the header states the byte order (the descriptor-count rule tied on
+    # single-submesh console models: WPN_2x4_2H was lost on Xbox 360 / PS3)
+    order = _cl.model_order(mh, ms, os.path.basename(model_base))
     be = order == ">"
     descs = we.find_descriptors(mh, order)
     mats = we.extract_materials(mh)
@@ -770,6 +1750,7 @@ def _weapon_attach_parts(model_base, slot, bind, bn, offset=None):
                 break
             c += 1
         if vbo is None:
+            _cl.note_dropped(model_base, si_, nv, stride, ib, order, _cl.NO_BUFFER)
             continue
         v, _, uv = we._decode_sub(ms, vbo, nv, stride, be)
         ibo = vbo + nv * stride
@@ -780,23 +1761,29 @@ def _weapon_attach_parts(model_base, slot, bind, bn, offset=None):
                 T.append((x, y, z))
         off = ibo + ib
         if not v or not T:
+            _cl.note_dropped(model_base, si_, nv, stride, ib, order, _cl.NO_TRIANGLES)
             continue
         V = (np.array(v, float) @ M.T) + t
         SI = np.full((len(V), 4), slot, np.uint16)
         SW = np.zeros((len(V), 4), np.float32)
         SW[:, 0] = 1
         parts.append(
-            (
-                V,
-                SI,
-                SW,
-                np.array(T),
-                np.array(uv if uv else [(0.0, 0.0)] * len(V), np.float32),
+            _vga.with_attrs(
                 (
-                    mats[smat[si_][1]]
-                    if si_ < len(smat) and smat[si_][1] < len(mats)
-                    else (mats[si_] if si_ < len(mats) else "%s_sub%d" % (wname, si_))
+                    V,
+                    SI,
+                    SW,
+                    np.array(T),
+                    np.array(uv if uv else [(0.0, 0.0)] * len(V), np.float32),
+                    (
+                        mats[smat[si_][1]]
+                        if si_ < len(smat) and smat[si_][1] < len(mats)
+                        else (mats[si_] if si_ < len(mats) else "%s_sub%d" % (wname, si_))
+                    ),
                 ),
+                # the mesh buffer's own vectors, turned with the positions
+                _vga.buffer_vertex_attrs(mh, ms, order, vbo, nv, stride, plat),
+                rot=M,
             )
         )
     return parts
@@ -806,21 +1793,12 @@ def _tw_weapon_spec(extract_out, bn):
     """TwilightLady's data-driven weapon: (model base, slot, (pos, quat)) from
     Bs2CharVisual.fragment (HandAttach node: attachedBone + child model node
     local offset), or None."""
-    hits = glob.glob(
-        os.path.join(
-            extract_out,
-            "extracted",
-            "TNT",
-            "Production",
-            "Fragments",
-            "**",
-            "Bs2CharVisual.fragment.json",
-        ),
-        recursive=True,
+    hit = _find_fragment(
+        os.path.join(extract_out, "extracted", "TNT", "Production", "Fragments"), "Bs2CharVisual"
     )
-    if not hits:
+    if not hit:
         return None
-    d = json.load(open(hits[0]))
+    d = _load_fragment(hit)
     props = {n["id"]: {k: v for k, t, v in n["props"]} for n in d["nodes_full"]}
     for i, p in props.items():
         mns = p.get("modelNames") or []
@@ -833,9 +1811,17 @@ def _tw_weapon_spec(extract_out, bn):
                 else bn.index(ATTACH_BONE)
             )
             m = mns[0].lstrip("/")
-            base = os.path.join(extract_out, "extracted", *m.split("/"))[:-6]
+            ex = os.path.join(extract_out, "extracted")
+            base = os.path.join(ex, *m.split("/"))[:-6]
             if not os.path.exists(base + ".model"):
-                return None
+                # the reference's folder case ("/Art/Characters/...") is not the
+                # extract's ("art/characters/..."): find it by name, as weapon_sets
+                cand = sorted(
+                    glob.glob(os.path.join(ex, "**", os.path.basename(m)), recursive=True)
+                )
+                if not cand:
+                    return None
+                base = cand[0][:-6]
             return base, slot, (p.get("localPos", [0, 0, 0]), p.get("localOrient", [0, 0, 0, 1]))
     return None
 
@@ -854,7 +1840,7 @@ def char_attachments(cname, bind, bn, extract_out):
                 )
             )
         return out
-    colls = CHAR_WEAPON_COLLS.get(cname)
+    colls = char_weapon_colls(extract_out, cname)
     if not colls:
         return out
     ws = weapon_sets(extract_out)
@@ -865,7 +1851,7 @@ def char_attachments(cname, bind, bn, extract_out):
                 os.path.join(extract_out, "extracted", "**", "GrappringGun.model"), recursive=True
             )
             if gg:
-                bases.append(gg[0][:-6])
+                bases.append(min(gg)[:-6])
     else:
         bases = []
         for c in colls:
@@ -893,9 +1879,11 @@ def _rigid_attach_parts(model_base, bone, bind, bn):
     space, all weights on the attach bone's slot."""
     import parse_model_nodes, build_bind_file as bbf
     import watchmen_extract as we, struct as st
+    import variant_glb as _vga
 
-    mh = open(model_base + ".model", "rb").read()
-    ms = open(model_base + ".model.stream", "rb").read()
+    mh = _read_bytes(model_base + ".model")
+    ms = _read_bytes(model_base + ".model.stream")
+    plat = we.console_platform_for(model_base + ".model")  # the console colour order
     names, pos, quat, parent = parse_model_nodes.parse(mh)
     pos[0] = 0
     quat[0] = np.array([0, 0, 0, 1.0])
@@ -927,9 +1915,11 @@ def _rigid_attach_parts(model_base, bone, bind, bn):
     Rb, tbb = bv["Rb"][bidx], bv["tb"][bidx]
     M = Rb @ np.linalg.inv(R[hi])
     t = tbb - M @ tb[hi]
-    # byte order: console (X360/PS3) model headers/streams are big-endian.
-    # Compare descriptor counts (a BE model can throw a stray LE false positive).
-    order = ">" if len(we.find_descriptors(mh, ">")) > len(we.find_descriptors(mh, "<")) else "<"
+    # byte order: console (X360/PS3) model headers/streams are big-endian; the
+    # header states which (char_lib.model_order).
+    import char_lib as _cl
+
+    order = _cl.model_order(mh, ms, os.path.basename(model_base))
     be = order == ">"
     descs = we.find_descriptors(mh, order)
     mats = we.extract_materials(mh)
@@ -950,6 +1940,7 @@ def _rigid_attach_parts(model_base, bone, bind, bn):
                 break
             c += 1
         if vbo is None:
+            _cl.note_dropped(model_base, si_, nv, stride, ib, order, _cl.NO_BUFFER)
             continue
         v, _, uv = we._decode_sub(ms, vbo, nv, stride, be)
         ibo = vbo + nv * stride
@@ -960,23 +1951,28 @@ def _rigid_attach_parts(model_base, bone, bind, bn):
                 T.append((x, y, z))
         off = ibo + ib
         if not v or not T:
+            _cl.note_dropped(model_base, si_, nv, stride, ib, order, _cl.NO_TRIANGLES)
             continue
         V = (np.array(v, float) @ M.T) + t
         SI = np.full((len(V), 4), bidx, np.uint16)
         SW = np.zeros((len(V), 4), np.float32)
         SW[:, 0] = 1
         parts.append(
-            (
-                V,
-                SI,
-                SW,
-                np.array(T),
-                np.array(uv if uv else [(0.0, 0.0)] * len(V), np.float32),
+            _vga.with_attrs(
                 (
-                    mats[smat[si_][1]]
-                    if si_ < len(smat) and smat[si_][1] < len(mats)
-                    else "head_sub%d" % si_
+                    V,
+                    SI,
+                    SW,
+                    np.array(T),
+                    np.array(uv if uv else [(0.0, 0.0)] * len(V), np.float32),
+                    (
+                        mats[smat[si_][1]]
+                        if si_ < len(smat) and smat[si_][1] < len(mats)
+                        else "head_sub%d" % si_
+                    ),
                 ),
+                _vga.buffer_vertex_attrs(mh, ms, order, vbo, nv, stride, plat),
+                rot=M,
             )
         )
     return parts
@@ -1005,6 +2001,63 @@ def _icp_refine(A, B, M, t, iters=7):
     return M, t, float(np.median(d))
 
 
+def _face_textures(face, texroots, extract_out):
+    """Texture layers of the face parts.  A head taken from the head collection
+    uses the texture SHEET that collection node names: when that sheet overrides a
+    layer with another texture (face_rule.sheet_overrides -- KnotTop_Large's
+    Large_Head_1 wears the "Goatee" sheet of bikers/head.bmp, whose diffuse is
+    bikers/head02.bmp), the layer is taken from there.  The part gets a material
+    key of its own, so a body part with the same texture keeps the default sheet."""
+    import char_lib, face_rule, variant_glb as vg
+    import watchmen_extract as we
+
+    gh = face.get("game_head") or {}
+    over = face_rule.sheet_overrides(extract_out, gh.get("texture_sheets"))
+    if over:
+        used, parts = [], []
+        for pt in face["parts"]:
+            nm = pt[5]
+            o = over.get(we.texture_key(getattr(nm, "path", None) or ""))
+            if o:
+                new = we.TexRef(str(nm), "%s#sheet=%s" % (nm.path, o["sheet"]))
+                pt = vg.keep_attrs(pt, (pt[0], pt[1], pt[2], pt[3], pt[4], new))
+                pt_over = dict(o, texture=nm.path)
+                if pt_over not in used:
+                    used.append(pt_over)
+            parts.append(pt)
+        face["parts"] = parts
+        gh["sheet_overrides"] = used
+    tex = {}
+    for pt in face["parts"]:
+        nm = pt[5]
+        if nm in tex:
+            continue
+        path = getattr(nm, "path", None) or ""
+        base, _, sheet = path.partition("#sheet=")
+        layers = char_lib._find_layers(we.TexRef(str(nm), base) if sheet else nm, texroots)
+        if layers and sheet:
+            layers = dict(layers)
+            for layer, opath in over[we.texture_key(base)]["overrides"].items():
+                src = char_lib._find_layers(we.texture_ref(opath), texroots) or {}
+                if layer in src:
+                    layers[layer] = src[layer]
+                    if layer == "diffuse":
+                        if src.get("alphaMask"):
+                            layers["alphaMask"] = True
+                        else:
+                            layers.pop("alphaMask", None)
+                        for _k in ("texAlpha", "texAlphaFlag"):
+                            if _k in src:
+                                layers[_k] = src[_k]
+                            else:
+                                layers.pop(_k, None)
+                else:
+                    print("  ! sheet %s: %s layer of %s not found" % (sheet, layer, opath))
+        if layers:
+            tex[nm] = layers
+    return tex
+
+
 def _face_attach(model_base, bone, bind, bn, cname, extract_out, outdir, align_ref=None):
     """Animated face attach: face bind from the head model's own nodes, its
     family's expression poses baked on, alignment M,t mapping face-model space
@@ -1020,7 +2073,7 @@ def _face_attach(model_base, bone, bind, bn, cname, extract_out, outdir, align_r
     if not os.path.exists(fbind):
         bbf.build(model_base + ".model", None, fbind)
     # alignment from both models' conj-gauge FK
-    names, pos, quat, parent = parse_model_nodes.parse(open(model_base + ".model", "rb").read())
+    names, pos, quat, parent = parse_model_nodes.parse(_read_bytes(model_base + ".model"))
     pos[0] = 0
     quat[0] = np.array([0, 0, 0, 1.0])
     parent[0] = -1
@@ -1034,6 +2087,8 @@ def _face_attach(model_base, bone, bind, bn, cname, extract_out, outdir, align_r
     M = Rb @ np.linalg.inv(Rf)
     t = tbb - M @ tf
     # face parts (face-model space) + family poses
+    import variant_glb as _vgk
+
     parts = char_lib.load_parts([model_base], fbn)
     proxy_slots = []
     if align_ref is None:
@@ -1122,19 +2177,22 @@ def _face_attach(model_base, bone, bind, bn, cname, extract_out, outdir, align_r
                 slotmap[k] = len(fbn) + len(proxy_slots) - 1
         if slotmap:
             parts = [
-                (
-                    V,
-                    np.where(
-                        np.isin(SI, list(slotmap)),
-                        np.vectorize(lambda x: slotmap.get(int(x), int(x)))(SI),
-                        SI,
-                    ).astype(SI.dtype),
-                    SW,
-                    T,
-                    UV,
-                    nm,
+                _vgk.keep_attrs(
+                    _pt,
+                    (
+                        _pt[0],
+                        np.where(
+                            np.isin(_pt[1], list(slotmap)),
+                            np.vectorize(lambda x: slotmap.get(int(x), int(x)))(_pt[1]),
+                            _pt[1],
+                        ).astype(_pt[1].dtype),
+                        _pt[2],
+                        _pt[3],
+                        _pt[4],
+                        _pt[5],
+                    ),
                 )
-                for (V, SI, SW, T, UV, nm) in parts
+                for _pt in parts
             ]
             print("  name-proxy ride: %s" % [bn[b] for b in proxy_slots])
     if align_ref is not None:
@@ -1172,7 +2230,8 @@ def _face_attach(model_base, bone, bind, bn, cname, extract_out, outdir, align_r
         refSI = np.vstack([pt[1] for pt in ref_parts])
         refSW = np.vstack([pt[2] for pt in ref_parts])
         newparts = []
-        for V, SI, SW, T, UV, nm in parts:
+        for _pt in parts:
+            V, SI, SW, T, UV, nm = _pt
             V2 = np.asarray(V, float) @ M.T + t
             nn = np.empty(len(V2), int)
             CH = 512
@@ -1210,7 +2269,7 @@ def _face_attach(model_base, bone, bind, bn, cname, extract_out, outdir, align_r
                 for c, (jidx, w) in enumerate(comps):
                     nSI[vi, c] = jidx
                     nSW[vi, c] = w / tw
-            newparts.append((V, nSI, nSW.astype(np.float32), T, UV, nm))
+            newparts.append(_vgk.keep_attrs(_pt, (V, nSI, nSW.astype(np.float32), T, UV, nm)))
         parts = newparts
         print("  weight transfer: proxy body slots %s" % [bn[b] for b in proxy_slots])
     fam = face_export.head_family(head)
@@ -1218,11 +2277,13 @@ def _face_attach(model_base, bone, bind, bn, cname, extract_out, outdir, align_r
         k: v for k, v in face_export.face_clips(extract_out).items() if k.startswith(fam + "/")
     }
     bake_v4._load_bind(fbind)
-    bake_v4._bank_lookup = lambda nm: open(clips[nm], "rb").read() if nm in clips else None
     anims = []
     for nm in sorted(clips):
         try:
-            pal, dur = bake_v4.bake(nm, 2)
+            # a head model's own node list: its roots keep their bind position
+            pal, dur = bake_v4.bake(
+                nm, 2, bank=clips, root_rest="bind", twist_align=False, track_names="prefix"
+            )
             if len(pal) == 1:
                 pal = np.repeat(pal, 2, axis=0)
             # static expression holds (nk 2): 1s hold beats header-exact 30s
@@ -1260,4 +2321,6 @@ def _face_attach(model_base, bone, bind, bn, cname, extract_out, outdir, align_r
         proxy_align=(proxy_align if align_ref is None else None),
         auto_poses=pose0,
         blink_closed=closed,
+        family=fam,
+        head=head,
     )

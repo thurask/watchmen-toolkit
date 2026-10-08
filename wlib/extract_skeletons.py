@@ -27,10 +27,21 @@ def _family(model_name):
     return base.replace("_Skeleton", "").replace("Skeleton", "").strip("_").lower() or base.lower()
 
 
+def _header_order(header):
+    """The order the header states (watchmen_extract.header_order), or None."""
+    try:
+        import watchmen_extract as _we
+    except ImportError:
+        return None
+    return _we.header_order(header)
+
+
 def _ordered_names(header, order=None):
     """Length-prefixed node names in file order. Console (X360/PS3) headers are
     big-endian, so the u32 namelen must be read BE; auto-detected when order is
     None (only the right order parses the small lengths)."""
+    if order is None:
+        order = _header_order(header)
     if order is None:
         order = "<" if len(_ordered_names(header, "<")) >= len(_ordered_names(header, ">")) else ">"
     occ = []

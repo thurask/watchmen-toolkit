@@ -1,0 +1,4808 @@
+{
+ "format": "kapow-builtins/1",
+ "evidence": "BuiltinModule::RegisterMembers 0x47ff8c of KapowMultiDEDRM.exe (PC Part 2), walked with capstone: every call of 0x47f650 (function: signature, handler, member name), 0x47fe93 (property: type object, name, getter, member name) and 0x50574a (enum member). Handlers are thiscall(module, slot* args) with the slot array [return slots][argument slots]; property getters return the value (numbers on the FPU stack, vectors through an out pointer).",
+ "counts": {
+  "functions": 123,
+  "properties": 19,
+  "distinct_function_names": 120,
+  "distinct_function_handlers": 99,
+  "stub_empty_registrations": 20,
+  "stub_empty_distinct_names": 19,
+  "stub_returns_zero_registrations": 3,
+  "enum_members": 10,
+  "semantics_read": 141,
+  "semantics_from_name": 1,
+  "x360_handlers": 14,
+  "ps3_handlers": 142
+ },
+ "console_note": "x360 = Part 2 retail image, from console/x360_p2/pc_function_pairs_v2.tsv (call-sequence pairing; confidence copied, not re-verified; omitted for the shared stubs). ps3 = Part 2 ELF, by the member-name string of the same registration (BuiltinModule__RegisterMembers 0x195540).",
+ "other_builds": {
+  "x360_p1": {
+   "missing_indices": [
+    68,
+    69,
+    98,
+    99,
+    100,
+    119,
+    120,
+    121
+   ],
+   "extra": [
+    {
+     "name": "set_disc_error_message",
+     "signature": "set_disc_error_message(entity,integer)",
+     "member": "BuiltinModule::SetDiscErrorMessageMSG"
+    },
+    {
+     "name": "disablecurrentloadscreen",
+     "signature": "disablecurrentloadscreen",
+     "member": "BuiltinModule::DisableCurrentLoadScreenMSG"
+    }
+   ],
+   "evidence": "member-name and signature strings; registration not read"
+  },
+  "same_as_pc_p2": [
+   "x360_p2",
+   "ps3_p2",
+   "ps3_p1"
+  ]
+ },
+ "type_codes": [
+  {
+   "code": 0,
+   "name": "nothing",
+   "slots": 0
+  },
+  {
+   "code": 1,
+   "name": "number",
+   "slots": 1
+  },
+  {
+   "code": 2,
+   "name": "integer",
+   "slots": 1
+  },
+  {
+   "code": 3,
+   "name": "biginteger",
+   "slots": 2
+  },
+  {
+   "code": 4,
+   "name": "string",
+   "slots": 1
+  },
+  {
+   "code": 5,
+   "name": "truth",
+   "slots": 1
+  },
+  {
+   "code": 6,
+   "name": "vector",
+   "slots": 3
+  },
+  {
+   "code": 7,
+   "name": "quaternion",
+   "slots": 4
+  },
+  {
+   "code": 8,
+   "name": "color",
+   "slots": 1
+  },
+  {
+   "code": 9,
+   "name": "netparticipant",
+   "slots": 1
+  },
+  {
+   "code": 10,
+   "name": "list",
+   "slots": 1
+  },
+  {
+   "code": 11,
+   "name": "dict",
+   "slots": 1
+  },
+  {
+   "code": 12,
+   "name": "entity",
+   "slots": 1
+  },
+  {
+   "code": 13,
+   "name": "struct",
+   "slots": 1
+  },
+  {
+   "code": 14,
+   "name": "asset",
+   "slots": 1
+  }
+ ],
+ "type_codes_note": "DataType ids read from the ctor calls (0x4fa12f); 14 is the asset family. A list, dict, struct or entity value is one pointer slot.",
+ "shared_bodies": {
+  "0x48d55e": "ret 4: the shared empty handler (the dump labels it AIBrainNode__SetEndGoalSlowDownDist)",
+  "0x4fa89c": "args[0] = 0; ret 4: returns false / 0 / null",
+  "0x47ae3b": "c_int and NumToInt",
+  "0x47ae2f": "c_num and IntToNum",
+  "0x47bc19": "getscreensize and getscreenresolution"
+ },
+ "enums": {
+  "LANGUAGE": {
+   "members": [
+    {
+     "name": "LANGUAGE___ENGLISH",
+     "source_name": "English",
+     "value": 0
+    },
+    {
+     "name": "LANGUAGE___FRENCH",
+     "source_name": "French",
+     "value": 1
+    },
+    {
+     "name": "LANGUAGE___ITALIAN",
+     "source_name": "Italian",
+     "value": 2
+    },
+    {
+     "name": "LANGUAGE___GERMAN",
+     "source_name": "German",
+     "value": 3
+    },
+    {
+     "name": "LANGUAGE___SPANISH",
+     "source_name": "Spanish",
+     "value": 4
+    },
+    {
+     "name": "LANGUAGE___DANISH",
+     "source_name": "Danish",
+     "value": 5
+    }
+   ],
+   "note": "member name = \"LANGUAGE___%s\" of the language name upper-cased by 0x410312 (a..z only)"
+  },
+  "PLATFORM": {
+   "members": [
+    {
+     "name": "PLATFORM___EDITOR",
+     "value": 0
+    },
+    {
+     "name": "PLATFORM___PC",
+     "value": 1
+    },
+    {
+     "name": "PLATFORM___X360",
+     "value": 2
+    },
+    {
+     "name": "PLATFORM___PS3",
+     "value": 3
+    }
+   ]
+  }
+ },
+ "structs": [
+  {
+   "declaration": "GameControllerInfo(productName:string,present:truth,type:integer)",
+   "site": "0x47cab9",
+   "also": "list(GameControllerInfo)"
+  }
+ ],
+ "functions": [
+  {
+   "index": 0,
+   "name": "sin",
+   "signature": "sin(number):number",
+   "args": [
+    {
+     "type": "number",
+     "code": 1,
+     "slot": 1,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "number",
+    "code": 1,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 2,
+   "member": "BuiltinModule::sin_handler",
+   "handler": {
+    "pc": "0x47aa9e",
+    "x360": null,
+    "ps3": "0x132ce48"
+   },
+   "registration_site": "0x4801f2",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "CRT sine of the argument (0x423b20)",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 1,
+   "name": "cos",
+   "signature": "cos(number):number",
+   "args": [
+    {
+     "type": "number",
+     "code": 1,
+     "slot": 1,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "number",
+    "code": 1,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 2,
+   "member": "BuiltinModule::cos_handler",
+   "handler": {
+    "pc": "0x47aab6",
+    "x360": null,
+    "ps3": "0x132ce10"
+   },
+   "registration_site": "0x48020c",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "CRT cosine (0x402b11)",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 2,
+   "name": "fastsin",
+   "signature": "fastsin(number):number",
+   "args": [
+    {
+     "type": "number",
+     "code": 1,
+     "slot": 1,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "number",
+    "code": 1,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 2,
+   "member": "BuiltinModule::fastsin_handler",
+   "handler": {
+    "pc": "0x47aace",
+    "x360": null,
+    "ps3": "0x132b7e0"
+   },
+   "registration_site": "0x480226",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "sine through the CRT intrinsic 0x9933f0; not a table",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 3,
+   "name": "fastcos",
+   "signature": "fastcos(number):number",
+   "args": [
+    {
+     "type": "number",
+     "code": 1,
+     "slot": 1,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "number",
+    "code": 1,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 2,
+   "member": "BuiltinModule::fastcos_handler",
+   "handler": {
+    "pc": "0x47aaea",
+    "x360": null,
+    "ps3": "0x132dd90"
+   },
+   "registration_site": "0x480240",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "cosine through the CRT intrinsic 0x990d10; not a table",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 4,
+   "name": "tan",
+   "signature": "tan(number):number",
+   "args": [
+    {
+     "type": "number",
+     "code": 1,
+     "slot": 1,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "number",
+    "code": 1,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 2,
+   "member": "BuiltinModule::tan_handler",
+   "handler": {
+    "pc": "0x47ab06",
+    "x360": null,
+    "ps3": "0x132cdd8"
+   },
+   "registration_site": "0x48025a",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "tangent (0x423b33)",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 5,
+   "name": "asin",
+   "signature": "asin(number):number",
+   "args": [
+    {
+     "type": "number",
+     "code": 1,
+     "slot": 1,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "number",
+    "code": 1,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 2,
+   "member": "BuiltinModule::asin_handler",
+   "handler": {
+    "pc": "0x47ab1e",
+    "x360": null,
+    "ps3": "0x132cda0"
+   },
+   "registration_site": "0x480274",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "arc sine (0x423b91)",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 6,
+   "name": "acos",
+   "signature": "acos(number):number",
+   "args": [
+    {
+     "type": "number",
+     "code": 1,
+     "slot": 1,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "number",
+    "code": 1,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 2,
+   "member": "BuiltinModule::acos_handler",
+   "handler": {
+    "pc": "0x47ab36",
+    "x360": null,
+    "ps3": "0x132cd68"
+   },
+   "registration_site": "0x48028e",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "arc cosine (0x423b46)",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 7,
+   "name": "atan",
+   "signature": "atan(number):number",
+   "args": [
+    {
+     "type": "number",
+     "code": 1,
+     "slot": 1,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "number",
+    "code": 1,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 2,
+   "member": "BuiltinModule::atan_handler",
+   "handler": {
+    "pc": "0x47ab4e",
+    "x360": null,
+    "ps3": "0x132cd30"
+   },
+   "registration_site": "0x4802a8",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "arc tangent (0x423bdc)",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 8,
+   "name": "abs",
+   "signature": "abs(integer):integer",
+   "args": [
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 1,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "integer",
+    "code": 2,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 2,
+   "member": "BuiltinModule::abs_handler",
+   "handler": {
+    "pc": "0x47ab8f",
+    "x360": null,
+    "ps3": "0x132b8b0"
+   },
+   "registration_site": "0x4802c2",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "integer absolute value",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 9,
+   "name": "fabs",
+   "signature": "fabs(number):number",
+   "args": [
+    {
+     "type": "number",
+     "code": 1,
+     "slot": 1,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "number",
+    "code": 1,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 2,
+   "member": "BuiltinModule::fabs_handler",
+   "handler": {
+    "pc": "0x47ab66",
+    "x360": null,
+    "ps3": "0x132b898"
+   },
+   "registration_site": "0x4802dc",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "number absolute value",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 10,
+   "name": "sqrt",
+   "signature": "sqrt(number):number",
+   "args": [
+    {
+     "type": "number",
+     "code": 1,
+     "slot": 1,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "number",
+    "code": 1,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 2,
+   "member": "BuiltinModule::sqrt_handler",
+   "handler": {
+    "pc": "0x47abc4",
+    "x360": null,
+    "ps3": "0x132cc60"
+   },
+   "registration_site": "0x4802f6",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "square root; a negative argument returns 0 (the error print is a no-op)",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 11,
+   "name": "floor",
+   "signature": "floor(number):number",
+   "args": [
+    {
+     "type": "number",
+     "code": 1,
+     "slot": 1,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "number",
+    "code": 1,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 2,
+   "member": "BuiltinModule::floor_handler",
+   "handler": {
+    "pc": "0x47aba1",
+    "x360": null,
+    "ps3": "0x132b8c8"
+   },
+   "registration_site": "0x480310",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "floor (0x991d00)",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 12,
+   "name": "ceil",
+   "signature": "ceil(number):number",
+   "args": [
+    {
+     "type": "number",
+     "code": 1,
+     "slot": 1,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "number",
+    "code": 1,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 2,
+   "member": "BuiltinModule::ceil_handler",
+   "handler": {
+    "pc": "0x47ac0d",
+    "x360": null,
+    "ps3": "0x132b958"
+   },
+   "registration_site": "0x48032a",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "ceiling (0x4058be)",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 13,
+   "name": "clamp",
+   "signature": "clamp(number,number,number):number",
+   "args": [
+    {
+     "type": "number",
+     "code": 1,
+     "slot": 1,
+     "slots": 1
+    },
+    {
+     "type": "number",
+     "code": 1,
+     "slot": 2,
+     "slots": 1
+    },
+    {
+     "type": "number",
+     "code": 1,
+     "slot": 3,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "number",
+    "code": 1,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 4,
+   "member": "BuiltinModule::clamp_handler",
+   "handler": {
+    "pc": "0x47acc4",
+    "x360": null,
+    "ps3": "0x132ba30"
+   },
+   "registration_site": "0x480344",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "clamp(x, lo, hi) = min(max(x, lo), hi)",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 14,
+   "name": "pow",
+   "signature": "pow(number,number):number",
+   "args": [
+    {
+     "type": "number",
+     "code": 1,
+     "slot": 1,
+     "slots": 1
+    },
+    {
+     "type": "number",
+     "code": 1,
+     "slot": 2,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "number",
+    "code": 1,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 3,
+   "member": "BuiltinModule::pow_handler",
+   "handler": {
+    "pc": "0x47ad1b",
+    "x360": null,
+    "ps3": "0x132ccf0"
+   },
+   "registration_site": "0x48035e",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "x to the power y (0x423c2b)",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 15,
+   "name": "mod",
+   "signature": "mod(number,number):number",
+   "args": [
+    {
+     "type": "number",
+     "code": 1,
+     "slot": 1,
+     "slots": 1
+    },
+    {
+     "type": "number",
+     "code": 1,
+     "slot": 2,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "number",
+    "code": 1,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 3,
+   "member": "BuiltinModule::mod_handler",
+   "handler": {
+    "pc": "0x47ad3c",
+    "x360": null,
+    "ps3": "0x132cac8"
+   },
+   "registration_site": "0x480378",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "floating remainder (0x99411a); a zero divisor returns 0",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 16,
+   "name": "min",
+   "signature": "min(number,number):number",
+   "args": [
+    {
+     "type": "number",
+     "code": 1,
+     "slot": 1,
+     "slots": 1
+    },
+    {
+     "type": "number",
+     "code": 1,
+     "slot": 2,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "number",
+    "code": 1,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 3,
+   "member": "BuiltinModule::min_handler",
+   "handler": {
+    "pc": "0x47ac2e",
+    "x360": null,
+    "ps3": "0x132b9e0"
+   },
+   "registration_site": "0x480392",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "smaller of two numbers",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 17,
+   "name": "max",
+   "signature": "max(number,number):number",
+   "args": [
+    {
+     "type": "number",
+     "code": 1,
+     "slot": 1,
+     "slots": 1
+    },
+    {
+     "type": "number",
+     "code": 1,
+     "slot": 2,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "number",
+    "code": 1,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 3,
+   "member": "BuiltinModule::max_handler",
+   "handler": {
+    "pc": "0x47ac64",
+    "x360": null,
+    "ps3": "0x132b9f8"
+   },
+   "registration_site": "0x4803ac",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "larger of two numbers",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 18,
+   "name": "min",
+   "signature": "min(integer,integer):integer",
+   "args": [
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 1,
+     "slots": 1
+    },
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 2,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "integer",
+    "code": 2,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 3,
+   "member": "BuiltinModule::minInt_handler",
+   "handler": {
+    "pc": "0x47ac9a",
+    "x360": null,
+    "ps3": "0x132ba10"
+   },
+   "registration_site": "0x4803c6",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "smaller of two integers",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 19,
+   "name": "max",
+   "signature": "max(integer,integer):integer",
+   "args": [
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 1,
+     "slots": 1
+    },
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 2,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "integer",
+    "code": 2,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 3,
+   "member": "BuiltinModule::maxInt_handler",
+   "handler": {
+    "pc": "0x47acaf",
+    "x360": null,
+    "ps3": "0x132cf60"
+   },
+   "registration_site": "0x4803e0",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "larger of two integers",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 20,
+   "name": "c_int",
+   "signature": "c_int(number):integer",
+   "args": [
+    {
+     "type": "number",
+     "code": 1,
+     "slot": 1,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "integer",
+    "code": 2,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 2,
+   "member": "BuiltinModule::NumberToInteger",
+   "handler": {
+    "pc": "0x47ae3b",
+    "x360": null,
+    "ps3": "0x132baf8"
+   },
+   "registration_site": "0x4803fb",
+   "stub": null,
+   "shares_body_with": [
+    "NumToInt"
+   ],
+   "semantics": "number to integer through 0x990ba0 (cvttsd2si: truncates toward zero)",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 21,
+   "name": "c_num",
+   "signature": "c_num(integer):number",
+   "args": [
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 1,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "number",
+    "code": 1,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 2,
+   "member": "BuiltinModule::IntegerToNumber",
+   "handler": {
+    "pc": "0x47ae2f",
+    "x360": null,
+    "ps3": "0x132bad8"
+   },
+   "registration_site": "0x480417",
+   "stub": null,
+   "shares_body_with": [
+    "IntToNum"
+   ],
+   "semantics": "integer to number (fild / fstp)",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 22,
+   "name": "StrToInt",
+   "signature": "StrToInt(string):integer",
+   "args": [
+    {
+     "type": "string",
+     "code": 4,
+     "slot": 1,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "integer",
+    "code": 2,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 2,
+   "member": "BuiltinModule::StringToInteger",
+   "handler": {
+    "pc": "0x47ae1b",
+    "x360": null,
+    "ps3": "0x132ca88"
+   },
+   "registration_site": "0x480431",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "atol of the string",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 23,
+   "name": "StrToNum",
+   "signature": "StrToNum(string):number",
+   "args": [
+    {
+     "type": "string",
+     "code": 4,
+     "slot": 1,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "number",
+    "code": 1,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 2,
+   "member": "BuiltinModule::StringToNumber",
+   "handler": {
+    "pc": "0x47ae07",
+    "x360": null,
+    "ps3": "0x132ca40"
+   },
+   "registration_site": "0x48044b",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "atof of the string, stored as float32",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 24,
+   "name": "NumToInt",
+   "signature": "NumToInt(number):integer",
+   "args": [
+    {
+     "type": "number",
+     "code": 1,
+     "slot": 1,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "integer",
+    "code": 2,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 2,
+   "member": "BuiltinModule::NumberToInteger",
+   "handler": {
+    "pc": "0x47ae3b",
+    "x360": null,
+    "ps3": "0x132baf8"
+   },
+   "registration_site": "0x480461",
+   "stub": null,
+   "shares_body_with": [
+    "c_int"
+   ],
+   "semantics": "same body as c_int: truncates toward zero",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 25,
+   "name": "NumToStr",
+   "signature": "NumToStr(number):string",
+   "args": [
+    {
+     "type": "number",
+     "code": 1,
+     "slot": 1,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "string",
+    "code": 4,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 2,
+   "member": "BuiltinModule::NumberToString",
+   "handler": {
+    "pc": "0x47bad0",
+    "x360": null,
+    "ps3": "0x1333730"
+   },
+   "registration_site": "0x48047b",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "number to a pooled string (0x40a754 with precision argument 0)",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 26,
+   "name": "NumToStrF",
+   "signature": "NumToStrF(number,integer):string",
+   "args": [
+    {
+     "type": "number",
+     "code": 1,
+     "slot": 1,
+     "slots": 1
+    },
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 2,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "string",
+    "code": 4,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 3,
+   "member": "BuiltinModule::NumberToStringFormatted",
+   "handler": {
+    "pc": "0x47bb20",
+    "x360": null,
+    "ps3": "0x1333658"
+   },
+   "registration_site": "0x480495",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "number to string with the integer passed as the second argument of 0x40a754 (meaning of that argument: from name, a format / precision)",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 27,
+   "name": "IntToNum",
+   "signature": "IntToNum(integer):number",
+   "args": [
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 1,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "number",
+    "code": 1,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 2,
+   "member": "BuiltinModule::IntegerToNumber",
+   "handler": {
+    "pc": "0x47ae2f",
+    "x360": null,
+    "ps3": "0x132bad8"
+   },
+   "registration_site": "0x4804a7",
+   "stub": null,
+   "shares_body_with": [
+    "c_num"
+   ],
+   "semantics": "same body as c_num",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 28,
+   "name": "IntToStr",
+   "signature": "IntToStr(integer):string",
+   "args": [
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 1,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "string",
+    "code": 4,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 2,
+   "member": "BuiltinModule::IntegerToString",
+   "handler": {
+    "pc": "0x47ba37",
+    "x360": null,
+    "ps3": "0x1333238"
+   },
+   "registration_site": "0x4804c1",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "integer to a pooled string (0x40a6eb with second argument 0)",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 29,
+   "name": "IntToStrF",
+   "signature": "IntToStrF(integer,integer):string",
+   "args": [
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 1,
+     "slots": 1
+    },
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 2,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "string",
+    "code": 4,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 3,
+   "member": "BuiltinModule::IntegerToStringFormatted",
+   "handler": {
+    "pc": "0x47ba83",
+    "x360": null,
+    "ps3": "0x1333158"
+   },
+   "registration_site": "0x4804db",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "integer to string with the second integer passed to 0x40a6eb (from name: a format / width)",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 30,
+   "name": "findrotation",
+   "signature": "findrotation(vector,vector):quaternion",
+   "args": [
+    {
+     "type": "vector",
+     "code": 6,
+     "slot": 4,
+     "slots": 3
+    },
+    {
+     "type": "vector",
+     "code": 6,
+     "slot": 7,
+     "slots": 3
+    }
+   ],
+   "returns": {
+    "type": "quaternion",
+    "code": 7,
+    "slot": 0,
+    "slots": 4
+   },
+   "arg_slots_total": 10,
+   "member": "BuiltinModule::findrotation_handler",
+   "handler": {
+    "pc": "0x47b992",
+    "x360": null,
+    "ps3": "0x132ce80"
+   },
+   "registration_site": "0x4804f5",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "quaternion from two vectors through 0x41f896 (from name: the rotation taking the first onto the second)",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 31,
+   "name": "testbits",
+   "signature": "testbits(integer,integer):truth",
+   "args": [
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 1,
+     "slots": 1
+    },
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 2,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "truth",
+    "code": 5,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 3,
+   "member": "BuiltinModule::testbits_handler",
+   "handler": {
+    "pc": "0x47ad8f",
+    "x360": null,
+    "ps3": "0x132ba58"
+   },
+   "registration_site": "0x48050f",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "(a & b) != 0",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 32,
+   "name": "setbit",
+   "signature": "setbit(integer,integer):integer",
+   "args": [
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 1,
+     "slots": 1
+    },
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 2,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "integer",
+    "code": 2,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 3,
+   "member": "BuiltinModule::setbit_handler",
+   "handler": {
+    "pc": "0x47ada4",
+    "x360": null,
+    "ps3": "0x132ba80"
+   },
+   "registration_site": "0x480529",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "v | (1 << (n & 31))",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 33,
+   "name": "getbit",
+   "signature": "getbit(integer,integer):truth",
+   "args": [
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 1,
+     "slots": 1
+    },
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 2,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "truth",
+    "code": 5,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 3,
+   "member": "BuiltinModule::getbit_handler",
+   "handler": {
+    "pc": "0x47adb8",
+    "x360": null,
+    "ps3": "0x132baa0"
+   },
+   "registration_site": "0x480543",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "(v & (1 << (n & 31))) != 0",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 34,
+   "name": "rand_seed",
+   "signature": "rand_seed(integer)",
+   "args": [
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 0,
+     "slots": 1
+    }
+   ],
+   "returns": null,
+   "arg_slots_total": 1,
+   "member": "BuiltinModule::rand_seed",
+   "handler": {
+    "pc": "0x47afdd",
+    "x360": null,
+    "ps3": "0x185130"
+   },
+   "registration_site": "0x48055d",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "frees the script generator and makes a new MT19937 seeded with the argument (0x41f403)",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 35,
+   "name": "rand_integer",
+   "signature": "rand_integer(integer):integer",
+   "args": [
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 1,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "integer",
+    "code": 2,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 2,
+   "member": "BuiltinModule::rand_integer",
+   "handler": {
+    "pc": "0x47b025",
+    "x360": "0x822c4580",
+    "ps3": "0x185328",
+    "x360_confidence": "medium"
+   },
+   "registration_site": "0x480577",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "script generator draw 0x47aa2e: 0 .. n-1 by rejection sampling; n = 0 divides by zero",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 36,
+   "name": "rand_number",
+   "signature": "rand_number:number",
+   "args": [],
+   "returns": {
+    "type": "number",
+    "code": 1,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 1,
+   "member": "BuiltinModule::rand_number",
+   "handler": {
+    "pc": "0x47b03e",
+    "x360": "0x822c4630",
+    "ps3": "0x185260",
+    "x360_confidence": "high"
+   },
+   "registration_site": "0x480591",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "script generator draw 0x576418: unsigned draw * 2^-32 stored as float32, range [0, 1]",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 37,
+   "name": "gettime",
+   "signature": "gettime:number",
+   "args": [],
+   "returns": {
+    "type": "number",
+    "code": 1,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 1,
+   "member": "BuiltinModule::GetTime_handler",
+   "handler": {
+    "pc": "0x47add2",
+    "x360": null,
+    "ps3": "0x132c928"
+   },
+   "registration_site": "0x4805ab",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "millisecond clock 0x41e568 divided by 1000.0",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 38,
+   "name": "getsystemtime",
+   "signature": "getsystemtime:string",
+   "args": [],
+   "returns": {
+    "type": "string",
+    "code": 4,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 1,
+   "member": "BuiltinModule::GetSystemTimeMSG",
+   "handler": {
+    "pc": "0x47bd0c",
+    "x360": null,
+    "ps3": "0x18de28"
+   },
+   "registration_site": "0x4805c5",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "system time as a pooled string (0x4282db)",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 39,
+   "name": "getScriptUpdateDuration",
+   "signature": "getScriptUpdateDuration:number",
+   "args": [],
+   "returns": {
+    "type": "number",
+    "code": 1,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 1,
+   "member": "BuiltinModule::GetScriptUpdateDuration_handler",
+   "handler": {
+    "pc": "0x47adf8",
+    "x360": null,
+    "ps3": "0x132bab8"
+   },
+   "registration_site": "0x4805df",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "returns the global 0xe14318",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 40,
+   "name": "print",
+   "signature": "print(string)",
+   "args": [
+    {
+     "type": "string",
+     "code": 4,
+     "slot": 0,
+     "slots": 1
+    }
+   ],
+   "returns": null,
+   "arg_slots_total": 1,
+   "member": "BuiltinModule::print_handler",
+   "handler": {
+    "pc": "0x47cbfc",
+    "x360": "0x82a02d08",
+    "ps3": "0x197830",
+    "x360_confidence": "medium"
+   },
+   "registration_site": "0x4805f9",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "no-op in this build: both branches end in the logger 0x48d561, which is a single ret",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 41,
+   "name": "forceprint",
+   "signature": "forceprint(string)",
+   "args": [
+    {
+     "type": "string",
+     "code": 4,
+     "slot": 0,
+     "slots": 1
+    }
+   ],
+   "returns": null,
+   "arg_slots_total": 1,
+   "member": "BuiltinModule::forceprint_handler",
+   "handler": {
+    "pc": "0x47b052",
+    "x360": null,
+    "ps3": "0x184a00"
+   },
+   "registration_site": "0x480613",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "no-op in this build (logger 0x48d561)",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 42,
+   "name": "debugstring",
+   "signature": "debugstring(string)",
+   "args": [
+    {
+     "type": "string",
+     "code": 4,
+     "slot": 0,
+     "slots": 1
+    }
+   ],
+   "returns": null,
+   "arg_slots_total": 1,
+   "member": "BuiltinModule::debugstring_handler",
+   "handler": {
+    "pc": "0x47cd03",
+    "x360": null,
+    "ps3": "0x184dc8"
+   },
+   "registration_site": "0x48062d",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "passes the string to 0x47bf3e",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 43,
+   "name": "getdrawannotationprimitives",
+   "signature": "getdrawannotationprimitives:truth",
+   "args": [],
+   "returns": {
+    "type": "truth",
+    "code": 5,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 1,
+   "member": "BuiltinModule::GetDrawAnnotationPrimitives",
+   "handler": {
+    "pc": "0x47bbb5",
+    "x360": null,
+    "ps3": "0x186538"
+   },
+   "registration_site": "0x480647",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "false without a scene, else byte +0x70 of the render preferences object (0x47afc1)",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 44,
+   "name": "iskeydown",
+   "signature": "iskeydown(integer):truth",
+   "args": [
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 1,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "truth",
+    "code": 5,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 2,
+   "member": "BuiltinModule::IsKeyDown",
+   "handler": {
+    "pc": "0x47b0ba",
+    "x360": null,
+    "ps3": "0x184a48"
+   },
+   "registration_site": "0x480661",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "bit 0 of the key state byte [0xd91d1c + 4 + key]",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 45,
+   "name": "iskeypressed",
+   "signature": "iskeypressed(integer):truth",
+   "args": [
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 1,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "truth",
+    "code": 5,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 2,
+   "member": "BuiltinModule::IsKeyPressed",
+   "handler": {
+    "pc": "0x47b0d4",
+    "x360": null,
+    "ps3": "0x186ec0"
+   },
+   "registration_site": "0x48067b",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "bit 1 of the key state byte",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 46,
+   "name": "iskeyreleased",
+   "signature": "iskeyreleased(integer):truth",
+   "args": [
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 1,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "truth",
+    "code": 5,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 2,
+   "member": "BuiltinModule::IsKeyReleased",
+   "handler": {
+    "pc": "0x47b0f0",
+    "x360": null,
+    "ps3": "0x186e90"
+   },
+   "registration_site": "0x480695",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "bit 2 of the key state byte",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 47,
+   "name": "drawpoint",
+   "signature": "drawpoint(vector,integer)",
+   "args": [
+    {
+     "type": "vector",
+     "code": 6,
+     "slot": 0,
+     "slots": 3
+    },
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 3,
+     "slots": 1
+    }
+   ],
+   "returns": null,
+   "arg_slots_total": 4,
+   "member": "BuiltinModule::DrawPoint",
+   "handler": {
+    "pc": "0x48d55e",
+    "x360": null,
+    "ps3": "0x184b70"
+   },
+   "registration_site": "0x4806af",
+   "stub": "empty",
+   "shares_body_with": [
+    "CreateEditorAction",
+    "CreateHotkeyBinding",
+    "RefreshSceneTree",
+    "close_tabpanel",
+    "create_newtabpanel",
+    "create_newtabpanelbyname",
+    "drawline",
+    "drawline2d",
+    "drawsphere",
+    "editor_reloadallassets",
+    "editor_selectnode",
+    "editorhelper_registertype",
+    "exists_tabpanel",
+    "printnodeproperties",
+    "profilebegin",
+    "profileend",
+    "setscreenresolution",
+    "startcleanupdashboard"
+   ],
+   "semantics": "retail stub: the shared empty body (ret 4); arguments ignored, a declared return slot is left unwritten",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 48,
+   "name": "drawline",
+   "signature": "drawline(vector,vector,integer)",
+   "args": [
+    {
+     "type": "vector",
+     "code": 6,
+     "slot": 0,
+     "slots": 3
+    },
+    {
+     "type": "vector",
+     "code": 6,
+     "slot": 3,
+     "slots": 3
+    },
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 6,
+     "slots": 1
+    }
+   ],
+   "returns": null,
+   "arg_slots_total": 7,
+   "member": "BuiltinModule::DrawLine",
+   "handler": {
+    "pc": "0x48d55e",
+    "x360": null,
+    "ps3": "0x184b60"
+   },
+   "registration_site": "0x4806c9",
+   "stub": "empty",
+   "shares_body_with": [
+    "CreateEditorAction",
+    "CreateHotkeyBinding",
+    "RefreshSceneTree",
+    "close_tabpanel",
+    "create_newtabpanel",
+    "create_newtabpanelbyname",
+    "drawline2d",
+    "drawpoint",
+    "drawsphere",
+    "editor_reloadallassets",
+    "editor_selectnode",
+    "editorhelper_registertype",
+    "exists_tabpanel",
+    "printnodeproperties",
+    "profilebegin",
+    "profileend",
+    "setscreenresolution",
+    "startcleanupdashboard"
+   ],
+   "semantics": "retail stub: the shared empty body (ret 4); arguments ignored, a declared return slot is left unwritten",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 49,
+   "name": "drawline2d",
+   "signature": "drawline2d(vector,vector,integer)",
+   "args": [
+    {
+     "type": "vector",
+     "code": 6,
+     "slot": 0,
+     "slots": 3
+    },
+    {
+     "type": "vector",
+     "code": 6,
+     "slot": 3,
+     "slots": 3
+    },
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 6,
+     "slots": 1
+    }
+   ],
+   "returns": null,
+   "arg_slots_total": 7,
+   "member": "BuiltinModule::DrawLine2D",
+   "handler": {
+    "pc": "0x48d55e",
+    "x360": null,
+    "ps3": "0x184b68"
+   },
+   "registration_site": "0x4806e3",
+   "stub": "empty",
+   "shares_body_with": [
+    "CreateEditorAction",
+    "CreateHotkeyBinding",
+    "RefreshSceneTree",
+    "close_tabpanel",
+    "create_newtabpanel",
+    "create_newtabpanelbyname",
+    "drawline",
+    "drawpoint",
+    "drawsphere",
+    "editor_reloadallassets",
+    "editor_selectnode",
+    "editorhelper_registertype",
+    "exists_tabpanel",
+    "printnodeproperties",
+    "profilebegin",
+    "profileend",
+    "setscreenresolution",
+    "startcleanupdashboard"
+   ],
+   "semantics": "retail stub: the shared empty body (ret 4); arguments ignored, a declared return slot is left unwritten",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 50,
+   "name": "drawsphere",
+   "signature": "drawsphere(vector,number,integer)",
+   "args": [
+    {
+     "type": "vector",
+     "code": 6,
+     "slot": 0,
+     "slots": 3
+    },
+    {
+     "type": "number",
+     "code": 1,
+     "slot": 3,
+     "slots": 1
+    },
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 4,
+     "slots": 1
+    }
+   ],
+   "returns": null,
+   "arg_slots_total": 5,
+   "member": "BuiltinModule::DrawSphere",
+   "handler": {
+    "pc": "0x48d55e",
+    "x360": null,
+    "ps3": "0x184b78"
+   },
+   "registration_site": "0x4806fd",
+   "stub": "empty",
+   "shares_body_with": [
+    "CreateEditorAction",
+    "CreateHotkeyBinding",
+    "RefreshSceneTree",
+    "close_tabpanel",
+    "create_newtabpanel",
+    "create_newtabpanelbyname",
+    "drawline",
+    "drawline2d",
+    "drawpoint",
+    "editor_reloadallassets",
+    "editor_selectnode",
+    "editorhelper_registertype",
+    "exists_tabpanel",
+    "printnodeproperties",
+    "profilebegin",
+    "profileend",
+    "setscreenresolution",
+    "startcleanupdashboard"
+   ],
+   "semantics": "retail stub: the shared empty body (ret 4); arguments ignored, a declared return slot is left unwritten",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 51,
+   "name": "profilebegin",
+   "signature": "profilebegin(string,integer)",
+   "args": [
+    {
+     "type": "string",
+     "code": 4,
+     "slot": 0,
+     "slots": 1
+    },
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 1,
+     "slots": 1
+    }
+   ],
+   "returns": null,
+   "arg_slots_total": 2,
+   "member": "BuiltinModule::ProfileBegin",
+   "handler": {
+    "pc": "0x48d55e",
+    "x360": null,
+    "ps3": "0x1849f0"
+   },
+   "registration_site": "0x480717",
+   "stub": "empty",
+   "shares_body_with": [
+    "CreateEditorAction",
+    "CreateHotkeyBinding",
+    "RefreshSceneTree",
+    "close_tabpanel",
+    "create_newtabpanel",
+    "create_newtabpanelbyname",
+    "drawline",
+    "drawline2d",
+    "drawpoint",
+    "drawsphere",
+    "editor_reloadallassets",
+    "editor_selectnode",
+    "editorhelper_registertype",
+    "exists_tabpanel",
+    "printnodeproperties",
+    "profileend",
+    "setscreenresolution",
+    "startcleanupdashboard"
+   ],
+   "semantics": "retail stub: the shared empty body (ret 4); arguments ignored, a declared return slot is left unwritten",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 52,
+   "name": "profileend",
+   "signature": "profileend(string,integer)",
+   "args": [
+    {
+     "type": "string",
+     "code": 4,
+     "slot": 0,
+     "slots": 1
+    },
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 1,
+     "slots": 1
+    }
+   ],
+   "returns": null,
+   "arg_slots_total": 2,
+   "member": "BuiltinModule::ProfileEnd",
+   "handler": {
+    "pc": "0x48d55e",
+    "x360": null,
+    "ps3": "0x1849f8"
+   },
+   "registration_site": "0x480731",
+   "stub": "empty",
+   "shares_body_with": [
+    "CreateEditorAction",
+    "CreateHotkeyBinding",
+    "RefreshSceneTree",
+    "close_tabpanel",
+    "create_newtabpanel",
+    "create_newtabpanelbyname",
+    "drawline",
+    "drawline2d",
+    "drawpoint",
+    "drawsphere",
+    "editor_reloadallassets",
+    "editor_selectnode",
+    "editorhelper_registertype",
+    "exists_tabpanel",
+    "printnodeproperties",
+    "profilebegin",
+    "setscreenresolution",
+    "startcleanupdashboard"
+   ],
+   "semantics": "retail stub: the shared empty body (ret 4); arguments ignored, a declared return slot is left unwritten",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 53,
+   "name": "quadtreequery",
+   "signature": "quadtreequery(vector,number,integer,list(entity)):integer",
+   "args": [
+    {
+     "type": "vector",
+     "code": 6,
+     "slot": 1,
+     "slots": 3
+    },
+    {
+     "type": "number",
+     "code": 1,
+     "slot": 4,
+     "slots": 1
+    },
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 5,
+     "slots": 1
+    },
+    {
+     "type": "list(entity)",
+     "code": 10,
+     "slot": 6,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "integer",
+    "code": 2,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 7,
+   "member": "BuiltinModule::QuadTreeQueryMSG",
+   "handler": {
+    "pc": "0x47fa32",
+    "x360": null,
+    "ps3": "0x189688"
+   },
+   "registration_site": "0x480757",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "queries the quad tree around the vector (0x47f8b8) and appends to the list every result whose flags at +0xd4 match the integer mask; returns the number appended",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 54,
+   "name": "dc_isactive",
+   "signature": "dc_isactive:truth",
+   "args": [],
+   "returns": {
+    "type": "truth",
+    "code": 5,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 1,
+   "member": "BuiltinModule::IsDebugConsoleActive",
+   "handler": {
+    "pc": "0x47b067",
+    "x360": null,
+    "ps3": "0x184a10"
+   },
+   "registration_site": "0x480771",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "true when the debug console object 0xe14acc has state 1",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 55,
+   "name": "dc_textbox",
+   "signature": "dc_textbox(integer,integer,integer,integer,integer)",
+   "args": [
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 0,
+     "slots": 1
+    },
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 1,
+     "slots": 1
+    },
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 2,
+     "slots": 1
+    },
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 3,
+     "slots": 1
+    },
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 4,
+     "slots": 1
+    }
+   ],
+   "returns": null,
+   "arg_slots_total": 5,
+   "member": "BuiltinModule::DebugConsoleTextBox",
+   "handler": {
+    "pc": "0x47b07f",
+    "x360": null,
+    "ps3": "0x186e28"
+   },
+   "registration_site": "0x48078b",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "debug console text box (0x4b606f) with the five integers",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 56,
+   "name": "dc_print",
+   "signature": "dc_print(string)",
+   "args": [
+    {
+     "type": "string",
+     "code": 4,
+     "slot": 0,
+     "slots": 1
+    }
+   ],
+   "returns": null,
+   "arg_slots_total": 1,
+   "member": "BuiltinModule::DebugConsolePrint",
+   "handler": {
+    "pc": "0x47b0a1",
+    "x360": null,
+    "ps3": "0x186de8"
+   },
+   "registration_site": "0x4807a5",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "prints the string on the debug console (0x4b62d2)",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 57,
+   "name": "getconfigstring",
+   "signature": "getconfigstring(string):string",
+   "args": [
+    {
+     "type": "string",
+     "code": 4,
+     "slot": 1,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "string",
+    "code": 4,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 2,
+   "member": "BuiltinModule::GetConfigStringMSG",
+   "handler": {
+    "pc": "0x47cdd6",
+    "x360": "0x82a06060",
+    "ps3": "0x193958",
+    "x360_confidence": "high"
+   },
+   "registration_site": "0x4807bf",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "value of a configuration key as string; null when the key is absent",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 58,
+   "name": "getconfigtruth",
+   "signature": "getconfigtruth(string):truth",
+   "args": [
+    {
+     "type": "string",
+     "code": 4,
+     "slot": 1,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "truth",
+    "code": 5,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 2,
+   "member": "BuiltinModule::GetConfigTruthMSG",
+   "handler": {
+    "pc": "0x47cf2e",
+    "x360": "0x82a05d78",
+    "ps3": "0x1930f0",
+    "x360_confidence": "medium"
+   },
+   "registration_site": "0x4807d9",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "value of a configuration key as truth; false when absent",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 59,
+   "name": "getconfigstringdefault",
+   "signature": "getconfigstringdefault(string,string):string",
+   "args": [
+    {
+     "type": "string",
+     "code": 4,
+     "slot": 1,
+     "slots": 1
+    },
+    {
+     "type": "string",
+     "code": 4,
+     "slot": 2,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "string",
+    "code": 4,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 3,
+   "member": "BuiltinModule::GetConfigStringDefaultMSG",
+   "handler": {
+    "pc": "0x47ce7b",
+    "x360": null,
+    "ps3": "0x1934b8"
+   },
+   "registration_site": "0x4807f3",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "configuration string, or the second argument when the key is absent",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 60,
+   "name": "getconfigtruthdefault",
+   "signature": "getconfigtruthdefault(string,truth):truth",
+   "args": [
+    {
+     "type": "string",
+     "code": 4,
+     "slot": 1,
+     "slots": 1
+    },
+    {
+     "type": "truth",
+     "code": 5,
+     "slot": 2,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "truth",
+    "code": 5,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 3,
+   "member": "BuiltinModule::GetConfigTruthDefaultMSG",
+   "handler": {
+    "pc": "0x47cfb5",
+    "x360": null,
+    "ps3": "0x192d20"
+   },
+   "registration_site": "0x48080d",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "configuration truth, or the second argument when the key is absent",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 61,
+   "name": "getconfignumber",
+   "signature": "getconfignumber(string,number):number",
+   "args": [
+    {
+     "type": "string",
+     "code": 4,
+     "slot": 1,
+     "slots": 1
+    },
+    {
+     "type": "number",
+     "code": 1,
+     "slot": 2,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "number",
+    "code": 1,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 3,
+   "member": "BuiltinModule::GetConfigNumberMSG",
+   "handler": {
+    "pc": "0x47d03e",
+    "x360": null,
+    "ps3": "0x192958"
+   },
+   "registration_site": "0x480827",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "configuration number, or the second argument when the key is absent",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 62,
+   "name": "getconfiginteger",
+   "signature": "getconfiginteger(string,integer):integer",
+   "args": [
+    {
+     "type": "string",
+     "code": 4,
+     "slot": 1,
+     "slots": 1
+    },
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 2,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "integer",
+    "code": 2,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 3,
+   "member": "BuiltinModule::GetConfigIntegerMSG",
+   "handler": {
+    "pc": "0x47d0c4",
+    "x360": null,
+    "ps3": "0x192590"
+   },
+   "registration_site": "0x480841",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "configuration integer, or the second argument when the key is absent",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 63,
+   "name": "set_current_country_code",
+   "signature": "set_current_country_code(string)",
+   "args": [
+    {
+     "type": "string",
+     "code": 4,
+     "slot": 0,
+     "slots": 1
+    }
+   ],
+   "returns": null,
+   "arg_slots_total": 1,
+   "member": "BuiltinModule::SetCurrentCountryCodeMSG",
+   "handler": {
+    "pc": "0x47ca70",
+    "x360": null,
+    "ps3": "0x1333808"
+   },
+   "registration_site": "0x48085b",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "deprecated: only builds a \"Deprecated function called\" message",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 64,
+   "name": "get_current_country_code",
+   "signature": "get_current_country_code:string",
+   "args": [],
+   "returns": {
+    "type": "string",
+    "code": 4,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 1,
+   "member": "BuiltinModule::GetCurrentCountryCodeMSG",
+   "handler": {
+    "pc": "0x47b9ec",
+    "x360": null,
+    "ps3": "0x1333310"
+   },
+   "registration_site": "0x480875",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "country code string from 0x437cb7",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 65,
+   "name": "getsystemlanguage",
+   "signature": "getsystemlanguage:integer",
+   "args": [],
+   "returns": {
+    "type": "integer",
+    "code": 2,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 1,
+   "member": "BuiltinModule::GetSystemLanguageMSG",
+   "handler": {
+    "pc": "0x47b10d",
+    "x360": null,
+    "ps3": "0x186518"
+   },
+   "registration_site": "0x48088f",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "LANGUAGE value from 0x45c762: field +0x88, or +0x84 when +0x88 is 6",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 66,
+   "name": "getplatformid",
+   "signature": "getplatformid:integer",
+   "args": [],
+   "returns": {
+    "type": "integer",
+    "code": 2,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 1,
+   "member": "BuiltinModule::GetPlatformIDMSG",
+   "handler": {
+    "pc": "0x47b121",
+    "x360": null,
+    "ps3": "0x186508"
+   },
+   "registration_site": "0x4808a9",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "PLATFORM value from 0x45c8b1: field +0x8c, with 5 reported as 1 (PC)",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 67,
+   "name": "getframenumber",
+   "signature": "getframenumber:integer",
+   "args": [],
+   "returns": {
+    "type": "integer",
+    "code": 2,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 1,
+   "member": "BuiltinModule::GetFrameNumberMSG",
+   "handler": {
+    "pc": "0x47b146",
+    "x360": null,
+    "ps3": "0x184b80"
+   },
+   "registration_site": "0x4808c3",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "frame counter 0xe14320",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 68,
+   "name": "SortPivotNodes",
+   "signature": "SortPivotNodes(list(entity),vector)",
+   "args": [
+    {
+     "type": "list(entity)",
+     "code": 10,
+     "slot": 0,
+     "slots": 1
+    },
+    {
+     "type": "vector",
+     "code": 6,
+     "slot": 1,
+     "slots": 3
+    }
+   ],
+   "returns": null,
+   "arg_slots_total": 4,
+   "member": "BuiltinModule::SortPivotNodesMSG",
+   "handler": {
+    "pc": "0x47edf3",
+    "x360": null,
+    "ps3": "0x18b450"
+   },
+   "registration_site": "0x4808dd",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "sorts the entity list in place by squared distance to the vector (quicksort 0x47e898, compare 0x47cd16)",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 69,
+   "name": "getrenderpreferences",
+   "signature": "getrenderpreferences:entity",
+   "args": [],
+   "returns": {
+    "type": "entity",
+    "code": 12,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 1,
+   "member": "BuiltinModule::GetRenderPreferencesMSG",
+   "handler": {
+    "pc": "0x47b155",
+    "x360": null,
+    "ps3": "0x187758"
+   },
+   "registration_site": "0x4808f7",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "the render preferences entity (0x47afc1)",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 70,
+   "name": "startcleanupdashboard",
+   "signature": "startcleanupdashboard(integer)",
+   "args": [
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 0,
+     "slots": 1
+    }
+   ],
+   "returns": null,
+   "arg_slots_total": 1,
+   "member": "BuiltinModule::StartCleanupDashboardMSG",
+   "handler": {
+    "pc": "0x48d55e",
+    "x360": null,
+    "ps3": "0x184a88"
+   },
+   "registration_site": "0x480911",
+   "stub": "empty",
+   "shares_body_with": [
+    "CreateEditorAction",
+    "CreateHotkeyBinding",
+    "RefreshSceneTree",
+    "close_tabpanel",
+    "create_newtabpanel",
+    "create_newtabpanelbyname",
+    "drawline",
+    "drawline2d",
+    "drawpoint",
+    "drawsphere",
+    "editor_reloadallassets",
+    "editor_selectnode",
+    "editorhelper_registertype",
+    "exists_tabpanel",
+    "printnodeproperties",
+    "profilebegin",
+    "profileend",
+    "setscreenresolution"
+   ],
+   "semantics": "retail stub: the shared empty body (ret 4); arguments ignored, a declared return slot is left unwritten",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 71,
+   "name": "setscreenresolution",
+   "signature": "setscreenresolution(integer,integer)",
+   "args": [
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 0,
+     "slots": 1
+    },
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 1,
+     "slots": 1
+    }
+   ],
+   "returns": null,
+   "arg_slots_total": 2,
+   "member": "BuiltinModule::SetScreenResolutionMSG",
+   "handler": {
+    "pc": "0x48d55e",
+    "x360": null,
+    "ps3": "0x184a90"
+   },
+   "registration_site": "0x48092b",
+   "stub": "empty",
+   "shares_body_with": [
+    "CreateEditorAction",
+    "CreateHotkeyBinding",
+    "RefreshSceneTree",
+    "close_tabpanel",
+    "create_newtabpanel",
+    "create_newtabpanelbyname",
+    "drawline",
+    "drawline2d",
+    "drawpoint",
+    "drawsphere",
+    "editor_reloadallassets",
+    "editor_selectnode",
+    "editorhelper_registertype",
+    "exists_tabpanel",
+    "printnodeproperties",
+    "profilebegin",
+    "profileend",
+    "startcleanupdashboard"
+   ],
+   "semantics": "retail stub: the shared empty body (ret 4); arguments ignored, a declared return slot is left unwritten",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 72,
+   "name": "getscreensize",
+   "signature": "getscreensize:vector",
+   "args": [],
+   "returns": {
+    "type": "vector",
+    "code": 6,
+    "slot": 0,
+    "slots": 3
+   },
+   "arg_slots_total": 3,
+   "member": "BuiltinModule::GetScreenSizeMSG",
+   "handler": {
+    "pc": "0x47bc19",
+    "x360": "0x82a02788",
+    "ps3": "0x186fd0",
+    "x360_confidence": "low"
+   },
+   "registration_site": "0x480945",
+   "stub": null,
+   "shares_body_with": [
+    "getscreenresolution"
+   ],
+   "semantics": "(width, height, 0) from 0xd91c70 +0x40c / +0x410; same body as getscreenresolution",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 73,
+   "name": "getscreenresolution",
+   "signature": "getscreenresolution:vector",
+   "args": [],
+   "returns": {
+    "type": "vector",
+    "code": 6,
+    "slot": 0,
+    "slots": 3
+   },
+   "arg_slots_total": 3,
+   "member": "BuiltinModule::GetScreenResolutionMSG",
+   "handler": {
+    "pc": "0x47bc19",
+    "x360": "0x82a02788",
+    "ps3": "0x184cb8",
+    "x360_confidence": "low"
+   },
+   "registration_site": "0x48095f",
+   "stub": null,
+   "shares_body_with": [
+    "getscreensize"
+   ],
+   "semantics": "(width, height, 0) from 0xd91c70 +0x40c / +0x410",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 74,
+   "name": "getwindowsize",
+   "signature": "getwindowsize:vector",
+   "args": [],
+   "returns": {
+    "type": "vector",
+    "code": 6,
+    "slot": 0,
+    "slots": 3
+   },
+   "arg_slots_total": 3,
+   "member": "BuiltinModule::GetWindowSizeMSG",
+   "handler": {
+    "pc": "0x47bbd9",
+    "x360": null,
+    "ps3": "0x186f30"
+   },
+   "registration_site": "0x480979",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "(width, height, 0) from 0xd91c70 +0x420 / +0x424",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 75,
+   "name": "geteditoractive",
+   "signature": "geteditoractive:truth",
+   "args": [],
+   "returns": {
+    "type": "truth",
+    "code": 5,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 1,
+   "member": "BuiltinModule::GetEditorActiveMSG",
+   "handler": {
+    "pc": "0x4fa89c",
+    "x360": null,
+    "ps3": "0x184a78"
+   },
+   "registration_site": "0x480993",
+   "stub": "returns_zero",
+   "shares_body_with": [
+    "editor_getselectednode",
+    "editor_numselectednodes"
+   ],
+   "semantics": "retail stub: returns false",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 76,
+   "name": "dumptable_create",
+   "signature": "dumptable_create(string):integer",
+   "args": [
+    {
+     "type": "string",
+     "code": 4,
+     "slot": 1,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "integer",
+    "code": 2,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 2,
+   "member": "BuiltinModule::DumpTable_CreateMSG",
+   "handler": {
+    "pc": "0x47ef3b",
+    "x360": null,
+    "ps3": "0x191dd8"
+   },
+   "registration_site": "0x4809ad",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "opens the file for writing and allocates a dump table in the first free slot of 0xc89ef0; -1 when the file cannot be opened (rest of the body not read)",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 77,
+   "name": "dumptable_createfromfile",
+   "signature": "dumptable_createfromfile(string):integer",
+   "args": [
+    {
+     "type": "string",
+     "code": 4,
+     "slot": 1,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "integer",
+    "code": 2,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 2,
+   "member": "BuiltinModule::DumpTable_CreateFromFileMSG",
+   "handler": {
+    "pc": "0x47f004",
+    "x360": null,
+    "ps3": "0x1917d8"
+   },
+   "registration_site": "0x4809c7",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "allocates a dump table and fills it from a file (body read in part)",
+   "semantics_evidence": "from name"
+  },
+  {
+   "index": 78,
+   "name": "dumptable_addintegercolumn",
+   "signature": "dumptable_addintegercolumn(integer,string)",
+   "args": [
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 0,
+     "slots": 1
+    },
+    {
+     "type": "string",
+     "code": 4,
+     "slot": 1,
+     "slots": 1
+    }
+   ],
+   "returns": null,
+   "arg_slots_total": 2,
+   "member": "BuiltinModule::DumpTable_AddIntegerColumnMSG",
+   "handler": {
+    "pc": "0x47e3a7",
+    "x360": null,
+    "ps3": "0x186410"
+   },
+   "registration_site": "0x4809e1",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "adds an integer column named by the string to table n and marks it dirty",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 79,
+   "name": "dumptable_addnumbercolumn",
+   "signature": "dumptable_addnumbercolumn(integer,string)",
+   "args": [
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 0,
+     "slots": 1
+    },
+    {
+     "type": "string",
+     "code": 4,
+     "slot": 1,
+     "slots": 1
+    }
+   ],
+   "returns": null,
+   "arg_slots_total": 2,
+   "member": "BuiltinModule::DumpTable_AddNumberColumnMSG",
+   "handler": {
+    "pc": "0x47e3ec",
+    "x360": null,
+    "ps3": "0x186360"
+   },
+   "registration_site": "0x4809fb",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "adds a number column to table n and marks it dirty",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 80,
+   "name": "dumptable_addstringcolumn",
+   "signature": "dumptable_addstringcolumn(integer,string)",
+   "args": [
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 0,
+     "slots": 1
+    },
+    {
+     "type": "string",
+     "code": 4,
+     "slot": 1,
+     "slots": 1
+    }
+   ],
+   "returns": null,
+   "arg_slots_total": 2,
+   "member": "BuiltinModule::DumpTable_AddStringColumnMSG",
+   "handler": {
+    "pc": "0x47e431",
+    "x360": null,
+    "ps3": "0x1862b0"
+   },
+   "registration_site": "0x480a15",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "adds a string column to table n and marks it dirty",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 81,
+   "name": "dumptable_setnumrows",
+   "signature": "dumptable_setnumrows(integer,integer)",
+   "args": [
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 0,
+     "slots": 1
+    },
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 1,
+     "slots": 1
+    }
+   ],
+   "returns": null,
+   "arg_slots_total": 2,
+   "member": "BuiltinModule::DumpTable_SetNumRowsMSG",
+   "handler": {
+    "pc": "0x47e474",
+    "x360": null,
+    "ps3": "0x186208"
+   },
+   "registration_site": "0x480a2f",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "sets the row count of table n and marks it dirty",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 82,
+   "name": "dumptable_setintegervalue",
+   "signature": "dumptable_setintegervalue(integer,integer,integer,integer)",
+   "args": [
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 0,
+     "slots": 1
+    },
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 1,
+     "slots": 1
+    },
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 2,
+     "slots": 1
+    },
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 3,
+     "slots": 1
+    }
+   ],
+   "returns": null,
+   "arg_slots_total": 4,
+   "member": "BuiltinModule::DumpTable_SetIntegerValueMSG",
+   "handler": {
+    "pc": "0x47e4ae",
+    "x360": null,
+    "ps3": "0x186150"
+   },
+   "registration_site": "0x480a49",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "stores an integer cell (three further arguments) in table n and marks it dirty",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 83,
+   "name": "dumptable_setnumbervalue",
+   "signature": "dumptable_setnumbervalue(integer,integer,integer,number)",
+   "args": [
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 0,
+     "slots": 1
+    },
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 1,
+     "slots": 1
+    },
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 2,
+     "slots": 1
+    },
+    {
+     "type": "number",
+     "code": 1,
+     "slot": 3,
+     "slots": 1
+    }
+   ],
+   "returns": null,
+   "arg_slots_total": 4,
+   "member": "BuiltinModule::DumpTable_SetNumberValueMSG",
+   "handler": {
+    "pc": "0x47e4ea",
+    "x360": null,
+    "ps3": "0x186098"
+   },
+   "registration_site": "0x480a63",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "stores a number cell in table n and marks it dirty",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 84,
+   "name": "dumptable_setstringvalue",
+   "signature": "dumptable_setstringvalue(integer,integer,integer,string)",
+   "args": [
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 0,
+     "slots": 1
+    },
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 1,
+     "slots": 1
+    },
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 2,
+     "slots": 1
+    },
+    {
+     "type": "string",
+     "code": 4,
+     "slot": 3,
+     "slots": 1
+    }
+   ],
+   "returns": null,
+   "arg_slots_total": 4,
+   "member": "BuiltinModule::DumpTable_SetStringValueMSG",
+   "handler": {
+    "pc": "0x47e52a",
+    "x360": null,
+    "ps3": "0x185fe0"
+   },
+   "registration_site": "0x480a7d",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "stores a string cell in table n and marks it dirty",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 85,
+   "name": "dumptable_writetofile",
+   "signature": "dumptable_writetofile(integer,string)",
+   "args": [
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 0,
+     "slots": 1
+    },
+    {
+     "type": "string",
+     "code": 4,
+     "slot": 1,
+     "slots": 1
+    }
+   ],
+   "returns": null,
+   "arg_slots_total": 2,
+   "member": "BuiltinModule::DumpTable_WriteToFileMSG",
+   "handler": {
+    "pc": "0x47e566",
+    "x360": null,
+    "ps3": "0x18d450"
+   },
+   "registration_site": "0x480a97",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "serialises table n and writes it to the named file",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 86,
+   "name": "dumptable_close",
+   "signature": "dumptable_close(integer)",
+   "args": [
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 0,
+     "slots": 1
+    }
+   ],
+   "returns": null,
+   "arg_slots_total": 1,
+   "member": "BuiltinModule::DumpTable_CloseMSG",
+   "handler": {
+    "pc": "0x47e5f1",
+    "x360": null,
+    "ps3": "0x18d148"
+   },
+   "registration_site": "0x480ab1",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "writes table n to its own file name, frees it and clears its slot",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 87,
+   "name": "createlogfile",
+   "signature": "createlogfile(string):integer",
+   "args": [
+    {
+     "type": "string",
+     "code": 4,
+     "slot": 1,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "integer",
+    "code": 2,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 2,
+   "member": "BuiltinModule::CreateLogFileMSG",
+   "handler": {
+    "pc": "0x47ee48",
+    "x360": "0x82a044c0",
+    "ps3": "0x192220",
+    "x360_confidence": "low"
+   },
+   "registration_site": "0x480acb",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "opens a file for writing and appends it to the module log-file list; returns its index, or -1",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 88,
+   "name": "closelogfile",
+   "signature": "closelogfile(integer)",
+   "args": [
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 0,
+     "slots": 1
+    }
+   ],
+   "returns": null,
+   "arg_slots_total": 1,
+   "member": "BuiltinModule::CloseLogFileMSG",
+   "handler": {
+    "pc": "0x47d14a",
+    "x360": null,
+    "ps3": "0x187800"
+   },
+   "registration_site": "0x480ae5",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "destroys log file n (ignored for -1)",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 89,
+   "name": "writetologfile",
+   "signature": "writetologfile(integer, string)",
+   "args": [
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 0,
+     "slots": 1
+    },
+    {
+     "type": "string",
+     "code": 4,
+     "slot": 1,
+     "slots": 1
+    }
+   ],
+   "returns": null,
+   "arg_slots_total": 2,
+   "member": "BuiltinModule::WriteToLogFileMSG",
+   "handler": {
+    "pc": "0x47d185",
+    "x360": "0x82a01128",
+    "ps3": "0x187070",
+    "x360_confidence": "low"
+   },
+   "registration_site": "0x480aff",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "writes the string to log file n and flushes (ignored for -1)",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 90,
+   "name": "editor_reloadallassets",
+   "signature": "editor_reloadallassets(string)",
+   "args": [
+    {
+     "type": "string",
+     "code": 4,
+     "slot": 0,
+     "slots": 1
+    }
+   ],
+   "returns": null,
+   "arg_slots_total": 1,
+   "member": "BuiltinModule::Editor_ReloadAllAssetsMSG",
+   "handler": {
+    "pc": "0x48d55e",
+    "x360": null,
+    "ps3": "0x184af8"
+   },
+   "registration_site": "0x480b1c",
+   "stub": "empty",
+   "shares_body_with": [
+    "CreateEditorAction",
+    "CreateHotkeyBinding",
+    "RefreshSceneTree",
+    "close_tabpanel",
+    "create_newtabpanel",
+    "create_newtabpanelbyname",
+    "drawline",
+    "drawline2d",
+    "drawpoint",
+    "drawsphere",
+    "editor_selectnode",
+    "editorhelper_registertype",
+    "exists_tabpanel",
+    "printnodeproperties",
+    "profilebegin",
+    "profileend",
+    "setscreenresolution",
+    "startcleanupdashboard"
+   ],
+   "semantics": "retail stub: the shared empty body (ret 4); arguments ignored, a declared return slot is left unwritten",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 91,
+   "name": "editor_selectnode",
+   "signature": "editor_selectnode(entity,truth)",
+   "args": [
+    {
+     "type": "entity",
+     "code": 12,
+     "slot": 0,
+     "slots": 1
+    },
+    {
+     "type": "truth",
+     "code": 5,
+     "slot": 1,
+     "slots": 1
+    }
+   ],
+   "returns": null,
+   "arg_slots_total": 2,
+   "member": "BuiltinModule::Editor_SelectNodeMSG",
+   "handler": {
+    "pc": "0x48d55e",
+    "x360": null,
+    "ps3": "0x184b00"
+   },
+   "registration_site": "0x480b36",
+   "stub": "empty",
+   "shares_body_with": [
+    "CreateEditorAction",
+    "CreateHotkeyBinding",
+    "RefreshSceneTree",
+    "close_tabpanel",
+    "create_newtabpanel",
+    "create_newtabpanelbyname",
+    "drawline",
+    "drawline2d",
+    "drawpoint",
+    "drawsphere",
+    "editor_reloadallassets",
+    "editorhelper_registertype",
+    "exists_tabpanel",
+    "printnodeproperties",
+    "profilebegin",
+    "profileend",
+    "setscreenresolution",
+    "startcleanupdashboard"
+   ],
+   "semantics": "retail stub: the shared empty body (ret 4); arguments ignored, a declared return slot is left unwritten",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 92,
+   "name": "editor_numselectednodes",
+   "signature": "editor_numselectednodes:integer",
+   "args": [],
+   "returns": {
+    "type": "integer",
+    "code": 2,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 1,
+   "member": "BuiltinModule::Editor_NumSelectedNodesMSG",
+   "handler": {
+    "pc": "0x4fa89c",
+    "x360": null,
+    "ps3": "0x184b08"
+   },
+   "registration_site": "0x480b50",
+   "stub": "returns_zero",
+   "shares_body_with": [
+    "editor_getselectednode",
+    "geteditoractive"
+   ],
+   "semantics": "retail stub: returns 0",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 93,
+   "name": "editor_getselectednode",
+   "signature": "editor_getselectednode(integer):entity",
+   "args": [
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 1,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "entity",
+    "code": 12,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 2,
+   "member": "BuiltinModule::Editor_GetSelectedNodeMSG",
+   "handler": {
+    "pc": "0x4fa89c",
+    "x360": null,
+    "ps3": "0x184b18"
+   },
+   "registration_site": "0x480b6a",
+   "stub": "returns_zero",
+   "shares_body_with": [
+    "editor_numselectednodes",
+    "geteditoractive"
+   ],
+   "semantics": "retail stub: returns null",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 94,
+   "name": "editor_reloadallassets",
+   "signature": "editor_reloadallassets(string)",
+   "args": [
+    {
+     "type": "string",
+     "code": 4,
+     "slot": 0,
+     "slots": 1
+    }
+   ],
+   "returns": null,
+   "arg_slots_total": 1,
+   "member": "BuiltinModule::Editor_ReloadAllAssetsMSG",
+   "handler": {
+    "pc": "0x48d55e",
+    "x360": null,
+    "ps3": "0x184af8"
+   },
+   "registration_site": "0x480b78",
+   "stub": "empty",
+   "shares_body_with": [
+    "CreateEditorAction",
+    "CreateHotkeyBinding",
+    "RefreshSceneTree",
+    "close_tabpanel",
+    "create_newtabpanel",
+    "create_newtabpanelbyname",
+    "drawline",
+    "drawline2d",
+    "drawpoint",
+    "drawsphere",
+    "editor_selectnode",
+    "editorhelper_registertype",
+    "exists_tabpanel",
+    "printnodeproperties",
+    "profilebegin",
+    "profileend",
+    "setscreenresolution",
+    "startcleanupdashboard"
+   ],
+   "semantics": "retail stub: the shared empty body (ret 4); arguments ignored, a declared return slot is left unwritten",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 95,
+   "name": "printnodeproperties",
+   "signature": "printnodeproperties(entity)",
+   "args": [
+    {
+     "type": "entity",
+     "code": 12,
+     "slot": 0,
+     "slots": 1
+    }
+   ],
+   "returns": null,
+   "arg_slots_total": 1,
+   "member": "BuiltinModule::PrintNodePropertiesMSG",
+   "handler": {
+    "pc": "0x48d55e",
+    "x360": null,
+    "ps3": "0x184b58"
+   },
+   "registration_site": "0x480b92",
+   "stub": "empty",
+   "shares_body_with": [
+    "CreateEditorAction",
+    "CreateHotkeyBinding",
+    "RefreshSceneTree",
+    "close_tabpanel",
+    "create_newtabpanel",
+    "create_newtabpanelbyname",
+    "drawline",
+    "drawline2d",
+    "drawpoint",
+    "drawsphere",
+    "editor_reloadallassets",
+    "editor_selectnode",
+    "editorhelper_registertype",
+    "exists_tabpanel",
+    "profilebegin",
+    "profileend",
+    "setscreenresolution",
+    "startcleanupdashboard"
+   ],
+   "semantics": "retail stub: the shared empty body (ret 4); arguments ignored, a declared return slot is left unwritten",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 96,
+   "name": "getmessageid",
+   "signature": "getmessageid(string):biginteger",
+   "args": [
+    {
+     "type": "string",
+     "code": 4,
+     "slot": 2,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "biginteger",
+    "code": 3,
+    "slot": 0,
+    "slots": 2
+   },
+   "arg_slots_total": 3,
+   "member": "BuiltinModule::GetMessageIDMSG",
+   "handler": {
+    "pc": "0x4f3230",
+    "x360": null,
+    "ps3": "0x132ca00"
+   },
+   "registration_site": "0x480bac",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "biginteger whose high word is the message id of the name (0x4ee289) and low word 0",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 97,
+   "name": "create_newtabpanel",
+   "signature": "create_newtabpanel(entity,string)",
+   "args": [
+    {
+     "type": "entity",
+     "code": 12,
+     "slot": 0,
+     "slots": 1
+    },
+    {
+     "type": "string",
+     "code": 4,
+     "slot": 1,
+     "slots": 1
+    }
+   ],
+   "returns": null,
+   "arg_slots_total": 2,
+   "member": "BuiltinModule::Editor_CreateNewTabPanelMSG",
+   "handler": {
+    "pc": "0x48d55e",
+    "x360": null,
+    "ps3": "0x184b28"
+   },
+   "registration_site": "0x480bc6",
+   "stub": "empty",
+   "shares_body_with": [
+    "CreateEditorAction",
+    "CreateHotkeyBinding",
+    "RefreshSceneTree",
+    "close_tabpanel",
+    "create_newtabpanelbyname",
+    "drawline",
+    "drawline2d",
+    "drawpoint",
+    "drawsphere",
+    "editor_reloadallassets",
+    "editor_selectnode",
+    "editorhelper_registertype",
+    "exists_tabpanel",
+    "printnodeproperties",
+    "profilebegin",
+    "profileend",
+    "setscreenresolution",
+    "startcleanupdashboard"
+   ],
+   "semantics": "retail stub: the shared empty body (ret 4); arguments ignored, a declared return slot is left unwritten",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 98,
+   "name": "create_newtabpanelbyname",
+   "signature": "create_newtabpanelbyname(entity,string,string)",
+   "args": [
+    {
+     "type": "entity",
+     "code": 12,
+     "slot": 0,
+     "slots": 1
+    },
+    {
+     "type": "string",
+     "code": 4,
+     "slot": 1,
+     "slots": 1
+    },
+    {
+     "type": "string",
+     "code": 4,
+     "slot": 2,
+     "slots": 1
+    }
+   ],
+   "returns": null,
+   "arg_slots_total": 3,
+   "member": "BuiltinModule::Editor_CreateNewTabPanelByNameMSG",
+   "handler": {
+    "pc": "0x48d55e",
+    "x360": null,
+    "ps3": "0x184b30"
+   },
+   "registration_site": "0x480be0",
+   "stub": "empty",
+   "shares_body_with": [
+    "CreateEditorAction",
+    "CreateHotkeyBinding",
+    "RefreshSceneTree",
+    "close_tabpanel",
+    "create_newtabpanel",
+    "drawline",
+    "drawline2d",
+    "drawpoint",
+    "drawsphere",
+    "editor_reloadallassets",
+    "editor_selectnode",
+    "editorhelper_registertype",
+    "exists_tabpanel",
+    "printnodeproperties",
+    "profilebegin",
+    "profileend",
+    "setscreenresolution",
+    "startcleanupdashboard"
+   ],
+   "semantics": "retail stub: the shared empty body (ret 4); arguments ignored, a declared return slot is left unwritten",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 99,
+   "name": "close_tabpanel",
+   "signature": "close_tabpanel(string)",
+   "args": [
+    {
+     "type": "string",
+     "code": 4,
+     "slot": 0,
+     "slots": 1
+    }
+   ],
+   "returns": null,
+   "arg_slots_total": 1,
+   "member": "BuiltinModule::Editor_CloseTabPanelMSG",
+   "handler": {
+    "pc": "0x48d55e",
+    "x360": null,
+    "ps3": "0x184b40"
+   },
+   "registration_site": "0x480bfa",
+   "stub": "empty",
+   "shares_body_with": [
+    "CreateEditorAction",
+    "CreateHotkeyBinding",
+    "RefreshSceneTree",
+    "create_newtabpanel",
+    "create_newtabpanelbyname",
+    "drawline",
+    "drawline2d",
+    "drawpoint",
+    "drawsphere",
+    "editor_reloadallassets",
+    "editor_selectnode",
+    "editorhelper_registertype",
+    "exists_tabpanel",
+    "printnodeproperties",
+    "profilebegin",
+    "profileend",
+    "setscreenresolution",
+    "startcleanupdashboard"
+   ],
+   "semantics": "retail stub: the shared empty body (ret 4); arguments ignored, a declared return slot is left unwritten",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 100,
+   "name": "exists_tabpanel",
+   "signature": "exists_tabpanel(string):truth",
+   "args": [
+    {
+     "type": "string",
+     "code": 4,
+     "slot": 1,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "truth",
+    "code": 5,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 2,
+   "member": "BuiltinModule::Editor_ExistsTabPanelMSG",
+   "handler": {
+    "pc": "0x48d55e",
+    "x360": null,
+    "ps3": "0x184b48"
+   },
+   "registration_site": "0x480c14",
+   "stub": "empty",
+   "shares_body_with": [
+    "CreateEditorAction",
+    "CreateHotkeyBinding",
+    "RefreshSceneTree",
+    "close_tabpanel",
+    "create_newtabpanel",
+    "create_newtabpanelbyname",
+    "drawline",
+    "drawline2d",
+    "drawpoint",
+    "drawsphere",
+    "editor_reloadallassets",
+    "editor_selectnode",
+    "editorhelper_registertype",
+    "printnodeproperties",
+    "profilebegin",
+    "profileend",
+    "setscreenresolution",
+    "startcleanupdashboard"
+   ],
+   "semantics": "retail stub: the shared empty body (ret 4); arguments ignored, a declared return slot is left unwritten",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 101,
+   "name": "editorhelper_registertype",
+   "signature": "editorhelper_registertype(string,string)",
+   "args": [
+    {
+     "type": "string",
+     "code": 4,
+     "slot": 0,
+     "slots": 1
+    },
+    {
+     "type": "string",
+     "code": 4,
+     "slot": 1,
+     "slots": 1
+    }
+   ],
+   "returns": null,
+   "arg_slots_total": 2,
+   "member": "BuiltinModule::EditorHelpers_RegisterTypeMSG",
+   "handler": {
+    "pc": "0x48d55e",
+    "x360": null,
+    "ps3": "0x184b50"
+   },
+   "registration_site": "0x480c2e",
+   "stub": "empty",
+   "shares_body_with": [
+    "CreateEditorAction",
+    "CreateHotkeyBinding",
+    "RefreshSceneTree",
+    "close_tabpanel",
+    "create_newtabpanel",
+    "create_newtabpanelbyname",
+    "drawline",
+    "drawline2d",
+    "drawpoint",
+    "drawsphere",
+    "editor_reloadallassets",
+    "editor_selectnode",
+    "exists_tabpanel",
+    "printnodeproperties",
+    "profilebegin",
+    "profileend",
+    "setscreenresolution",
+    "startcleanupdashboard"
+   ],
+   "semantics": "retail stub: the shared empty body (ret 4); arguments ignored, a declared return slot is left unwritten",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 102,
+   "name": "GetEnumMemberNameFromValue",
+   "signature": "GetEnumMemberNameFromValue(string,integer):string",
+   "args": [
+    {
+     "type": "string",
+     "code": 4,
+     "slot": 1,
+     "slots": 1
+    },
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 2,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "string",
+    "code": 4,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 3,
+   "member": "BuiltinModule::GetEnumMemberNameFromValueMSG",
+   "handler": {
+    "pc": "0x47af90",
+    "x360": null,
+    "ps3": "0x13330b8"
+   },
+   "registration_site": "0x480c48",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "name of the member of the named enum with that value (0x4f9109), as a pooled string",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 103,
+   "name": "GetEnumMemberNameFromValueFormatted",
+   "signature": "GetEnumMemberNameFromValueFormatted(string,integer):string",
+   "args": [
+    {
+     "type": "string",
+     "code": 4,
+     "slot": 1,
+     "slots": 1
+    },
+    {
+     "type": "integer",
+     "code": 2,
+     "slot": 2,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "string",
+    "code": 4,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 3,
+   "member": "BuiltinModule::GetEnumMemberNameFromValueFormattedMSG",
+   "handler": {
+    "pc": "0x47d722",
+    "x360": "0x82a02aa0",
+    "ps3": "0x18f5d0",
+    "x360_confidence": "high"
+   },
+   "registration_site": "0x480c62",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "same lookup, then the text after the first \"___\" (string 0x9f5610) is returned, so the FAMILY___ prefix is cut",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 104,
+   "name": "crc32",
+   "signature": "crc32(string):integer",
+   "args": [
+    {
+     "type": "string",
+     "code": 4,
+     "slot": 1,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "integer",
+    "code": 2,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 2,
+   "member": "BuiltinModule::Crc32MSG",
+   "handler": {
+    "pc": "0x47ae4e",
+    "x360": null,
+    "ps3": "0x132c9a8"
+   },
+   "registration_site": "0x480c7c",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "raw engine CRC 0x423ca1 over the string bytes, no case fold",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 105,
+   "name": "CreateNodeAtSiblingPos",
+   "signature": "CreateNodeAtSiblingPos(string,entity,entity):entity",
+   "args": [
+    {
+     "type": "string",
+     "code": 4,
+     "slot": 1,
+     "slots": 1
+    },
+    {
+     "type": "entity",
+     "code": 12,
+     "slot": 2,
+     "slots": 1
+    },
+    {
+     "type": "entity",
+     "code": 12,
+     "slot": 3,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "entity",
+    "code": 12,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 4,
+   "member": "BuiltinModule::CreateNodeAtSiblingPosMSG",
+   "handler": {
+    "pc": "0x47bcef",
+    "x360": "0x82a02cb0",
+    "ps3": "0x188188",
+    "x360_confidence": "high"
+   },
+   "registration_site": "0x480c96",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "CreateNode, then virtual +0x34 of the new node with the third argument (from name: place it at that sibling position)",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 106,
+   "name": "CreateNode",
+   "signature": "CreateNode(string,entity):entity",
+   "args": [
+    {
+     "type": "string",
+     "code": 4,
+     "slot": 1,
+     "slots": 1
+    },
+    {
+     "type": "entity",
+     "code": 12,
+     "slot": 2,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "entity",
+    "code": 12,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 3,
+   "member": "BuiltinModule::CreateNodeMSG",
+   "handler": {
+    "pc": "0x47bc97",
+    "x360": "0x82a01c98",
+    "ps3": "0x187f28",
+    "x360_confidence": "high"
+   },
+   "registration_site": "0x480cb0",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "creates a node of the named type (0x4fd96f) under the parent, which must cast to Node; sets flag 8 on the new subtree, sets the parent and runs or defers the post-load step; null on failure",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 107,
+   "name": "CloneNode",
+   "signature": "CloneNode(entity,entity):entity",
+   "args": [
+    {
+     "type": "entity",
+     "code": 12,
+     "slot": 1,
+     "slots": 1
+    },
+    {
+     "type": "entity",
+     "code": 12,
+     "slot": 2,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "entity",
+    "code": 12,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 3,
+   "member": "BuiltinModule::CloneNodeMSG",
+   "handler": {
+    "pc": "0x47d558",
+    "x360": "0x82a06f28",
+    "ps3": "0x18fc88",
+    "x360_confidence": "high"
+   },
+   "registration_site": "0x480cca",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "clones the first node under the second (serialises it and calls the fragment reader 0x5473ee; body read in part); null when either is not a node",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 108,
+   "name": "DeleteNode",
+   "signature": "DeleteNode(entity)",
+   "args": [
+    {
+     "type": "entity",
+     "code": 12,
+     "slot": 0,
+     "slots": 1
+    }
+   ],
+   "returns": null,
+   "arg_slots_total": 1,
+   "member": "BuiltinModule::DeleteNodeMSG",
+   "handler": {
+    "pc": "0x47b19a",
+    "x360": null,
+    "ps3": "0x185228"
+   },
+   "registration_site": "0x480ce4",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "non-null node: virtual +0x2c with argument 1 (0x4f313c), the deleting destructor; immediate",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 109,
+   "name": "ReparentNode",
+   "signature": "ReparentNode(entity,entity)",
+   "args": [
+    {
+     "type": "entity",
+     "code": 12,
+     "slot": 0,
+     "slots": 1
+    },
+    {
+     "type": "entity",
+     "code": 12,
+     "slot": 1,
+     "slots": 1
+    }
+   ],
+   "returns": null,
+   "arg_slots_total": 2,
+   "member": "BuiltinModule::ReparentNodeMSG",
+   "handler": {
+    "pc": "0x47f2e3",
+    "x360": null,
+    "ps3": "0x187240"
+   },
+   "registration_site": "0x480cfe",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "both must cast (0xe14270); re-parents with 0x490442 and restores the saved world position",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 110,
+   "name": "QuitGame",
+   "signature": "QuitGame",
+   "args": [],
+   "returns": null,
+   "arg_slots_total": 0,
+   "member": "BuiltinModule::QuitGameMSG",
+   "handler": {
+    "pc": "0x47b23a",
+    "x360": null,
+    "ps3": "0x18f440"
+   },
+   "registration_site": "0x480d18",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "sets byte +0x5c of the object at 0xd92a14",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 111,
+   "name": "ReturnToArcadeX360",
+   "signature": "ReturnToArcadeX360",
+   "args": [],
+   "returns": null,
+   "arg_slots_total": 0,
+   "member": "BuiltinModule::ReturnToArcadeX360MSG",
+   "handler": {
+    "pc": "0x47d7f0",
+    "x360": null,
+    "ps3": "0x18f2b0"
+   },
+   "registration_site": "0x480d32",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "PC: only builds the message \"ReturnToArcade is only supported for X360\"",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 112,
+   "name": "RefreshSceneTree",
+   "signature": "RefreshSceneTree",
+   "args": [],
+   "returns": null,
+   "arg_slots_total": 0,
+   "member": "BuiltinModule::RefreshSceneTreeMSG",
+   "handler": {
+    "pc": "0x48d55e",
+    "x360": null,
+    "ps3": "0x184ba0"
+   },
+   "registration_site": "0x480d4c",
+   "stub": "empty",
+   "shares_body_with": [
+    "CreateEditorAction",
+    "CreateHotkeyBinding",
+    "close_tabpanel",
+    "create_newtabpanel",
+    "create_newtabpanelbyname",
+    "drawline",
+    "drawline2d",
+    "drawpoint",
+    "drawsphere",
+    "editor_reloadallassets",
+    "editor_selectnode",
+    "editorhelper_registertype",
+    "exists_tabpanel",
+    "printnodeproperties",
+    "profilebegin",
+    "profileend",
+    "setscreenresolution",
+    "startcleanupdashboard"
+   ],
+   "semantics": "retail stub: the shared empty body (ret 4); arguments ignored, a declared return slot is left unwritten",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 113,
+   "name": "CreateEditorAction",
+   "signature": "CreateEditorAction(entity, string, string, string)",
+   "args": [
+    {
+     "type": "entity",
+     "code": 12,
+     "slot": 0,
+     "slots": 1
+    },
+    {
+     "type": "string",
+     "code": 4,
+     "slot": 1,
+     "slots": 1
+    },
+    {
+     "type": "string",
+     "code": 4,
+     "slot": 2,
+     "slots": 1
+    },
+    {
+     "type": "string",
+     "code": 4,
+     "slot": 3,
+     "slots": 1
+    }
+   ],
+   "returns": null,
+   "arg_slots_total": 4,
+   "member": "BuiltinModule::CreateEditorActionMSG",
+   "handler": {
+    "pc": "0x48d55e",
+    "x360": null,
+    "ps3": "0x184ba8"
+   },
+   "registration_site": "0x480d66",
+   "stub": "empty",
+   "shares_body_with": [
+    "CreateHotkeyBinding",
+    "RefreshSceneTree",
+    "close_tabpanel",
+    "create_newtabpanel",
+    "create_newtabpanelbyname",
+    "drawline",
+    "drawline2d",
+    "drawpoint",
+    "drawsphere",
+    "editor_reloadallassets",
+    "editor_selectnode",
+    "editorhelper_registertype",
+    "exists_tabpanel",
+    "printnodeproperties",
+    "profilebegin",
+    "profileend",
+    "setscreenresolution",
+    "startcleanupdashboard"
+   ],
+   "semantics": "retail stub: the shared empty body (ret 4); arguments ignored, a declared return slot is left unwritten",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 114,
+   "name": "CreateHotkeyBinding",
+   "signature": "CreateHotkeyBinding(string, string, truth, truth):truth",
+   "args": [
+    {
+     "type": "string",
+     "code": 4,
+     "slot": 1,
+     "slots": 1
+    },
+    {
+     "type": "string",
+     "code": 4,
+     "slot": 2,
+     "slots": 1
+    },
+    {
+     "type": "truth",
+     "code": 5,
+     "slot": 3,
+     "slots": 1
+    },
+    {
+     "type": "truth",
+     "code": 5,
+     "slot": 4,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "truth",
+    "code": 5,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 5,
+   "member": "BuiltinModule::CreateHotkeyBindingMSG",
+   "handler": {
+    "pc": "0x48d55e",
+    "x360": null,
+    "ps3": "0x184bb0"
+   },
+   "registration_site": "0x480d80",
+   "stub": "empty",
+   "shares_body_with": [
+    "CreateEditorAction",
+    "RefreshSceneTree",
+    "close_tabpanel",
+    "create_newtabpanel",
+    "create_newtabpanelbyname",
+    "drawline",
+    "drawline2d",
+    "drawpoint",
+    "drawsphere",
+    "editor_reloadallassets",
+    "editor_selectnode",
+    "editorhelper_registertype",
+    "exists_tabpanel",
+    "printnodeproperties",
+    "profilebegin",
+    "profileend",
+    "setscreenresolution",
+    "startcleanupdashboard"
+   ],
+   "semantics": "retail stub: the shared empty body (ret 4); arguments ignored, a declared return slot is left unwritten",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 115,
+   "name": "EnableBlockingMode",
+   "signature": "EnableBlockingMode(truth)",
+   "args": [
+    {
+     "type": "truth",
+     "code": 5,
+     "slot": 0,
+     "slots": 1
+    }
+   ],
+   "returns": null,
+   "arg_slots_total": 1,
+   "member": "BuiltinModule::EnableBlockingModeMSG",
+   "handler": {
+    "pc": "0x47b1ac",
+    "x360": null,
+    "ps3": "0x187158"
+   },
+   "registration_site": "0x480d9a",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "true: enter (0x435c4d), false: leave (0x435c73) the global blocking-mode handler; does not touch the task",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 116,
+   "name": "IsLowViolence",
+   "signature": "IsLowViolence:truth",
+   "args": [],
+   "returns": {
+    "type": "truth",
+    "code": 5,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 1,
+   "member": "BuiltinModule::GetIsLowViolenceMSG",
+   "handler": {
+    "pc": "0x47b135",
+    "x360": null,
+    "ps3": "0x1864e8"
+   },
+   "registration_site": "0x480db4",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "first byte of the object at 0xd92a14",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 117,
+   "name": "GetAsset",
+   "signature": "GetAsset(string,string):entity",
+   "args": [
+    {
+     "type": "string",
+     "code": 4,
+     "slot": 1,
+     "slots": 1
+    },
+    {
+     "type": "string",
+     "code": 4,
+     "slot": 2,
+     "slots": 1
+    }
+   ],
+   "returns": {
+    "type": "entity",
+    "code": 12,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 3,
+   "member": "BuiltinModule::GetAssetMSG",
+   "handler": {
+    "pc": "0x47b1e6",
+    "x360": null,
+    "ps3": "0x1851b8"
+   },
+   "registration_site": "0x480dce",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "asset named by the second string of the asset type named by the first (0x4fd986, 0x54ba59); null when either is missing",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 118,
+   "name": "GetNetworkManager",
+   "signature": "GetNetworkManager:entity",
+   "args": [],
+   "returns": {
+    "type": "entity",
+    "code": 12,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 1,
+   "member": "BuiltinModule::GetNetworkManagerMSG",
+   "handler": {
+    "pc": "0x47bd50",
+    "x360": null,
+    "ps3": "0x184c98"
+   },
+   "registration_site": "0x480de8",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "returns the global 0xe12e1c",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 119,
+   "name": "InitPerformanceMeasurement",
+   "signature": "InitPerformanceMeasurement(list(string))",
+   "args": [
+    {
+     "type": "list(string)",
+     "code": 10,
+     "slot": 0,
+     "slots": 1
+    }
+   ],
+   "returns": null,
+   "arg_slots_total": 1,
+   "member": "BuiltinModule::InitPerformanceMeasurementMSG",
+   "handler": {
+    "pc": "0x47f11b",
+    "x360": null,
+    "ps3": "0x1882f0"
+   },
+   "registration_site": "0x480e02",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "copies the string list into a name vector and passes it to 0x47d918",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 120,
+   "name": "RegisterPerformanceMeasurementCallback",
+   "signature": "RegisterPerformanceMeasurementCallback(entity,biginteger)",
+   "args": [
+    {
+     "type": "entity",
+     "code": 12,
+     "slot": 0,
+     "slots": 1
+    },
+    {
+     "type": "biginteger",
+     "code": 3,
+     "slot": 1,
+     "slots": 2
+    }
+   ],
+   "returns": null,
+   "arg_slots_total": 3,
+   "member": "BuiltinModule::RegisterPerformanceMeasurementCallbacksMSG",
+   "handler": {
+    "pc": "0x47f720",
+    "x360": "0x82a06710",
+    "ps3": "0x185de8",
+    "x360_confidence": "high"
+   },
+   "registration_site": "0x480e1c",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "non-null entity: installs the callback 0x47f1d5 and binds the message through 0x4e1c93",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 121,
+   "name": "UnRegisterPerformanceMeasurementCallback",
+   "signature": "UnRegisterPerformanceMeasurementCallback(entity,biginteger)",
+   "args": [
+    {
+     "type": "entity",
+     "code": 12,
+     "slot": 0,
+     "slots": 1
+    },
+    {
+     "type": "biginteger",
+     "code": 3,
+     "slot": 1,
+     "slots": 2
+    }
+   ],
+   "returns": null,
+   "arg_slots_total": 3,
+   "member": "BuiltinModule::UnRegisterPerformanceMeasurementCallbacksMSG",
+   "handler": {
+    "pc": "0x47b163",
+    "x360": null,
+    "ps3": "0x185da0"
+   },
+   "registration_site": "0x480e36",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "non-null entity: clears the callback (0x41a930(0))",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 122,
+   "name": "GetGameControllerInfoList",
+   "signature": "GetGameControllerInfoList:list(GameControllerInfo)",
+   "args": [],
+   "returns": {
+    "type": "list(GameControllerInfo)",
+    "code": 10,
+    "slot": 0,
+    "slots": 1
+   },
+   "arg_slots_total": 1,
+   "member": "BuiltinModule::GetGameControllerInfoListMSG",
+   "handler": {
+    "pc": "0x47f767",
+    "x360": null,
+    "ps3": "0x18b4e8"
+   },
+   "registration_site": "0x480e5d",
+   "stub": null,
+   "shares_body_with": [],
+   "semantics": "new list(GameControllerInfo) with one element per attached controller (count 0xd91d28): productName, present, type = 0",
+   "semantics_evidence": "read"
+  }
+ ],
+ "properties": [
+  {
+   "index": 0,
+   "name": "gametime",
+   "type": "number",
+   "code": 1,
+   "slots": 1,
+   "type_object": "0xe15190",
+   "member": "BuiltinModule::GetGameTime",
+   "getter": {
+    "pc": "0x47af16",
+    "x360": null,
+    "ps3": "0x132bc28"
+   },
+   "registration_site": "0x480e7d",
+   "semantics": "game clock in seconds (0xe14314)",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 1,
+   "name": "realtime",
+   "type": "number",
+   "code": 1,
+   "slots": 1,
+   "type_object": "0xe15190",
+   "member": "BuiltinModule::GetRealTime",
+   "getter": {
+    "pc": "0x47af1d",
+    "x360": null,
+    "ps3": "0x132bc40"
+   },
+   "registration_site": "0x480e9d",
+   "semantics": "real clock in seconds (0xe1430c)",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 2,
+   "name": "timepassed",
+   "type": "number",
+   "code": 1,
+   "slots": 1,
+   "type_object": "0xe15190",
+   "member": "BuiltinModule::GetTimePassed",
+   "getter": {
+    "pc": "0x47af24",
+    "x360": null,
+    "ps3": "0x132bc58"
+   },
+   "registration_site": "0x480ebd",
+   "semantics": "game step of this frame (0xe14304)",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 3,
+   "name": "realtimepassed",
+   "type": "number",
+   "code": 1,
+   "slots": 1,
+   "type_object": "0xe15190",
+   "member": "BuiltinModule::GetRealTimePassed",
+   "getter": {
+    "pc": "0x47af2b",
+    "x360": null,
+    "ps3": "0x132bc70"
+   },
+   "registration_site": "0x480edd",
+   "semantics": "real step of this frame (0xe14300)",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 4,
+   "name": "millisecondsSinceFrameStart",
+   "type": "number",
+   "code": 1,
+   "slots": 1,
+   "type_object": "0xe15190",
+   "member": "BuiltinModule::GetMillisecondsSinceFrameStart",
+   "getter": {
+    "pc": "0x47af32",
+    "x360": null,
+    "ps3": "0x132c818"
+   },
+   "registration_site": "0x480efd",
+   "semantics": "performance counter delta since the frame start, times 1000 / frequency",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 5,
+   "name": "pi",
+   "type": "number",
+   "code": 1,
+   "slots": 1,
+   "type_object": "0xe15190",
+   "member": "BuiltinModule::GetPI",
+   "getter": {
+    "pc": "0x47ae75",
+    "x360": null,
+    "ps3": "0x132bb08"
+   },
+   "registration_site": "0x480f1d",
+   "semantics": "3.14159274 (float at 0x9f52a8)",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 6,
+   "name": "in_vector",
+   "type": "vector",
+   "code": 6,
+   "slots": 3,
+   "type_object": "0xe15184",
+   "member": "BuiltinModule::GetInVector",
+   "getter": {
+    "pc": "0x47ae7c",
+    "x360": null,
+    "ps3": "0x132bb20"
+   },
+   "registration_site": "0x480f3d",
+   "semantics": "(0, 0, 1) at 0x9e808c",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 7,
+   "name": "out_vector",
+   "type": "vector",
+   "code": 6,
+   "slots": 3,
+   "type_object": "0xe15184",
+   "member": "BuiltinModule::GetOutVector",
+   "getter": {
+    "pc": "0x47ae92",
+    "x360": null,
+    "ps3": "0x132bb48"
+   },
+   "registration_site": "0x480f5d",
+   "semantics": "(0, 0, -1) at 0x9e80cc",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 8,
+   "name": "right_vector",
+   "type": "vector",
+   "code": 6,
+   "slots": 3,
+   "type_object": "0xe15184",
+   "member": "BuiltinModule::GetRightVector",
+   "getter": {
+    "pc": "0x47aea8",
+    "x360": null,
+    "ps3": "0x132bb70"
+   },
+   "registration_site": "0x480f7d",
+   "semantics": "(1, 0, 0) at 0x9e806c",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 9,
+   "name": "left_vector",
+   "type": "vector",
+   "code": 6,
+   "slots": 3,
+   "type_object": "0xe15184",
+   "member": "BuiltinModule::GetLeftVector",
+   "getter": {
+    "pc": "0x47aebe",
+    "x360": null,
+    "ps3": "0x132bb98"
+   },
+   "registration_site": "0x480f9d",
+   "semantics": "(-1, 0, 0) at 0x9e80ac",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 10,
+   "name": "up_vector",
+   "type": "vector",
+   "code": 6,
+   "slots": 3,
+   "type_object": "0xe15184",
+   "member": "BuiltinModule::GetUpVector",
+   "getter": {
+    "pc": "0x47aed4",
+    "x360": null,
+    "ps3": "0x132bbc0"
+   },
+   "registration_site": "0x480fbd",
+   "semantics": "(0, 1, 0) at 0x9e807c",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 11,
+   "name": "down_vector",
+   "type": "vector",
+   "code": 6,
+   "slots": 3,
+   "type_object": "0xe15184",
+   "member": "BuiltinModule::GetDownVector",
+   "getter": {
+    "pc": "0x47aeea",
+    "x360": null,
+    "ps3": "0x132bbe8"
+   },
+   "registration_site": "0x480fdd",
+   "semantics": "(0, -1, 0) at 0x9e80bc",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 12,
+   "name": "zero_vector",
+   "type": "vector",
+   "code": 6,
+   "slots": 3,
+   "type_object": "0xe15184",
+   "member": "BuiltinModule::GetZeroVector",
+   "getter": {
+    "pc": "0x47af00",
+    "x360": null,
+    "ps3": "0x132bc10"
+   },
+   "registration_site": "0x480ffd",
+   "semantics": "(0, 0, 0) at 0x9e803c",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 13,
+   "name": "physicsTimePassed",
+   "type": "number",
+   "code": 1,
+   "slots": 1,
+   "type_object": "0xe15190",
+   "member": "BuiltinModule::GetPhysicsTimePassed",
+   "getter": {
+    "pc": "0x47b24c",
+    "x360": null,
+    "ps3": "0x184bd0"
+   },
+   "registration_site": "0x48101d",
+   "semantics": "float +0xec of the physics object 0xe1528c",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 14,
+   "name": "physicsRemainingTime",
+   "type": "number",
+   "code": 1,
+   "slots": 1,
+   "type_object": "0xe15190",
+   "member": "BuiltinModule::GetPhysicsRemainingTime",
+   "getter": {
+    "pc": "0x47b258",
+    "x360": null,
+    "ps3": "0x186f10"
+   },
+   "registration_site": "0x48103d",
+   "semantics": "float +0xe8 of the physics object 0xe1528c",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 15,
+   "name": "physicsNumTimesteps",
+   "type": "integer",
+   "code": 2,
+   "slots": 1,
+   "type_object": "0xe1518c",
+   "member": "BuiltinModule::GetPhysicsNumTimesteps",
+   "getter": {
+    "pc": "0x47b264",
+    "x360": null,
+    "ps3": "0x186ef0"
+   },
+   "registration_site": "0x48105d",
+   "semantics": "integer +0xf0 of the physics object 0xe1528c",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 16,
+   "name": "scene",
+   "type": "entity",
+   "code": 12,
+   "slots": 1,
+   "type_object": "0xe151a0",
+   "member": "BuiltinModule::GetScene",
+   "getter": {
+    "pc": "0x47afb5",
+    "x360": null,
+    "ps3": "0x132bc88"
+   },
+   "registration_site": "0x48107d",
+   "semantics": "the scene entity (0xe14324)",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 17,
+   "name": "annotate",
+   "type": "entity",
+   "code": 12,
+   "slots": 1,
+   "type_object": "0xe151a0",
+   "member": "BuiltinModule::GetAnnotator",
+   "getter": {
+    "pc": "0x47afbb",
+    "x360": null,
+    "ps3": "0x132bca0"
+   },
+   "registration_site": "0x48109d",
+   "semantics": "the annotator entity (0xe14d3c)",
+   "semantics_evidence": "read"
+  },
+  {
+   "index": 18,
+   "name": "platform",
+   "type": "entity",
+   "code": 12,
+   "slots": 1,
+   "type_object": "0xe151a0",
+   "member": "BuiltinModule::GetPlatformNode",
+   "getter": {
+    "pc": "0x47b246",
+    "x360": null,
+    "ps3": "0x184bb8"
+   },
+   "registration_site": "0x4810bd",
+   "semantics": "the platform node (0xe14d78)",
+   "semantics_evidence": "read"
+  }
+ ]
+}

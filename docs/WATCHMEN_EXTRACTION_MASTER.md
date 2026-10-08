@@ -17,22 +17,22 @@ memory, or NinjaRipper. Engine = **Kapow** (Deadline Games, codename WM07), a
 | block → asset (header+stream) | ✅ solved & verified | `extract_block(header, RAW block_s_z)` |
 | Asset property-bag header format | ✅ characterized | typed, name-HASHED records (config) |
 | **Texture header → name/format/layers** | ✅ **SOLVED & verified** | `parse_texture_header()`; 100% exact name+format+layers, all 186 |
-| **Models — geometry → OBJ** | ✅ **header-driven on Part 2 PC** (735/735 models with a stream) | `wlib/watchmen_extract.py`. *Corrected 2026-10-02:* this row read "OBJ/FBX/STL … (640/642) … header submesh descriptors + IB-validated carve". Every buffer offset now comes from the model header (§5); the descriptor scan remains as the fallback for console files and Part 1. The shipped extractor writes OBJ + MTL (and GLB with `--glb`); it has no FBX or STL writer |
+| **Models — geometry → OBJ** | ✅ **header-driven on all six sets** (735 models with a stream per Part 2 set, 1,085 per Part 1 set; PC, Xbox 360, PS3) | `wlib/watchmen_extract.py`. *Corrected 2026-10-02:* this row read "OBJ/FBX/STL … (640/642) … header submesh descriptors + IB-validated carve". Every buffer offset now comes from the model header (§5); the descriptor scan remains as the fallback and decodes no shipped model (since 2026-10-05 the stand-alone Part 1 header layout and the console streams are read too). The shipped extractor writes OBJ + MTL (and GLB with `--glb`); it has no FBX or STL writer |
 | **Models — collision mesh / full byte-faithful parse** | ✅ header + stream tile exactly (740/740 Part 2 PC); node collision volumes parsed | *Corrected 2026-10-02:* this row read "mapped, not extracted; ~19% of stream is collision volumes". The non-render bytes of the stream are shadow hulls, per-part proxy slabs and cluster tables; collision volumes are in the header, per node (`skeleton_records.parse_node_tail`, see `FORMATS_MISC.md`). The physics / cloth tail of the header is not parsed |
 | **Models — skin weights** | ✅ **decoded** (4×u8 idx @+44, 4×half wt @+48, Σ=1) | rigged FBX still needs skeleton+keyframes from the `.ani` asset; see §5 below |
 | **Animation / skeleton (`.animation`)** | ⚠️ **mapped** — skeleton extracted (428/428), keyframe format decoded | bone names+fps+frames parse; compact quat/trans tracks mapped; full rigged FBX = assembly step; see `ENGINE_CONSTANTS.md` |
 | **Per-variant character glbs** | ✅ 25 glbs, ALL user-QA'd (2026-07-13): header-exact fps, finger-shear dense bakes, d6 jiggle default, face attaches incl. NiteOwl cowl + Heavies_Head_1, BipNN name fixes | `watchmen.py characters 20260708 20260708/characters`; current state + engine truths in `docs/ENGINE_CONSTANTS.md` |
-| **Toolkit layout + one-command run** | ✅ `wlib/` next to `watchmen.py` (canonical lib); `python3 watchmen.py all game.naz OUT` = extract → binds → character glbs | see the README §Quick start |
+| **Toolkit layout + one-command run** | ✅ `wlib/` next to `watchmen.py` (canonical lib); `python3 watchmen.py all game.naz OUT` = extract → binds → the `characters` export (OUT/characters) | see the README §Quick start |
 | **Fresh-install clean-room run** | ✅ **verified** (2026-07-08c) | binds bit-identical + character glb numerically identical from game.naz alone; `watchmen.py extract/binds` |
 | **Character BIND (rest pose → skinning palettes)** | ✅ **SOLVED, FILE-ONLY, engine-exact** (2026-07-08, all 7 skeletons) | node records store [pos][quat XYZW] BEFORE the name (old parser off-by-one); bind Rb = conj-quat FK, tb = FK(Rb, node locals); palette order = bone list rotated by one. `wlib/build_bind_file.py`, `wl.ensure_binds()`, see `docs/ENGINE_CONSTANTS.md` |
 | Vertex normal packing | ✅ solved | HALF4 (3×f16) at vertex+12 |
 | **Textures — format enum** | ✅ solved (Ghidra) | enum→D3DFORMAT table @0xc799e0 |
 | **Texture → stream binding** | ✅ **SOLVED, deterministic** (1190/1190, no search) | *Corrected 2026-10-02:* the (off,sz) pair is the tail of the asset's own directory record; the "+1 shift" was an artefact of starting the directory walk at 399 instead of 400. Same bytes, same assets. See `KAPOW_NAZ_FORMAT.md` §2.3 |
-| **Textures — pixel decode** | ✅ **COMPLETE — 1190/1190** stream-exact | `plan_texture_layers()` tiles every stream as single / cube×6 / animN; multi-layer diffuse+BC5 normal+spec all decode; see §6 below |
+| **Textures — pixel decode** | ✅ **COMPLETE — 1190/1190** stream-exact | `plan_texture_layers()` tiles every stream as single / cube×6 / animN; multi-layer diffuse+BC5 normal+spec all decode; see §6 below. *Corrected 2026-10-03:* the tiling was right, but the two channels of every PC `ATI2` normal layer were written swapped up to toolkit 1.3.0 (§0.7) |
 | **Audio — SFX (`sound`)** | ✅ **COMPLETE — 848/848** → WAV | `wlib/watchmen_extract.py`; format tag @+10 selects MS-ADPCM (98%) / PCM (2%); mono+stereo; see §7 below |
 | **Audio — music (`.mediastream_s`)** | ✅ **13/13 → Ogg Vorbis** | `naz_sound_extract.py game.naz` / `watchmen_extract.py` |
 | **Determinism** | textures+archive ✅ verified reproducible; meshes+SFX empirical/blocked | textures: identical manifest + byte-identical PNG across runs |
-| Full-binary decompile corpus | ✅ available | `ghidra_kapow_out\` (14,910 funcs). *2026-10-02:* a later pass with the scripts in `tools/ghidra/` has 17,225 functions; the research reports are in `docs/re/` |
+| Full-binary decompile corpus | ✅ available | `ghidra_kapow_out\` (14,910 funcs). *2026-10-02:* a later pass with the scripts in `tools/ghidra/` has 19,233 functions (17,225 before the last repair run); the research reports are in `docs/re/` |
 
 ---
 ## 0.5 Session changelog — 2026-07-16 (before PS3 pass)
@@ -107,6 +107,47 @@ that the code contradicts are corrected in place and marked "corrected
 The authoritative layouts are in `KAPOW_NAZ_FORMAT.md` (block, asset header,
 texture, ModelRes) and `FORMATS_MISC.md` (`.sequence`, `.detailmesh`, node
 collision volumes).
+
+---
+## 0.7 Corrections — 2026-10-03 (toolkit 1.4.0)
+
+The game's shaders were disassembled and the result rendered against the
+engine's pixel math (`docs/re/vcolor.md`; `ENGINE_CONSTANTS.md`, section
+"2026-10-03"). Statements in this document that this contradicts are marked
+"corrected 2026-10-03" in place. In summary:
+
+- **PC normal maps** (§6, §14): a PC `ATI2` layer stores the Y block first and
+  the X block second. The extractor wrote the first block to red, so every PC
+  `*_normal_*_ATI2.png` written before 1.4.0 has X and Y swapped. X360 (enum
+  10) and PS3 (`DXT5`) layers were decoded in the right order. PNGs from
+  earlier versions must be extracted again; nothing in a PNG says which
+  decoder wrote it.
+- **PC against console normals** (§14): the "different BC5 encoder" explanation
+  for the PC / X360 normal divergence was written while the PC side was
+  transposed. It has not been re-measured.
+- **Vertex layout** (§5): the colour at +20 is a multiplicative tint on the
+  lit colour (rgb) and on the texture alpha (a), used only for buffers whose
+  `hasColor` flag is set; tangent and bitangent are used as stored, without a
+  handedness sign.
+- **Materials**: the texture's property bag carries `twoSided`, `renderType`,
+  `alphaThreshold` and `normalMapPower`; extraction writes them as
+  `sheet.json` beside the PNGs. `twoSided` is what the renderer turns into
+  `D3DCULL_NONE`; `renderType` 1 is "Standard with blending";
+  `alphaThreshold` is the alpha-test reference.
+- **GLB output**: `extract --glb` writes a GLB for every header-decoded model
+  (735 on Part 2 PC, 130 before), with NORMAL, TANGENT, COLOR_0, corrected
+  winding and sheet-driven materials; character GLBs carry the same
+  attributes. `--no-vertex-attrs` writes the 1.3.0 attribute set.
+
+Layouts and evidence: `KAPOW_NAZ_FORMAT.md` §4.5, §4.6 and §6b.
+
+*Added 2026-10-04 (same release):* a model header lists its textures as full
+asset paths and the game loads exactly those (`ModelRes::Read` 0x547006).
+Wherever this document speaks of finding a texture by its material name, read
+"by the path in the model header": twelve bare names exist in more than one
+folder of Part 2, and the toolkit now resolves by path
+(`watchmen_extract.TextureIndex`). Details: `ENGINE_CONSTANTS.md`, section
+"2026-10-04".
 
 ---
 ## 1. File map
@@ -207,6 +248,12 @@ mesh" with int16 positions that could not be decoded from the `.naz`.
   raw `float32 × 3` in every format. **Vertex normal = HALF4** (3× float16 +
   pad) at `vertex+12`, little-endian — validated (unit_box 24/24; body 0.976).
   Colour, UV, tangent and bitangent offsets: `KAPOW_NAZ_FORMAT.md` §6b.
+  *Added 2026-10-03:* what those fields are — the colour multiplies the lit
+  colour and the texture alpha on buffers with `hasColor`; tangent and
+  bitangent are ∂P/∂u and +∂P/∂v, used as stored; triangles wind clockwise
+  against the normals — is in the same section. With `--glb` the extractor
+  now writes them as NORMAL / TANGENT / COLOR_0 and writes a GLB for rigid
+  models too (`--no-vertex-attrs` turns that off).
 - **The stride-16 "baked env mesh" claim is withdrawn.** No vertex declaration
   in the executable has a SHORT element; format 3 (stride 16) is a 2D format,
   `FLOAT2 pos + FLOAT2 uv`. All 735 model streams of Part 2 PC tile exactly
@@ -233,6 +280,10 @@ mesh" with int16 positions that could not be decoded from the `.naz`.
 11-15 HDR/16-bit
 ```
 Found via `cmp eax,'DXT1'/'DXT5'` @0x455695/0x4556a3 + `[0xc799e0+enum*4]`.
+
+*Corrected 2026-10-03:* enum 9 on PC stores each 16-byte block as **Y (8
+bytes) then X (8 bytes)**. The decoder read them as X then Y up to toolkit
+1.3.0; `watchmen_extract.ati2_xy` now swaps them. See §0.7.
 
 **In-memory texture struct:** `+4 width, +8 height, +0xc format-enum, +0x40 mipcount`.
 
@@ -265,7 +316,10 @@ the bag at +196 is `u32 nFrames, u8 hasAnim`, then per frame eight slots — a
 29-byte descriptor for slot 0 and, for slots 1–7, a presence byte followed by
 a descriptor if present — and the source path. Descriptor: `u32 width, u32
 height, u32 format, u32 0, u32 type (1 = 2D, 2 = cube), u8 hasAlpha, u32
-mipCount, u32 0`. The "30-byte record" offsets above are those fields seen
+mipCount, u32 0` (the two zero fields are the buffer's usage class, 0 in
+files, and the Xbox 360 stored size, 0 on PC and PS3; the slots are 0
+diffuse, 1 normal, 2 specular, 3 glow, 4 height, 5 fallOff, 6 ambOcc, 7
+specSize). The "30-byte record" offsets above are those fields seen
 through a window that starts at `nFrames`: the "× 256" is the `hasAnim` byte in
 front of the width (the "low byte carries a flag"). See `KAPOW_NAZ_FORMAT.md`
 §4. `watchmen_extract.parse_texture_frames` reads it exactly.
@@ -646,7 +700,9 @@ with zero flags** (the `files/` + `extracted/` raw trees).
      verified == XMA frame-count × 512 exactly). The trailing u32 table in that
      header (count then per-segment values) is the seek table.
    - **SFX (`sound` class, inline)**: X360 = codec tag 3, XMA2 packets at
-     propbagEnd+30 (`[+4 u16 ch][+14 u32 rate][+18 u32 samples][+22 u32 size]`,
+     propbagEnd+26 *(corrected 2026-10-05; this said +30, which is four
+     bytes into the first packet — see the note under "X360 SHORT SFX"
+     below; PS3 layout: FORMATS_MISC.md "The `sound` asset")* (`[+4 u16 ch][+14 u32 rate][+18 u32 samples][+22 u32 size]`,
      size % 2048 == 0); PS3 = raw MP3 from the first frame sync after the
      propbag (`decode_sfx_console`). PC keeps the old `decode_sfx` path.
    - **vgmstream is NOT bundled**: `watchmen.py extract NAZ OUT --vgmstream-cli
@@ -659,6 +715,14 @@ with zero flags** (the `files/` + `extracted/` raw trees).
      rain_R 9.7s vs L 37.6s is identical on both = genuine asset).
    - Also fixed: `asset_class()` was LE-only (console blocks classified
      everything 'unknown'); now byte-order aware.
+   - *[2026-10-05: the conclusion of the next two items is superseded. The
+     extraction WAS the cause: every X360 sound `.xma` up to 1.3.0 was cut
+     four bytes late (from propbagEnd+30 instead of +26) and ended with the
+     4-byte cue count. All 2,921 + 3,953 exported files are the correct
+     data shifted by four. Fixed in 1.4.0; ffmpeg decodes three fixed files
+     to the PC audio (correlation 1.0 / 0.997 / 1.0 at zero lag, one to the
+     exact PC sample count). In the six-set export vgmstream decoded 26 of
+     26 sampled Xbox 360 files (correlation with the PC sound 0.99).]*
    - **X360 SHORT SFX decode to SILENCE — decoder limitation, 2026-07-15.**
      ~46% of X360 SFX wavs (almost all the short `Speaks/` dialog barks) come
      out all-zero. Root cause is NOT the extraction: the inline XMA2 is read
@@ -754,7 +818,11 @@ with zero flags** (the `files/` + `extracted/` raw trees).
      diffuse+normal+specMap). Recovery is conservative — never adds spurious
      layers (0 over-count on either platform).
    - **Pixel-verified** PC≡X360≡PS3 on diffuse/normal/spec for sampled textures
-     (dominatrixsuits1, wall_light_02, 2d_noise4 identical). Minor remaining
+     (dominatrixsuits1, wall_light_02, 2d_noise4 identical).
+     *[corrected 2026-10-03: for the normal layer this cannot have held as
+     written. Up to toolkit 1.3.0 the PC normal PNG had X and Y swapped while
+     the console ones did not (§0.7); the later measurement below (median
+     9.6°) is the one that fits. Not re-checked.]* Minor remaining
      cosmetic: X360's drift-recovered specSize layer is labeled "specMap" (the
      grayscale DATA is correct, ~26/26/26 = PC's specSize; only the filename
      tag differs because X360 renumbers that record's enum to DXT1).
@@ -817,6 +885,17 @@ with zero flags** (the `files/` + `extracted/` raw trees).
      genuine platform content difference, not a pipeline error.
    Bottom line: divergence is confined to normal-map re-encoding; diffuse, spec
    colour and spec params are near-identical. Not absurd.
+   *[corrected 2026-10-03: "proven NOT a decode bug" is withdrawn for the
+   normal layer. The PC side of this comparison was decoded with X and Y
+   swapped (PC `ATI2` stores the Y block first, §0.7), and the console side
+   was not: on the same maps the mixed-partials test gives 0.17 / 0.57
+   (as written / swapped) for the PC PNGs and 0.78 / 0.15 for the X360 and
+   PS3 ones. A divergence "concentrated in the R/G channels" with matching
+   means is what a transposed PC map would show (inferred). Re-run with the
+   fixed decoder on every layer (six-set export): PS3 has no layer off by
+   more than a mean of 8; the 574 (Part 2) / 674 (Part 1) that are not
+   identical are the normal maps (DXT5 where PC has ATI2), so a small
+   encoder difference remains.]*
 
    **The 8 non-identical diffuses characterized (2026-07-15; deep-dived 2026-07-16):**
    `_xg2d` IS the exact canonical Xenia `XGAddress2DTiledOffset` (verified bit-for-
@@ -991,12 +1070,23 @@ authoritative (same class as the P2 nit).
 3. Standalone `gray.texture` re-carved via the same path (byte-identical now).
 
 **Residual nits (P1, accepted):**
+*[2026-10-05: the first nit and the "PS3 cubemap framing" notes below are
+superseded. Cube storage: PC and X360 store the mip levels in order, six
+faces per level (X360 faces padded to 32 × 32 blocks); PS3 stores six face
+chains, each but the last padded to 128 bytes, the mip count being byte 13
+of the 36-byte segment descriptor. Read that way all three give identical
+faces on 310 of 310 cube maps, and console files are named `faceN_` /
+`frameN_` like PC. See KAPOW_NAZ_FORMAT.md §4.2. Runtime check (measured):
+in the D3D9 gameplay captures the six level-0 face uploads of 94 cube
+textures match file slices 0…5 in the order +X, −X, +Y, −Y, +Z, −Z.]*
 - PS3 cubemaps: 212 dirs carve only face0 (PC/X360 emit 6 faces; X360 names
   them `segN_`, PC `faceN_` — cosmetic). The PS3 stream is ONE 36B-headered
   segment of 6x10996 B; face0 decodes byte-exact at offset 0 but faces 1-5 sit
   at irregular offsets (13752/30320/44072/54504…) and are NOT byte-exact vs PC
-  (recompressed?). Needs the PS3 cube header fields decoding — TODO (~1000
-  pngs; also latent in P2).
+  (recompressed?). Needs the PS3 cube header fields decoding (~1000
+  pngs; also latent in P2). *[Resolved in 1.4.0: every cube face of the six-set
+  export is written, and all 660 + 1,200 faces are pixel-identical to PC on both
+  consoles (measured; CHANGELOG, "Across the platforms").]*
 - PS3 `floor_sidewalk_curb_01` 3_specSize 32x512 L8 differs from PC (not a
   permutation — histograms differ; other 47/48 L8 byte-identical).
 - X360 `SawMillRope` 1_normal 64x16 ATI2: no tail offset matches (best mean
@@ -1049,9 +1139,11 @@ IDENTICAL to PC (every npz key array_equal, all three platforms; runs in
 <45 s per platform). Console P1 skeleton/rest-pose decode is therefore exact;
 the full `characters` glb export on console sources would consume these same
 binds + the already-audited extract-out, so parity is expected — running the
-(long, resumable) export remains optional.
+(long, resumable) export remains optional. *[2026-10-05: run. Both Part 1
+console sets export 80 character GLBs with piece lists equal to PC.]*
 
-**PS3 cubemap framing — partial findings (faces 1-5 recovery, TODO).**
+**PS3 cubemap framing — partial findings (faces 1-5 recovery).** *[Resolved in
+1.4.0; see the cubemap bullet above.]*
 Confirmed the face data IS byte-exact in the PS3 stream (PC probe bytes found
 verbatim), so full recovery is possible once the framing is decoded:
 - Stream = one 36-B segment header + data (128px DXT1 cube: 65976 B ≈ 6x10996).

@@ -50,7 +50,7 @@ Loader: state machine `FUN_004a36d8` (loadblock.cpp), started by `FUN_004ae0fd`;
 | 0x024 | char[36] | GUID text | no reader found | not established |
 | 0x048 | char[255] | **fingerprint**, encrypted C string | `FUN_0049dd0e` decrypts in place with a 3-LFSR stream cipher (`FUN_00405a31/00405a8b/00405b1e`), key `"1E564E3B-D243-4ec5-AFB7"`, stores at `LoadBlock+0x1d4` | read from code + **validated**: bordello decrypts to `THIS IS THE DEFAULT FINGERPRINT KEY, PLEASE CHANGE IT!` |
 | 0x147 (327) | u8 | `2` | copied to `LoadBlock+0x1e4` (0x49dd59) | store read from code; meaning not established |
-| 0x148 (328) | u32 | `0x593F430A` | never read by the loader. `FUN_0049db60` builds a CRC over `"8"` ("Block version: 8") and each asset class's version; its return value is discarded at 0x4a3b63 | **inferred** to be that version signature (not recomputed) |
+| 0x148 (328) | 4 bytes | `0a 88 3f 59` | never read by the loader; the same bytes on the big-endian consoles, so not a platform-order integer | bytes read from data; meaning not established. **Not** the version signature (this row said so until 2026-10-05, as an inference): that CRC over `"8"` ("Block version: 8") and each asset class's version (`FUN_0049db60`, result discarded at 0x4a3b63) is the u32 at 0x020 (`0x79D3E0DA` in Part 2 and PS3 Part 1, `0xEE1FB0A3` in PC / X360 Part 1) |
 | 0x14C (332) | u32 | tablesSize | size of read #2 | read from code |
 | 0x150 (336) | u32 | **unk1** = header-blob size of entry 0 | size of read #3 (0x4a3b20) | read from code + validated (2903 = entry 0) |
 | 0x154 (340) | u32 | **unk2** = I/O buffer size | both ping-pong buffers are allocated with it (0x4a3be7, 0x4a3c2d); the directory is read into the same buffer | read from code + validated: `max(tablesSize, largest blob)` |
@@ -388,6 +388,5 @@ produced by code that is not in this binary. No further claim is made.
 - ModelRes: `b24`, `u28`, `ix`, `u2c`, `u70`, `b4`, `e4`; cluster range units; the role of the per-part extra
   fmt-5 buffer; whether vertices are part-local; the runtime routing of stream bytes; the physics/cloth tail.
 - Sequence: asset `u94`, object `u4`.
-- Texture: PC cube face order (code not traced), fields `x` and `z` of the descriptor (always 0), the animation
-  tail.
+- Texture: PC cube face order (code not traced), the animation tail.
 - Console: everything in §5.3 and the 2D half of §5.4.

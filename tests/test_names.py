@@ -204,6 +204,9 @@ def test_reg_dump_v2_shape_and_counts():
             "arg3",
             "typeidx",
             "signature",
+            "visibility",
+            "dispatch_kind",
+            "dispatch_index",
         }
         assert m["name"] and m["handler"] and m["kind"] in (1, 3)
         slots[m["slot"]] = slots.get(m["slot"], 0) + 1

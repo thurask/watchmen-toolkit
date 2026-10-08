@@ -1,0 +1,673 @@
+{
+ "bit0_not_stored": [
+  {
+   "site": "0x486930",
+   "class": "AIBrainNode",
+   "property": "debugRendering"
+  },
+  {
+   "site": "0x486fdb",
+   "class": "AIBrainNode",
+   "property": "subGoalSlowDownDist"
+  },
+  {
+   "site": "0x487025",
+   "class": "AIBrainNode",
+   "property": "endGoalSlowDownDist"
+  },
+  {
+   "site": "0x4870a5",
+   "class": "AIBrainNode",
+   "property": "maxDeltaAnglePerFrame"
+  },
+  {
+   "site": "0x4878fc",
+   "class": "AIBrainNode",
+   "property": "showPath"
+  },
+  {
+   "site": "0x487961",
+   "class": "AIBrainNode",
+   "property": "showVelocityVector"
+  },
+  {
+   "site": "0x48797b",
+   "class": "AIBrainNode",
+   "property": "showDynamicAvoidance"
+  },
+  {
+   "site": "0x487a2b",
+   "class": "AIBrainNode",
+   "property": "showVisionAcuteness"
+  },
+  {
+   "site": "0x487a6f",
+   "class": "AIBrainNode",
+   "property": "showVisibilityInfo"
+  },
+  {
+   "site": "0x487aaf",
+   "class": "AIBrainNode",
+   "property": "brainDebugRenderingFlags"
+  },
+  {
+   "site": "0x495317",
+   "class": "PivotNode",
+   "property": "worldPos"
+  },
+  {
+   "site": "0x495385",
+   "class": "PivotNode",
+   "property": "worldOrient"
+  },
+  {
+   "site": "0x49571b",
+   "class": "PivotNode",
+   "property": "transformParent"
+  },
+  {
+   "site": "0x496f1b",
+   "class": "SceneNode",
+   "property": "timeMultiplier"
+  },
+  {
+   "site": "0x496f80",
+   "class": "SceneNode",
+   "property": "editorTimeMultiplier"
+  },
+  {
+   "site": "0x496fa4",
+   "class": "SceneNode",
+   "property": "initMode"
+  },
+  {
+   "site": "0x49704a",
+   "class": "SceneNode",
+   "property": "editorCamera"
+  },
+  {
+   "site": "0x4970af",
+   "class": "SceneNode",
+   "property": "gameCamera"
+  },
+  {
+   "site": "0x4970c9",
+   "class": "SceneNode",
+   "property": "additionalCamera1"
+  },
+  {
+   "site": "0x497179",
+   "class": "SceneNode",
+   "property": "additionalCamera2"
+  },
+  {
+   "site": "0x49719c",
+   "class": "SceneNode",
+   "property": "additionalCamera3"
+  },
+  {
+   "site": "0x497253",
+   "class": "SceneNode",
+   "property": "gameCamera2"
+  },
+  {
+   "site": "0x4ac195",
+   "class": "TerrainNode",
+   "property": "visualizeUserSectors"
+  },
+  {
+   "site": "0x4ace00",
+   "class": "CollisionNode",
+   "property": "pivotBookAssetRef"
+  },
+  {
+   "site": "0x4ace24",
+   "class": "CollisionNode",
+   "property": "articulatedBody"
+  },
+  {
+   "site": "0x4ad3e8",
+   "class": "PropertySequenceNode",
+   "property": "playPos"
+  },
+  {
+   "site": "0x4ad48e",
+   "class": "PropertySequenceNode",
+   "property": "relPlayPos"
+  },
+  {
+   "site": "0x4ad981",
+   "class": "StreamBlockNode",
+   "property": "render"
+  },
+  {
+   "site": "0x4ae778",
+   "class": "LoadBlock",
+   "property": "visualizeQuadTreeBounds"
+  },
+  {
+   "site": "0x4c0a2d",
+   "class": "LensFlareManager",
+   "property": "visualizeOcclusion"
+  },
+  {
+   "site": "0x4c7387",
+   "class": "Sprite",
+   "property": "spriteOffset"
+  },
+  {
+   "site": "0x4c748e",
+   "class": "Sprite",
+   "property": "spriteSize"
+  },
+  {
+   "site": "0x4c83b4",
+   "class": "Sprite",
+   "property": "viewportCamera"
+  },
+  {
+   "site": "0x4c944e",
+   "class": "Character",
+   "property": "selectedBone"
+  },
+  {
+   "site": "0x4c94fe",
+   "class": "Character",
+   "property": "boneScaleX"
+  },
+  {
+   "site": "0x4c9543",
+   "class": "Character",
+   "property": "boneScaleY"
+  },
+  {
+   "site": "0x4c957d",
+   "class": "Character",
+   "property": "boneScaleZ"
+  },
+  {
+   "site": "0x4c9635",
+   "class": "Character",
+   "property": "boneScaleFactors"
+  },
+  {
+   "site": "0x4e5cb7",
+   "class": "EntityTableOptions",
+   "property": "entityTable_followSelection"
+  },
+  {
+   "site": "0x4e9937",
+   "class": "GeneralEditorOptions",
+   "property": "generalEditorOptions_selectedNodes"
+  },
+  {
+   "site": "0x4ea15a",
+   "class": "AlignNodeOptions",
+   "property": "alignNode_target"
+  },
+  {
+   "site": "0x4ea1c7",
+   "class": "AlignNodeOptions",
+   "property": "alignNode_sourceNodes"
+  },
+  {
+   "site": "0x4ea234",
+   "class": "AlignNodeOptions",
+   "property": "alignNode_originalPositions"
+  },
+  {
+   "site": "0x4ea2a6",
+   "class": "AlignNodeOptions",
+   "property": "alignNode_originalOrientations"
+  },
+  {
+   "site": "0x50f59d",
+   "class": "RigidBody",
+   "property": "collisionMask"
+  },
+  {
+   "site": "0x511a65",
+   "class": "Entity",
+   "property": "autoName"
+  },
+  {
+   "site": "0x518be3",
+   "class": "Actor",
+   "property": "collisionGroup"
+  },
+  {
+   "site": "0x518e91",
+   "class": "Actor",
+   "property": "enabled"
+  },
+  {
+   "site": "0x521152",
+   "class": "ArticulatedBody",
+   "property": "owner"
+  },
+  {
+   "site": "0x526685",
+   "class": "TextureSheet",
+   "property": "texturePtr"
+  },
+  {
+   "site": "0x528dfc",
+   "class": "Sheet",
+   "property": "isVolatile"
+  },
+  {
+   "site": "0x528e85",
+   "class": "Sheet",
+   "property": "ownerAsset"
+  },
+  {
+   "site": "0x529099",
+   "class": "PivotBook",
+   "property": "sheetVec"
+  },
+  {
+   "site": "0x539422",
+   "class": "Texture",
+   "property": "sheetVec"
+  },
+  {
+   "site": "0x55ce4e",
+   "class": "ParticleType",
+   "property": "typeAffectors"
+  },
+  {
+   "site": "0x55cec4",
+   "class": "ParticleType",
+   "property": "spawners"
+  },
+  {
+   "site": "0x55cf3a",
+   "class": "ParticleType",
+   "property": "affectors"
+  },
+  {
+   "site": "0x55cffa",
+   "class": "ParticleType",
+   "property": "initializers"
+  },
+  {
+   "site": "0x55d01e",
+   "class": "ParticleType",
+   "property": "ownerAsset"
+  },
+  {
+   "site": "0x55db9c",
+   "class": "ParticleSystemAsset",
+   "property": "particleTypes"
+  },
+  {
+   "site": "0x595d69",
+   "class": "AnimBlendSource",
+   "property": "animSlot"
+  }
+ ],
+ "bit1_deprecated_alias": [
+  {
+   "site": "0x494d6e",
+   "class": "TextSlot",
+   "property": "current_Index"
+  },
+  {
+   "site": "0x494e33",
+   "class": "TextSlot",
+   "property": "text_String_Identifier"
+  },
+  {
+   "site": "0x494ef5",
+   "class": "TextSlot",
+   "property": "number_Of_Text_Indices"
+  },
+  {
+   "site": "0x494fb7",
+   "class": "TextSlot",
+   "property": "current_Text_Content"
+  },
+  {
+   "site": "0x497262",
+   "class": "SceneNode",
+   "property": "gameCamera2"
+  },
+  {
+   "site": "0x4aac3f",
+   "class": "BaseModel",
+   "property": "modelRes"
+  },
+  {
+   "site": "0x4aaefa",
+   "class": "BaseModel",
+   "property": "textureSheets"
+  },
+  {
+   "site": "0x4abc59",
+   "class": "TerrainNode",
+   "property": "terrain_asset"
+  },
+  {
+   "site": "0x4abd27",
+   "class": "TerrainNode",
+   "property": "terrain_coloring_asset"
+  },
+  {
+   "site": "0x4abdf5",
+   "class": "TerrainNode",
+   "property": "meters_per_quad"
+  },
+  {
+   "site": "0x4abec3",
+   "class": "TerrainNode",
+   "property": "quads_per_user_sector"
+  },
+  {
+   "site": "0x4abf91",
+   "class": "TerrainNode",
+   "property": "width_in_user_sectors"
+  },
+  {
+   "site": "0x4ac05f",
+   "class": "TerrainNode",
+   "property": "height_in_user_sectors"
+  },
+  {
+   "site": "0x4c9656",
+   "class": "Character",
+   "property": "auxModelRes00"
+  },
+  {
+   "site": "0x4c96c3",
+   "class": "Character",
+   "property": "auxModelRes01"
+  },
+  {
+   "site": "0x4c9730",
+   "class": "Character",
+   "property": "auxModelRes02"
+  },
+  {
+   "site": "0x4c979d",
+   "class": "Character",
+   "property": "auxModelRes03"
+  },
+  {
+   "site": "0x4c980a",
+   "class": "Character",
+   "property": "auxModelRes04"
+  },
+  {
+   "site": "0x4c9877",
+   "class": "Character",
+   "property": "auxModelRes05"
+  },
+  {
+   "site": "0x4c98e4",
+   "class": "Character",
+   "property": "auxModelRes06"
+  },
+  {
+   "site": "0x4c9951",
+   "class": "Character",
+   "property": "auxModelRes07"
+  },
+  {
+   "site": "0x4c99be",
+   "class": "Character",
+   "property": "auxModelRes08"
+  },
+  {
+   "site": "0x4c9a2b",
+   "class": "Character",
+   "property": "auxModelRes09"
+  },
+  {
+   "site": "0x4c9a98",
+   "class": "Character",
+   "property": "auxModelRes10"
+  },
+  {
+   "site": "0x4c9b05",
+   "class": "Character",
+   "property": "auxModelRes11"
+  },
+  {
+   "site": "0x4ca48a",
+   "class": "TextBox",
+   "property": "textres_mode"
+  },
+  {
+   "site": "0x4ca67b",
+   "class": "TextBox",
+   "property": "use_slot_index"
+  },
+  {
+   "site": "0x4ca749",
+   "class": "TextBox",
+   "property": "textslot_index"
+  },
+  {
+   "site": "0x4ca817",
+   "class": "TextBox",
+   "property": "text_color"
+  },
+  {
+   "site": "0x4ca8e5",
+   "class": "TextBox",
+   "property": "text_scale"
+  },
+  {
+   "site": "0x4ca9b3",
+   "class": "TextBox",
+   "property": "horizontal_spacing"
+  },
+  {
+   "site": "0x4caa81",
+   "class": "TextBox",
+   "property": "horizontal_alignment"
+  },
+  {
+   "site": "0x4cab4f",
+   "class": "TextBox",
+   "property": "vertical_alignment"
+  },
+  {
+   "site": "0x4cafb0",
+   "class": "SoundSystemNode",
+   "property": "max_voices"
+  },
+  {
+   "site": "0x4cb07e",
+   "class": "SoundSystemNode",
+   "property": "linear_dist_att"
+  },
+  {
+   "site": "0x4cb1ad",
+   "class": "SoundSystemNode",
+   "property": "roll_off_scale"
+  },
+  {
+   "site": "0x4cb645",
+   "class": "SoundSystemNode",
+   "property": "test_sound_1"
+  },
+  {
+   "site": "0x4cb713",
+   "class": "SoundSystemNode",
+   "property": "test_sound_2"
+  },
+  {
+   "site": "0x4cb7e1",
+   "class": "SoundSystemNode",
+   "property": "test_sound_3"
+  },
+  {
+   "site": "0x4cb8af",
+   "class": "SoundSystemNode",
+   "property": "test_sound_4"
+  },
+  {
+   "site": "0x4cb97d",
+   "class": "SoundSystemNode",
+   "property": "test_sound_5"
+  },
+  {
+   "site": "0x4d9597",
+   "class": "SoundController",
+   "property": "volume_curve"
+  },
+  {
+   "site": "0x4d9788",
+   "class": "SoundController",
+   "property": "stop_voice_on_unbind"
+  },
+  {
+   "site": "0x4d9850",
+   "class": "SoundController",
+   "property": "voice_volume"
+  },
+  {
+   "site": "0x4d9918",
+   "class": "SoundController",
+   "property": "pivot_node"
+  },
+  {
+   "site": "0x4daab4",
+   "class": "SoundSlot",
+   "property": "streaming_sound"
+  },
+  {
+   "site": "0x4dae29",
+   "class": "SoundSlot",
+   "property": "doppler_factor"
+  },
+  {
+   "site": "0x4daf58",
+   "class": "SoundSlot",
+   "property": "lfe_level"
+  },
+  {
+   "site": "0x4db026",
+   "class": "SoundSlot",
+   "property": "center_channel_only"
+  },
+  {
+   "site": "0x4db0f4",
+   "class": "SoundSlot",
+   "property": "back_channels"
+  },
+  {
+   "site": "0x4db161",
+   "class": "SoundSlot",
+   "property": "useBackChannels"
+  },
+  {
+   "site": "0x4db1ce",
+   "class": "SoundSlot",
+   "property": "randompitch_length"
+  },
+  {
+   "site": "0x4db29c",
+   "class": "SoundSlot",
+   "property": "randomvolume_length"
+  },
+  {
+   "site": "0x4db3c5",
+   "class": "SoundSlot",
+   "property": "asset_is_looping"
+  },
+  {
+   "site": "0x4db487",
+   "class": "SoundSlot",
+   "property": "num_stream_tracks"
+  },
+  {
+   "site": "0x55ca77",
+   "class": "ParticleType",
+   "property": "localMode"
+  }
+ ],
+ "bit3": [
+  {
+   "site": "0x4aa93c",
+   "class": "EmbeddedActorNode",
+   "property": "actor"
+  },
+  {
+   "site": "0x4aaf16",
+   "class": "BaseModel",
+   "property": "textureSheets"
+  },
+  {
+   "site": "0x4ace09",
+   "class": "CollisionNode",
+   "property": "pivotBookAssetRef"
+  },
+  {
+   "site": "0x4ace2d",
+   "class": "CollisionNode",
+   "property": "articulatedBody"
+  },
+  {
+   "site": "0x52115b",
+   "class": "ArticulatedBody",
+   "property": "owner"
+  },
+  {
+   "site": "0x52667c",
+   "class": "TextureSheet",
+   "property": "texturePtr"
+  },
+  {
+   "site": "0x528df3",
+   "class": "Sheet",
+   "property": "isVolatile"
+  },
+  {
+   "site": "0x528e7c",
+   "class": "Sheet",
+   "property": "ownerAsset"
+  },
+  {
+   "site": "0x5290a2",
+   "class": "PivotBook",
+   "property": "sheetVec"
+  },
+  {
+   "site": "0x53942b",
+   "class": "Texture",
+   "property": "sheetVec"
+  },
+  {
+   "site": "0x542e2a",
+   "class": "Fragment",
+   "property": "reapplyable"
+  },
+  {
+   "site": "0x55ce57",
+   "class": "ParticleType",
+   "property": "typeAffectors"
+  },
+  {
+   "site": "0x55cecd",
+   "class": "ParticleType",
+   "property": "spawners"
+  },
+  {
+   "site": "0x55cf43",
+   "class": "ParticleType",
+   "property": "affectors"
+  },
+  {
+   "site": "0x55d003",
+   "class": "ParticleType",
+   "property": "initializers"
+  },
+  {
+   "site": "0x55d027",
+   "class": "ParticleType",
+   "property": "ownerAsset"
+  }
+ ]
+}

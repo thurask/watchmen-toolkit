@@ -105,10 +105,10 @@ rule checked against the known capsule offsets and the +0x08 id) [R order, I siz
 | +0x0c | 0x42dd8a72 | `m_tforceupdateblends` |
 | +0x10 | 0x387ca064 | random number written by the sender |
 | +0x14, +0x18, +0x1c | 0x9db59b14 / …94 / …54 | entity refs |
-| +0x20 | 0xed4c0d80 | enum dropdown (name not in the exe); "enum" below |
+| +0x20 | 0xed4c0d80 | `m_ivalue00`, an enum dropdown; "enum" below |
 | +0x24 | 0x66cc9ce5 | `m_nvalue` |
 | +0x28 … +0x48 | 0x7050e679 … 0x70506639 | nine more floats ("value2" = +0x28) |
-| +0x4c, +0x50, +0x54 | 0xbd9f4248 / …88 / …08 | three bools ("bool1" = 0xbd9f4248) |
+| +0x4c, +0x50, +0x54 | 0xbd9f4248 / …88 / …08 | `m_ttruth1` / `m_ttruth2` / `m_ttruth3` ("bool1" = 0xbd9f4248) |
 | +0x58, +0x64 | 0x69f0c2e5, 0x69f0c225 | two vectors |
 
 Objects used below: `logic` = CharacterRootLogic data (`ebx`); `root` =
@@ -141,7 +141,8 @@ AnimationStateWM; `logic+0x18` stored victim.
 | 26 | DROP_TARGET_LOCK | 0x6a9df6 | `root+0x7c = 0`, `root+0x8c = 0`, `root+0x90 = (-10000)³`; tutorial event |
 | 27 | FORCE_ALLOW_COUNTER_ATTACK | 0x6a9dea | `logic+0x74 = 1` |
 | 28 | ABSOLUTE_GOTO_TARGET_POS | 0x6a9dca | `capsule.data+0xb8 = 1`; section 3 |
-| 29, 30 | FLASH_GRENADE, ELECTRIFY_ARMOR | 0x6a62d8 | radius-3 physics query, `hit_soon` + `give_damage` per character; id 30 also charges the armor |
+| 29 | FLASH_GRENADE | 0x6a62d8 | pays `m_ngrenadecost`; radius-3 physics query, `hit_soon` + `give_damage` per character not of the attacker's faction: (11.0 − distance) × modifier × global × uber for a playable target, 0 otherwise, stun 3.0 s |
+| 30 | ELECTRIFY_ARMOR | 0x6a62d8 | charges the armour and pays `m_narmorcost` (`ElectricArmor.command_electric_armor_charge`), leaving before the grenade loop; area damage is dealt by `ElectricArmor.AreaDamage` 0x72769f on entering `StateActive` |
 | 31 | DISCHARGE_ARMOR | 0x6a8865 | partner: rumble, `hit_soon`, `force_anim_always`, `give_damage`, lightning |
 | 32 | COUNTER_ATTACK_WEAPON_STEAL | 0x6a84cf | partner `command_force_drop_weapon`; own weapon dropped; `WeaponBase.command_do_actual_pickup{root, 0.1}`; `root+0xd4 = weapon` |
 | 33 | BULLMOVE_IMPACT | 0x6abcb1 | `give_damage` to `logic+0x18`, camera recoil |
@@ -149,9 +150,9 @@ AnimationStateWM; `logic+0x18` stored victim.
 | 35 | EXTEND_COMBO_TIME | 0x6ac9bf | `logic+0x0c = now + m_nvalue` |
 | 36 | PICK_UP_WEAPON | 0x6a817a | `WeaponBase.command_detach` on the old weapon; `root+0xd4 = root+0x15c`; `command_do_actual_pickup{root, 0.1}` (or `force_drop_weapon` for "UnderbossBluntWeapon") |
 | 37 | SPEAK | 0x6a9f30 | `SpeakCtrl.command_add_speak_event_based_on_enum` (enum = +0x20) |
-| 38 | THROW_BRANCH_POINT | 0x6a91c0 | partner in special state 8: `FireAnimationAction(ctrl, 0x1e)`, `hit_soon` both ways; `ClearAttackData` |
+| 38 | THROW_BRANCH_POINT | 0x6a91c0 | partner in special handling BLOCK (8): `FireAnimationAction(ctrl, 0x1e)`, `hit_soon` both ways; `ClearAttackData` |
 | 39 | GOT_UP | 0x6a812a | behaviour `command_got_up` |
-| 41 / 49 / 54 / 55 | REVERSE / NORMAL_HEADING, ROTATE_HEADING_90_LEFT / RIGHT | 0x6a8108 / 0x6a80dc / 0x6a80ef / 0x6a80e0 | `root+0x158` = π (0xa5d2a0) / 0 / +c / −c, c = MathLib data +0x40 (run-time value [N]); then `command_set_move_and_face_heading_to_actual_heading` |
+| 41 / 49 / 54 / 55 | REVERSE / NORMAL_HEADING, ROTATE_HEADING_90_LEFT / RIGHT | 0x6a8108 / 0x6a80dc / 0x6a80ef / 0x6a80e0 | `root+0x158` = π (0xa5d2a0) / 0 / +c / −c, c = `MathLib.pidiv2` (+0x40, registered default "1.570796", 0x79f094; a data override was not checked); then `command_set_move_and_face_heading_to_actual_heading` |
 | 42 | NO_LONGER_IMMUNE_TO_ATTACK | 0x6ac9b0 | `logic+0x84 = 1` |
 | 45 | LOOK_AT_TARGET | 0x6a86ae | section 4 |
 | 46 / 47 | GRAPGUN_ENABLE / DISABLE | 0x6a9eaf / 0x6a9ea6 | `command_enable` / `command_disable` to `logic+0x24` |
@@ -165,7 +166,7 @@ AnimationStateWM; `logic+0x18` stored victim.
 | 61 | CAMERA_CUT_TO_CHARACTER_CAM | 0x6aa036 | `command_return_to_character_camera{m_nvalue}` |
 | 62 | SET_HEADINGS_FROM_ALIGNEMENT | 0x6a7dd5 | `command_set_move_and_face_heading_to_actual_heading` |
 | 63 / 64 / 65 | UNDERBOSS_START / STOP_FLAMER, FLAMER_DONE | 0x6a7ce7 / 0x6a7bf9 / 0x6a7b0b | Underboss phase `command_flamer_start / _stop / _done` |
-| 66, 67, 68, 71 | TRIGGER_START/END_INTERPOLATING, UNDERBOSS_JUMP_OFF_LAND_DONE, UNDERBOSS_WOBBLE_DONE | 0x6a739d | Underboss phase `command_jump_anim_part_done{id}` |
+| 66, 67, 68, 71 | TRIGGER_START/END_INTERPOLATING, UNDERBOSS_JUMP_OFF_LAND_DONE, UNDERBOSS_WOBBLE_DONE | 0x6a739d | Underboss phase `command_jump_anim_part_done{id}`. 66 in `JumpOnCharacter`: stores the jump end point. 67 in `JumpOnCharacter`: starts the landing shockwave. 68 in `JumpOnCharacter`: returns to `StateActive`; in `StateFlameThrower`: re-reads the target. 71 in `UnderBossWobble`: enters `JumpOnCharacter`; in `StateFlameThrower`: restarts the flamethrower |
 | 69 | MAKE_LIGHTNING_FLASH | 0x6ac1bf | two `command_fire_effect_by_id` |
 | 70 | THROW_MODE_STORE_TARGET | 0x6a9349 | picks throw target → `root+0x8c`, `root+0x90` |
 | 72 | KNEE | 0x6a7ad9 | `SetAnimationEnum(ctrl, 13, enum)` |
@@ -173,12 +174,12 @@ AnimationStateWM; `logic+0x18` stored victim.
 | 74 | REMOVE_INVERSE_DIRECTION | 0x6a798d | `logic+0x34 = 0` |
 | 75 | DROP_WEAPON_WITH_ANIM | 0x6a8480 | `FireAnimationAction(ctrl, 0x1b)` if a weapon is held |
 | 80 | DO_AUTO_ALIGN | 0x6aae3c | `CharacterRoot.command_force_auto_align{m_nvalue, value2}` (0x694ed7): `root+0x26c = now + value2`, `root+0x270 = m_nvalue` |
-| 81 | UNDERBOSS_SUPPORT_EVENT | 0x6a78ea | `command_recieve_anim_support_event` |
+| 81 | UNDERBOSS_SUPPORT_EVENT | 0x6a78ea | `command_recieve_anim_support_event`; phase 3: disables the pipe and clears the weapon |
 | 82 | RUMBLE | 0x6a7879 | `command_do_rumble_effect{m_nvalue, value2, bool1}` |
 | 83 | STARTING_HURT_ANIMATION | 0x6ac12f | `command_dont_move_while_animation_runs{clip length}` |
 | 84 | DO_BLOCK_FLASH | 0x6a779e | `logic+0xd8 = 1`, `add_electrify_power(-k)`, `SetTextureSheetData` |
 | 85 | DIE | 0x6ac4e1 | `give_damage{attacker = self, 100000}` to self |
-| 86 | DELAY_OPPONENT | 0x6a7772 | `command_delay` to `root+0x70` |
+| 86 | DELAY_OPPONENT | 0x6a7772 | `command_delay` to `root+0x70`; the receiver stamps `_ndelaypunishtimer`; a completed combo within 2.0 s of it does not force a punish |
 | 87 / 88 | FORCE_ALLOW_BREAKOUT / _NO_MORE | 0x6a7763 / 0x6a7757 | `logic+0xe0 = 1 / 0` |
 | 89 | ACTIVATE_DEPTH_OF_FIELD | 0x6a7619 | `FXGfxEffectCtrl.command_fade_in{entity ref +0x14, m_nvalue}` |
 | 91 | NEVER_USE_THIS_ANIM_AGAIN | 0x6a760d | state property `enabled` = 0 |
@@ -331,9 +332,8 @@ bools and vectors of those events should not be trusted until that is fixed.
 ## Not established
 
 - Blend time passed to the capsule for victim states (section 3).
-- Run-time value of the MathLib constant used by 54/55.
-- Names of properties 0xed4c0d80, 0xbd9f42x8, 0x7050e6xx (not in the exe's
-  strings; hashes of `m_nvalue02`… do not match).
 - Path from lethal damage to ragdoll.
 - Cases 23, 29/30, 31, 59, 70 and the footstep block were skimmed for commands
-  and field writes, not read instruction by instruction.
+  and field writes, not read instruction by instruction. *[All of them have
+  been read since: see "Corrections to these reports" in README.md and the
+  `evidence` strings of `event_semantics`.]*

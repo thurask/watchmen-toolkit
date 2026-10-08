@@ -102,6 +102,27 @@ def talk_anim(neutral, talk, fps=15.0, dur=4.0, seed=0):
     return np.stack([blend_pal(neutral, talk, wi) for wi in w])
 
 
+def blend_locals(poses, weights):
+    """Weighted blend of pose locals.  poses: {name: (quat (N,4), trans (N,3))},
+    weights: {name: w}.  Quaternions are sign-aligned to the heaviest pose,
+    averaged and normalised; translations averaged.  Two poses = nlerp."""
+    names = sorted(weights, key=lambda k: (-weights[k], k))
+    if len(names) == 1:  # a held pose: exactly the shipped values
+        return np.array(poses[names[0]][0], np.float64), np.array(poses[names[0]][1], np.float64)
+    tot = sum(weights[n] for n in names)
+    q0 = poses[names[0]][0]
+    Q = np.zeros_like(q0, dtype=np.float64)
+    T = np.zeros_like(poses[names[0]][1], dtype=np.float64)
+    for n in names:
+        q, t = poses[n]
+        w = weights[n] / tot
+        sgn = np.where((q * q0).sum(1) < 0, -1.0, 1.0)[:, None]
+        Q += w * sgn * q
+        T += w * t
+    Q /= np.linalg.norm(Q, axis=1, keepdims=True)
+    return Q, T
+
+
 # body-clip name -> face pose name, per family pose inventory.
 # (BS2: 9 poses; EN1: 11; NTO: 4 -- only shipped names are referenced.)
 def category_pose(clipname, have):

@@ -62,7 +62,9 @@ def signed(value):
 
 def enum_variable_family(var):
     """The family an ANIMATION_ENUM variable (criteria `m_ianimationenum`) takes
-    its values from, or None (TARGET_MODE has no registered value family)."""
+    its values from, or None (TARGET_MODE: the game writes its values from script,
+    0x69b988, table in combat_meta.TARGET_MODE; the editor lists the CHARACTER_MODE
+    names for it, AnimationEnumEnumName 0x7f0934)."""
     return data()["enum_variable_family"].get(str(var))
 
 

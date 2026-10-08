@@ -17,10 +17,24 @@ import os, struct, sys, numpy as np
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
 
+def _read_bytes(path):
+    """The file's bytes; the handle is closed before returning."""
+    with open(path, "rb") as fh:
+        return fh.read()
+
+
 def _detect_order(mb):
-    """'<' PC / '>' X360+PS3.  Pick the order that finds more length-prefixed
-    node names (the console header is byte-flipped; namelen only parses small
-    in the right order)."""
+    """'<' PC / '>' X360+PS3: the order the header states (its opening class-name
+    length, watchmen_extract.header_order); when it does not say, the order that
+    finds more length-prefixed node names."""
+    try:  # the header states its order (5,490 of 5,490 models of the six sets)
+        import watchmen_extract as _we
+
+        o = _we.header_order(mb)
+    except ImportError:
+        o = None
+    if o is not None:
+        return o
     return "<" if len(_names(mb, "<")) >= len(_names(mb, ">")) else ">"
 
 
@@ -48,7 +62,8 @@ def _names(mb, order="<"):
 def parse_header_driven(mb):
     """Node table straight from the engine-exact ModelRes header walk
     (watchmen_extract.parse_model_header: FUN_00547006 -> FUN_00545927), or None
-    when the blob is not a Part 2 PC header.  Same return shape as parse(); every
+    when the blob is not a little-endian header of either layout (Part 2, or the
+    stand-alone Part 1 build).  Same return shape as parse(); every
     part of the file is a node, so parent indices can never be misaligned."""
     try:
         import watchmen_extract as _we
@@ -179,7 +194,7 @@ def rest_by_name(mb, order=None):
 
 
 if __name__ == "__main__":
-    mb = open(sys.argv[1], "rb").read()
+    mb = _read_bytes(sys.argv[1])
     names, pos, quat, parent = parse(mb)
     print(len(names), "nodes")
     for i, (nm, p, q, pa) in enumerate(zip(names, pos, quat, parent)):
@@ -190,12 +205,13 @@ if __name__ == "__main__":
 # Node AUX region = the bytes between a node's name and the next node's
 # transform (Node::Deserialize 0x545927):
 #   [u32 f1][u32 parent]
-#   [u32 cnt34] cnt34 x [u32 innerCnt]   innerCnt > 0 only on mesh nodes
-#   [u32 cnt40]                          > 0 only on mesh nodes
-#   [u8 flag]
+#   [u32 nLod] nLod x [u32 nSub][nSub x submesh]      nSub > 0 only on mesh nodes
+#   [u32 nGroup] nGroup x [u32 n][n x shadow hull]    groups may be empty (n = 0)
+#   [u8 hasOccluder] (MeshBuffer)
 #   [u32 n0] n0 x volume   collision shapes, PhysX scene 0
 #   [u32 n1] n1 x volume   collision shapes, PhysX scene 1
-#   [u32 n2] n2 x surface  (one node of the PC corpus)
+#   [u32 n2] n2 x surface  particle emission meshes (MeshParticleData, 0x561d1c):
+#                          29 in 19 of the 738 distinct staged PC Part 2 models
 # The volume records are read by skeleton_records.parse_node_tail (box 52 B,
 # sphere 44 B, capsule 48 B, mesh variable).  Until 2026-10 this function read
 # them itself as fixed 48-byte "joints" [type][0][pos][a][a'][quat], which only
@@ -211,10 +227,14 @@ def _skeleton_records():
     return _sr
 
 
-def parse_node_aux(mb, start, end, order="<"):
+def parse_node_aux(mb, start, end, order="<", meshes=False):
     """Parse one node aux region [start, end).  Returns None when the node
-    carries mesh data or the bytes do not tile the region exactly, else
-        dict(f1, parent, joints, volumes, surfaces)
+    carries mesh data (unless meshes=True: skeleton_records.parse_node_tail) or
+    the bytes do not tile the region exactly, else
+        dict(f1, parent, joints, volumes, surfaces, has_mesh)
+    surfaces particle emission meshes: [{class "MeshParticleData", tris
+             [{normal, area_weight, material_id}], verts, indices, weight_sum,
+             weight_is_area}]
     volumes  [scene 0 list, scene 1 list] as skeleton_records.parse_node_tail
              returns them (type, kind, base, pos, quat, blob + size | radius |
              diameter, height | mode, verts, indices)
@@ -222,7 +242,7 @@ def parse_node_aux(mb, start, end, order="<"):
              callers use: type, pos (3,) f32, quat (4,) f32 xyzw, blob, scene,
              and a / a2 = a capsule's diameter / height (None for other types)
     order: '<' PC (default) / '>' X360+PS3."""
-    tail = _skeleton_records().parse_node_tail(mb, start, end, order)
+    tail = _skeleton_records().parse_node_tail(mb, start, end, order, meshes=meshes)
     if tail is None:
         return None
     joints = []
@@ -240,4 +260,50 @@ def parse_node_aux(mb, start, end, order="<"):
         joints=joints,
         volumes=tail["volumes"],
         surfaces=tail["surfaces"],
+        has_mesh=tail["has_mesh"],
     )
+
+
+def model_physics(mb, order="<"):
+    """Header-driven read of everything physical in a ModelRes header, in either
+    header layout (watchmen_extract.MODEL_LAYOUTS: Part 2 / PS3 Part 1, and the
+    stand-alone Part 1 build): every node with its two collision-volume lists
+    (Node::Deserialize 0x545927) and the articulated-body section that follows
+    the node array (0x51e1ad).  Works on models with meshes too (the
+    name-anchored scan of skeleton_records only tiles mesh-free nodes).
+    -> dict(nodes=[{name, parent, pos, quat (xyzw as stored), volumes: [scene 0
+    list, scene 1 list], surfaces: [particle emission meshes, see
+    parse_node_aux]}], articulated_body=
+    skeleton_records.parse_articulated_body(...), end, layout) or None when the
+    blob follows neither layout."""
+    try:
+        import watchmen_extract as _we
+    except ImportError:
+        if _HERE not in sys.path:
+            sys.path.append(_HERE)  # append, never insert(0)
+        import watchmen_extract as _we
+    _sr = _skeleton_records()
+    M = _we.parse_model_header(mb, order)
+    if M is None:
+        return None
+    try:
+        nodes = []
+        end = M["end"]
+        for P in M["parts"]:
+            par = P["parent"]
+            nd = {"pos": P["pos"], "quat": P["quat"], "name": P["name"]}
+            nd["parent"] = par - (1 << 32) if par >= (1 << 31) else par
+            nd["volumes"], nd["surfaces"], end = _sr.parse_volume_lists(
+                mb, P["lists_offset"], order
+            )
+            nodes.append(nd)
+        if end != M["end"]:
+            return None
+        n = len(nodes)
+        for nd in nodes:
+            if not -1 <= nd["parent"] < n:
+                nd["parent"] = -1
+        ab = _sr.parse_articulated_body(mb, M["end"], order)
+    except (ValueError, struct.error, IndexError):
+        return None
+    return dict(nodes=nodes, articulated_body=ab, end=ab["end"], layout=M["layout"])

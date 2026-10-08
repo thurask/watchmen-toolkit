@@ -95,19 +95,22 @@ SWING = 0.6 * np.sin(np.arange(90) / 60.0 * 2 * math.pi * 2.0)  # 2 Hz, +-34 deg
 # ---------------------------------------------------------------------------
 
 
-def test_default_model_is_pinned_and_pivot_is_opt_in(tmp_path):
-    """Review M2: the default stays the 1.2.0 model; the pivot model's swing
-    constants are capture-fitted at an estimated frame rate, so it is opt-in."""
+def test_pinned_model_is_the_1_2_0_model_and_pivot_is_opt_in(tmp_path):
+    """Review M2: `pinned` stays the 1.2.0 model (the default up to 1.3.0); the pivot
+    model's swing constants are capture-fitted at an estimated frame rate, so it is
+    opt-in.  The default is the `solver` model (tests/test_jiggle_default.py)."""
     bind, _tb = _bind(tmp_path)
     P = _palettes(SWING, [0, 0, 1])
-    assert jiggle_d6.DEFAULT_MODEL == "pinned"
-    assert jiggle_d6.resolve_model() == ("pinned", "engine")
+    assert jiggle_d6.DEFAULT_MODEL == "solver"
+    assert jiggle_d6.resolve_model() == ("solver", "file")
+    assert jiggle_d6.resolve_model("pinned") == ("pinned", "engine")
     assert jiggle_d6.resolve_model("pivot") == ("pivot", "capture")
     default = jiggle_d6.apply_jiggle(P, 60.0, bind)
     pivot = jiggle_d6.apply_jiggle(P, 60.0, bind, model="pivot")
     pinned = jiggle_d6.apply_jiggle(P, 60.0, bind, model="pinned")
     legacy = jiggle_d6.apply_jiggle_legacy(P, 60.0, bind)
-    assert np.array_equal(default, pinned)
+    assert np.array_equal(default, jiggle_d6.apply_jiggle(P, 60.0, bind, model="solver"))
+    assert not np.allclose(default, pinned, atol=1e-4)
     assert np.array_equal(pinned, legacy)
     assert not np.allclose(pivot, pinned, atol=1e-4)
     with pytest.raises(ValueError):
@@ -115,7 +118,7 @@ def test_default_model_is_pinned_and_pivot_is_opt_in(tmp_path):
 
 
 def test_pinned_model_keeps_the_old_numbers(tmp_path):
-    """model='pinned' is the shipped 1.3.x integrator: gravity sag on a static
+    """model='pinned' is the integrator shipped up to 1.3.0: gravity sag on a static
     parent, origin pinned, K/D = solver_soften at 1/120 s."""
     bind, tb = _bind(tmp_path)
     P = _palettes(np.zeros(120), [0, 0, 1])

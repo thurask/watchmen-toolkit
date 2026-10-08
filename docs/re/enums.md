@@ -968,6 +968,29 @@ a second, separate family with the same prefix, registered at 0x8bb4aa.
 (`ACTIONLIST_SETTINGS_MENU_UPDATED`, `MENU_CLOSED`). `COLORS` registers each id under two names (`RED` and `COLOR_RED`, ...).
 Where an id has several names `enums.json` joins them with ` | `; `meta[family].aliases` lists them.
 
+## Class constants that are not in a family: `AIBrainNode`
+
+Registered by 0x50574a in `AIBrainNode::RegisterMembers` 0x4865b9 (0x48660a..0x4866e2). They have no common
+prefix, so they are not families of `engine_enums.json`; the toolkit keeps them as
+`level_meta.AI_BRAIN_ENUMS`, keyed by the property each one is the value set of.
+
+| property | values |
+|---|---|
+| `agentType` | 0 `IDLEAGENT`, 1 `GOTOAGENT`, 2 `FOLLOWAGENT`, 3 `WANDERAGENT`, 4 `FLEEAGENT`, 5 `HIDEAGENT` |
+| `agentFaction` | 0 `ALLYFACTION`, 1 `ENEMYFACTION`, 2 `NEUTRALFACTION` |
+| `pathFindingConstraint` | 0 `SHORTESTPATH`, 1 `STEALTH` |
+
+Three more value sets the level export names (read from the pushes beside each name string):
+`ENEMY` (0x5a3b12..0x5a3b9c: 0 `NO_STATE`, 1 `INACTIVE`, 2 `CHASING`, 3 `IDLING`, 4 `ATTACKING`,
+5 `FOLLOW_PIVOT`, 6 `BRAINLESS_AUTOTARGET`, 7 `HANG_BACK`, 8 `RETURN_TO_COMBAT_ZONE`,
+9 `TWILIGHT_LADY_BACK_FLIP`, 10 `STEP_BACK`), `STOP_CRITERIA` (0x5a3c99..0x5a3cd5: 0 `NONE`,
+1 `LEADER_PRESENT`, 2 `TIMER`, 4 `ENEMY_IN_MELEE_RANGE`, 8 `STATE_NOT_RUNNING`), and for the save
+file `SAVE_DEVICES` (0x775ad0..0x775b25: −1 `INVALID`, 0 `X360_PS3`, 1 `KEYBOARD_MOUSE`,
+2 `GENERIC_PC_GAMEPAD`, 3 `LOGITECH_RUMBLEPAD_2`, 4 `SMARTJOY_PLUS_ADAPTOR`,
+5 `TIGERGAME_PS_PS2_GAME_CONTROLLER_ADAPTER`) and `LOGICAL_INPUT_BUTTON` (`ProjectLib` registration
+0x80d17a..0x80d3b8: −1 `NONE`, 0 `MENU_UP` … 39 `CAMERA_STICK_RIGHT`, 40 `SIZE`; 9, 10, 14–17, 19 and
+29 are not registered).
+
 ## Side finding: the engine hash is not Python `upper()`
 
 `FUN_00423ce8` (0x423ce8, the hash used for enum names and property keys) masks **every** byte with `& 0xDF` before shifting it

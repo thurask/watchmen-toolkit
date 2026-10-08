@@ -39,7 +39,8 @@ _names = None
 def reg():
     global _reg
     if _reg is None:
-        _reg = json.load(open(os.path.join(_HERE, "reg_dump.json")))
+        with open(os.path.join(_HERE, "reg_dump.json")) as fh:
+            _reg = json.load(fh)
     return _reg
 
 
@@ -48,7 +49,8 @@ def prop_names():
     if _names is None:
         p = os.path.join(_HERE, "prop_names_from_reg.json")
         if os.path.exists(p):
-            _names = json.load(open(p))
+            with open(p) as fh:
+                _names = json.load(fh)
         else:  # pure aggregation of reg_dump.json - no need to ship the file
             from gen_data import derive_prop_names
 

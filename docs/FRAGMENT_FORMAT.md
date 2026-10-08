@@ -84,6 +84,24 @@ type record = [FFFFFFFF][nodeId][wc][TypeName, NUL-padded to wc words]
 instance    = [FFFFFFFE][nodeId] ( [keyHash][value] )*
 ```
 
+- **Header** *[2026-10-04, engine `Fragment::LoadHeader` 0x54306d]*: `u32 version` (4 in every
+  shipped file), `u8 singleton`, `u8 smartSelectable`, `u32 nameLen` (NUL included), `name`,
+  `u8 reapplyable`, `u8 typed`, `u32 chunkCount`; 17 bytes with the empty name.
+  `kapow_fragment.parse_header`; exported as `header` in the fragment JSON. Part 2 PC (906
+  fragments + 1 scene): 129 singletons, 63 with a name, 11 reapplyable, none typed.
+- Typed streams (header byte `typed`): a property is `[keyHash][typeHash][wordCount][value]`;
+  the engine skips the value on an unknown key, a type-hash mismatch, a property the class
+  lacks or one with store-flag bit 0 (0x545e1b, 0x53c5c3). No shipped fragment is typed (0 on
+  PC, PS3 and Xbox 360, both parts). 0x53c5c3 is the stream transcoder (byte swap and the
+  `.debug_info` log written by 0x5409da), not a reference fix-up. `kapow_fragment.parse` reads
+  a typed stream with this framing (the value of an unknown key is kept as its `wordCount`
+  words, type `words?`); it does not compare the type hash.
+- **A `.scene` file is a fragment** whose first node is the `SceneNode`; `to_json` /
+  `load_fragment` accept it.
+- The stream may open with type records that carry a bare native name (`SceneNode`, `Folder`);
+  they are read like any other type record, so those nodes have a `type` (111 of the 907 Part 2
+  files gain typed nodes; instance records and properties are identical in all 907, in the same
+  order).
 - `TypeName` is `Class(Native)` for a script class (`CharacterRoot(PivotNode)`)
   or a bare native class (`Folder`, `Model`, `Sprite`, …).
 - Type records open the stream **and recur between instances**. `0xFFFFFFFF`
@@ -101,6 +119,31 @@ instance    = [FFFFFFFE][nodeId] ( [keyHash][value] )*
   `[count][T × count]`; entity references are tagged (`[tag]`, tag 0 / 1 / 2 =
   4 bytes, tag 3 = `[3][nodeId]`, tag 4 = `[4][a][n][n words]`, tag 5 =
   `[5][n][n words]`).
+- **Entity references as the engine resolves them** *[2026-10-04, readers 0x500b81 / 0x505d84,
+  scope search 0x53a5ff]*: tag 1 null; tag 2 the node the fragment is applied to; tag 3 `[id]` a
+  node of the same instance; tag 4 `[a][n][ids]` a path from the scene (`a = 0`) or from the
+  fragment host enclosing the referrer, `a - 1` hosts further up; tag 5 `[n][ids]` where
+  `ids[0]` is the name hash of a SINGLETON fragment (header name, or the file's base name when
+  the name is empty; the first registered instance wins) and the rest a path below the node it
+  is applied to. Each id is searched depth-first in child order without entering nested
+  fragments. `anim_state_machine.resolve_ref` implements this when fragment headers are known
+  and keeps the older nearest-instance rule otherwise (JSON without headers; a tag-5 singleton
+  outside the loaded tree; the tag-3 fallback past the own instance, which is not established).
+  It is never used by shipped data: 0 of 69,104 (Part 2) and 0 of 96,411 (Part 1) tag-3 references
+  name an id outside their own fragment file, on all three platforms.
+  Which registered properties a fragment stores at all is decided at registration: property
+  record +0x38: bit 0 = never written; bit 1 = deprecated alias, read but never written; bit 3
+  is set on 16 properties (`bit3` in `property_store_flags.json`); its meaning is not
+  established. `wlib/property_store_flags.json` lists the 61 + 56 properties
+  that carry bit 0 / bit 1 (class, property, registration site). The writer (Entity vfunc 7,
+  0x5016d8) also skips `script`, a property without a setter and `assetName` on an entity whose
+  native class is SceneNode.
+  All references of every Part 2 PC level (6) and Part 1 PC level (7) resolve.
+- Asset paths in `assetName` are matched case-insensitively (engine 0x54ba59): the scene says
+  `/Levels/.../tutorial.fragment`, the file is `Tutorial.fragment`.
+- `anim_state_machine.load_tree(hosts="all" | callable)` splices a fragment under every node
+  whose `assetName` names a `.fragment` / `.scene`; the default (`"groups"`: state groups only)
+  is unchanged and is all an animation class needs. What a level is built from: LEVEL_META.md.
 - Key names and types come from `kapow_fragment_keys.pkl`. Built-in node
   properties are typed from the engine's typed registration wrappers (862
   names, e.g. `aspectRatio` number, `includeInAO` truth, `pivotSheet_Id`
@@ -109,14 +152,23 @@ instance    = [FFFFFFFE][nodeId] ( [keyHash][value] )*
 
 In the JSON, `schema` lists every type record, created nodes carry their
 `type` in `nodes_full`, and a type record still produces a
-`{"node", "created": true, "props": []}` entry.
+`{"node", "created": true, "props": []}` entry (53,799 + 1,492 = 55,291 of
+them in the 906 Part 2 PC fragments). The exception: type records in front of
+the first `Class(Native)` record at the head of the stream go to `schema`
+alone, as that first run of `Class(Native)` records always did.
 
 Part 2 PC corpus (906 `.fragment` files): all 906 parse to the end of the
 file; 22 unknown-key occurrences remain (580,286 before the hash fold, the
 built-in types and type-record handling). The residue: 22 different values,
 each directly after `key_0991b0d4 = 3`, of the form `[X][float][0][0][0]`.
 `key_0991b0d4` is the one standard key without a name; its name and type are
-not established.
+not established. *[corrected 2026-10-04: it is `CharacterGroup.m_ezonetrigger`
+(the name hashes to 0x0991b0d4; registered as an entity reference, "Combat
+Zone"), an Entity: `[1]` = none (119 times), `[3][node id]` = a node of the
+same fragment (22 times). Read as an integer, the id was taken for a key.
+With the type corrected no unknown key remains in the 906 fragments (nor, since 2026-10-05,
+in the 758 of Part 1, see "Part 1 keys" below). The "22 unknown-key
+occurrences" above are those 22 references and are obsolete.]*
 
 ## Spawn map — RECOVERED (`enemy_spawns.json`)
 `watchmen fragment Enemies.fragment enemy_spawns.json`
@@ -179,9 +231,10 @@ The exact TriggerAction->target-group id wiring (u32 hash references in the prop
 instHash, but per-key types aren't all mapped). The node names already make the wiring legible
 (`act_ACTIVATE_Entrance_enemies_02`, `act_FOLLOW_PIVOT_{dominatrice}`), so this is optional.
 *[2026-10-02: key typing is no longer the obstacle — see the corpus figures
-under "Stream grammar". Not established: the name and type of `key_0991b0d4`;
-the serialized size of `netparticipant` (one property, absent from the
-corpus).]*
+under "Stream grammar". Not established: the name and type of `key_0991b0d4`
+*[established 2026-10-04: `m_ezonetrigger`, Entity; see "Stream grammar"]*;
+`netparticipant` is one slot (4 bytes, default 0xFFFFFFFF; 0x500343, 0x4f35b0); it is still
+absent from the corpus.]*
 
 ## Encounter content (from the decoded types + the name table)
 Enemies.fragment instantiates, across 56 CharacterGroups / 164 spawn pivots:
@@ -192,3 +245,96 @@ Boss control: act_ACTIVATE_TwillligthLady, act_FORCE_MOVE_{twilight_lady},
 act_DAMAGE_MODE_{twilight_lady}_INVULNERABLE, act_DEACTIVATE_{twilight_lady}.
 Cameras.fragment: Cam_01/02/03 via PivotController(Camera), TELEPORT/FORCE_MOVE players,
 SET_AI_STATE Rorshach/NiteOwl PASSIVE during cutscenes then AGGRESSIVE.
+
+## JSON sections (`.fragment.json`)
+
+*Rewritten 2026-10-05.* Up to then `nodes`, `named_instances`, `instances` and `transforms`
+came from a byte sweep of the raw file, which read integers as text, lost strings at chunk
+boundaries and paired types with the wrong id (553 of 906 Part 2 files and 486 of 758 Part 1
+files disagreed with their own `nodes_full`). They are now built from the exact parse
+(`kapow_fragment.sections`).
+
+- `schema`, `nodes_full`: the exact parse. `nodes`: the same type records as `{type, hash}`.
+  `nodes_full` has two records for a node the fragment creates: a creation record
+  (`created: true`, no properties) and a property record. Count nodes by property records, not
+  by `created: true` records: Part 2 has 467 `CharacterRoot` creation records and 488 property
+  records (the 21 extra are overrides of nodes created in another fragment), Part 1 504 and 519;
+  the 47 `visionblocker` records of Part 2 are 28 nodes.
+- **Key names** are spelled as the executable registers them (`visible`, `open`, `useRealtime`,
+  `locked`, `userType`, `textRes`, `minRange` …), the same spelling `.particle.json` and the
+  other property-bag files use. Up to 1.3.0 99 names differed from the registered spelling in
+  letter case only (`Visible`, `Open`, `UseRealTime`, `Locked`, `UserType`, `textres`,
+  `minrange` …); 48 of them occur in PC Part 2 fragments (285,211 keys in 897 of the 906
+  fragments and the scene file) and 49 in PC Part 1 (436,865 keys in 746 of 758). The key hash
+  folds letter case, so hashes, types and values are unchanged: only the spelling of the key in
+  the JSON differs. None of the 99 is an entry of a script database (`Database.bin`), whose
+  3,693 / 3,410 names already agreed; the spelling is the one of the registration string
+  (`wlib/registered_names.json`). The toolkit's own readers take either spelling, so a
+  `.fragment.json` written by an older version still works. Four keys also changed type to the
+  one their native registration gives, `alphaThreshold` and `density` integer,
+  `materialColorAlpha` number, `model` string; no fragment carries any of the four.
+- `named_instances`: every `name` in file order.
+- `instances`: one entry per instance name, in order of first appearance. Nodes sharing a
+  name share the entry; a node without `name` adds to the entry before it; `(preamble)`
+  holds the opening type table and anything before the first name.
+  - `<property>`: the distinct text values of that `string` / `list(string)` property;
+  - `str_<id>`: the node's type record;
+  - `model_ref`, `texture_ref`, `fragment_ref`, `sound_ref`, `script_ref`, `animation_ref`,
+    `asset_ref`: resource paths among list elements, by extension;
+  - `_transforms`: one per `localPos`.
+- `transforms`: every finite `localPos`; `quat` and `yaw_deg` when a unit `localOrient`
+  follows directly.
+- `instances_source`: `"exact"`, or `"sweep"` when the property stream does not parse to
+  its end (then `lossless` is false and the four sections are the old sweep; 0 files in six
+  sets). `unknown_keys`: `[{key, count, type_guess}]`, only when a key is in no table (0
+  files). `extract` prints a `WARNING: fragment …` line for either.
+
+A vector or quaternion guess for an unknown key is refused when a component is a marker, a
+known key hash, or not an ordinary float (zero, or magnitude between 1e-6 and 1e7); the
+parser then falls through to its other guesses and re-syncs on the next key.
+
+Byte order: `detect_order` takes the order whose chunk walk ends on the last byte; when
+both do (one 393-byte console fragment, `SE_Countered_victim02`), the one whose payload
+holds a schema record.
+
+### Part 1 keys
+
+Seven keys occur only in Part 1 (95 properties per set) and are named in
+`kapow_fragment.PART1_KEYS`:
+
+| Key | Name | Type | Class | Count | Evidence |
+|---|---|---|---|---|---|
+| 57a8be19 | `_idebugrunthroughmode` | integer | WaypointController | 6 | Part 1 `database.bin` entry `_idebugrunthroughmode:integer`; also a string in the PS3 Part 1 executable and both XBLA images; caption "Runthrough Special Mode" |
+| 40cb4063 | `_tdebugtmp01` | truth | WaypointController | 6 | Part 1 `database.bin` entry `_tdebugtmp01:truth`; also a string in the same executables; "Tjeck Waypoint Path" button |
+| 56eec9bf | `_nsteplengthinmeters` | number | WaypointController | 6 | Part 1 `database.bin` entry `_nsteplengthinmeters:number`; caption "Step Length(m)", values 2.0 and 0.5 |
+| f89f0453 | `_ntimeprstepinsec` | number | WaypointController | 6 | Part 1 `database.bin` entry `_ntimeprstepinsec:number`; caption "Step Time(m/sec)", values 0.5 and 0.01 |
+| ceacaed4 | `_tuseteleport` | truth | WaypointController | 6 | Part 1 `database.bin` entry `_tuseteleport:truth`; "tUseTeleport" is a string beside `waypointcontroller_tnt.cpp`; caption "Use Teleport" |
+| 0cdb31bf | `_nobstructionfactor` | number | SoundEnvironment | 50 | Part 1 `database.bin` entry `_nobstructionfactor:number`; caption "Obstruction factor", between `_nocclusionfactor` and `_tobstructor` |
+| b29cf82f | `_tstartenabled` | truth | visionblocker | 21 | Part 1 `database.bin` entry `_tstartenabled:truth`; caption "Start Enabled" |
+
+All seven names and types are entries of the Part 1 script database
+(`data_baked/tnt/production/database.bin`; PC, the Xbox 360 devkit build and PS3 agree), so
+no spelling is inferred any more. See [SCRIPT_DATABASE.md](SCRIPT_DATABASE.md). The pairing
+of key and caption is by file order and was not read from the registration code.
+
+Until the database was read, five of the seven spellings were inferred and a fragment JSON
+that used one carried an `inferred_names` list. `kapow_fragment.PART1_INFERRED` is empty
+now, so no fragment JSON has that list. The mechanism is kept for a name that is added
+later with an exact hash but no string list or database entry behind it; such a file would
+then say:
+
+```json
+"inferred_names": [
+ {"name": "<name>", "key": "<8 hex digits>", "count": 1,
+  "confidence": "inferred", "caption": "<UI caption>"}
+],
+"inferred_names_note": "the spelling of these property names is inferred: ..."
+```
+
+One entry per inferred name the file uses, with the stored key, the number of properties
+and the caption it was matched to (`inferred_names()`). The key, the type and the value in
+`nodes_full` are as stored and the file stays `lossless`; only the name would be a guess.
+
+Fragment JSON differences between platforms that remain are typed values of the source:
+4 Part 2 files (Bordello `Enemies` and `Sound`, NightClub `Collision`, StreetsOfRiot
+`Cameras`) and 12 files of the PS3 build of Part 1.
