@@ -176,7 +176,7 @@ def find_face_fragments(extract_out):
         for f in _kj.glob_tree(
             _fragroot(extract_out), "CharacterAnimation", "AnimationClass*" + ext
         ):
-            hits.add(f[: -len(".json")] if f.endswith(".json") else f)
+            hits.add(f.removesuffix(".json"))
     out = {}
     for f in sorted(hits):
         nm = os.path.basename(f)[len("AnimationClass") : -len(".fragment")]
@@ -193,7 +193,7 @@ def charvisual_table(extract_out):
     hits = set()
     for ext in (".fragment", ".fragment.json"):
         for f in _kj.glob_tree(_fragroot(extract_out), "CharacterVisual", "*CharVisual*" + ext):
-            hits.add(f[: -len(".json")] if f.endswith(".json") else f)
+            hits.add(f.removesuffix(".json"))
     rows = []
     for f in sorted(hits):
         try:
@@ -320,16 +320,17 @@ def simulate(root, play_time, attack=False, mode=MODE_NONCOMBAT, inputs=(), seed
         while k < len(ins) and ins[k][0] <= t + 1e-6:
             _t, kind, pose = ins[k]
             k += 1
-            if kind == "HIT":
-                it.env.actions.add(A_HITTAKEN)
-                it.env.enums[E_DAMAGE_POSE] = pose or 0
-            elif kind == "START_SPEAK":
-                it.env.actions.add(A_START_SPEAK)
-                talking = True
-            elif kind == "STOP_SPEAK":
-                talking = False
-            elif kind == "DEAD":
-                it.env.enums[E_CHARACTER_MODE] = MODE_DEAD
+            match kind:
+                case "HIT":
+                    it.env.actions.add(A_HITTAKEN)
+                    it.env.enums[E_DAMAGE_POSE] = pose or 0
+                case "START_SPEAK":
+                    it.env.actions.add(A_START_SPEAK)
+                    talking = True
+                case "STOP_SPEAK":
+                    talking = False
+                case "DEAD":
+                    it.env.enums[E_CHARACTER_MODE] = MODE_DEAD
         if attack and it.env.enums[E_CHARACTER_MODE] != MODE_DEAD:
             it.env.actions.add(A_NORMAL_ATTACK)
         if not talking:
@@ -353,7 +354,11 @@ def simulate(root, play_time, attack=False, mode=MODE_NONCOMBAT, inputs=(), seed
 def face_class_record(name, path, extract_out, am):
     """JSON-able description of one face class.  am: the anim_meta module
     (record builders; passed in to avoid a circular import)."""
-    root, nodes = load_face_class(path)
+    try:
+        root, nodes = load_face_class(path)
+    except (OSError, ValueError, KeyError, IndexError, TypeError) as ex:
+        ex.add_note("face class %s" % name)
+        raise
     byid = asm.node_index(None, nodes)
     states, groups, dirs, mixes = [], [], set(), {}
     for n in nodes:
@@ -778,18 +783,21 @@ def _script(inputs):
             i["in_track"] = False
             i["not_in_track_because"] = "no defined time"
             continue
-        if i["input"] == "HITTAKEN":
-            if not i.get("pose_established", True):
-                i["in_track"] = False
-                i["not_in_track_because"] = "the DAMAGE_POSE sent with this hit is not established"
-                continue
-            out.append((round(i["t_s"], 4), "HIT", i.get("damage_pose_id") or 0))
-        elif i["input"] == "START_SPEAK":
-            out.append((round(i["t_s"], 4), "START_SPEAK", 0))
-            if i.get("talk_s"):  # one fixed wave: the sound, and the talk, end here
-                out.append((round(i["t_s"] + i["talk_s"], 4), "STOP_SPEAK", 0))
-        elif i["input"] == "DEAD":
-            out.append((round(i["t_s"], 4), "DEAD", 0))
+        match i["input"]:
+            case "HITTAKEN":
+                if not i.get("pose_established", True):
+                    i["in_track"] = False
+                    i["not_in_track_because"] = (
+                        "the DAMAGE_POSE sent with this hit is not established"
+                    )
+                    continue
+                out.append((round(i["t_s"], 4), "HIT", i.get("damage_pose_id") or 0))
+            case "START_SPEAK":
+                out.append((round(i["t_s"], 4), "START_SPEAK", 0))
+                if i.get("talk_s"):  # one fixed wave: the sound, and the talk, end here
+                    out.append((round(i["t_s"] + i["talk_s"], 4), "STOP_SPEAK", 0))
+            case "DEAD":
+                out.append((round(i["t_s"], 4), "DEAD", 0))
     return tuple(out)
 
 
@@ -1237,15 +1245,15 @@ def _shared(x, sp0, pps, slaved):
     """Time on the pair's clock of an event given on its state's own timeline.
     slaved: the state's play position is the pair's (a partner's own PLAY_POS
     events, or events of the partner state seen from the master)."""
-    trig = x.get("trigger")
-    if trig == "TOTAL_PLAY_TIME":
-        return x.get("raw")
-    if trig == "ENTER_STATE":
-        return 0.0
-    if trig == "LEAVE_STATE":
-        return None
-    if trig == "PLAY_POS" and slaved:
-        return round(max(0.0, (x["raw"] - sp0) / pps), 4) if pps else None
+    match x.get("trigger"):
+        case "TOTAL_PLAY_TIME":
+            return x.get("raw")
+        case "ENTER_STATE":
+            return 0.0
+        case "LEAVE_STATE":
+            return None
+        case "PLAY_POS" if slaved:
+            return round(max(0.0, (x["raw"] - sp0) / pps), 4) if pps else None
     return x.get("t_s")
 
 
@@ -1665,7 +1673,7 @@ def head_tables(extract_out):
     hits = set()
     for ext in (".fragment", ".fragment.json"):
         for f in _kj.glob_tree(_fragroot(extract_out), "Fragments", "Enemy", "*" + ext):
-            hits.add(f[: -len(".json")] if f.endswith(".json") else f)
+            hits.add(f.removesuffix(".json"))
     for f in sorted(hits):
         try:
             if os.path.getsize(f if os.path.exists(f) else f + ".json") > 200000:

@@ -16,12 +16,10 @@
 #   bytes each ANDed with 0xDF (engine FUN_00423ce8) -- NOT str.upper(): digits and
 #   punctuation are folded too ('0'..'9' -> 0x10..0x19, '(' -> 0x08, ',' -> 0x0C).
 import struct, json, pickle
+from wutil import restricted_load
 
 
-def _read_bytes(path):
-    """The file's bytes; the handle is closed before returning."""
-    with open(path, "rb") as fh:
-        return fh.read()
+from wutil import read_bytes as _read_bytes  # one copy, in wlib/wutil.py
 
 
 def kapow_hash(s):
@@ -125,14 +123,15 @@ def namedict():
         cand = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prop_hash_dict.pkl")
         try:
             with open(cand, "rb") as _fh:
-                _D = pickle.load(_fh)
+                _D = restricted_load(_fh)  # plain data only, no code
             # names the dictionary lacks, from the executable's registrations
             # (VarianceInitializer.life, UVArray*.numX / numY, DampeningAffector.damp,
             # Entity.open); never overrides an existing entry
             for _nm in ("life", "numX", "numY", "damp", "open"):
                 _D.setdefault(name_hash(_nm), _nm)
         except (OSError, pickle.UnpicklingError, EOFError, ValueError) as _ex:
-            # NEVER fall back to a world-writable path: pickle.load executes code.
+            # NEVER fall back to a world-writable path (restricted_load refuses a pickle
+            # that names a class or function, but a table from elsewhere is still not ours).
             print(
                 "warning: %s unreadable (%s) -- property keys will render as hex hashes"
                 % (cand, _ex),
@@ -276,7 +275,7 @@ def find_objects(b, bo="<", classes=None):
             p += 1
             continue
         cls, q = r
-        base = cls[cls.index("(") + 1 : -1] if cls.endswith(")") and "(" in cls else cls
+        base = cls.partition("(")[2].removesuffix(")") if cls.endswith(")") and "(" in cls else cls
         if q + 4 > n or (want is not None and cls not in want and base not in want):
             p += 1
             continue
@@ -296,21 +295,20 @@ def record_value(type_name, b, q, k, bo="<"):
     """Plain value of one record payload (k dwords at q) by type name: float,
     int, bool, str, [float] (vector / color / quaternion), int (64-bit "id");
     None when the type is unknown or the size does not fit it."""
-    if type_name == "string":
-        return None if k < 1 else b[q + 4 : q + 4 * k].split(b"\0", 1)[0].decode("latin1")
-    if type_name == "number" and k == 1:
-        return struct.unpack_from(bo + "f", b, q)[0]
-    if type_name == "integer" and k == 1:
-        return struct.unpack_from(bo + "i", b, q)[0]
-    if type_name == "enum" and k == 1:
-        return struct.unpack_from(bo + "i", b, q)[0]
-    if type_name == "truth" and k == 1:
-        return bool(struct.unpack_from(bo + "I", b, q)[0])
-    if type_name == "id" and k == 2:
-        hi, lo = struct.unpack_from(bo + "II", b, q)
-        return (hi << 32) | lo
-    if type_name in ("vector", "color", "quaternion") and k >= 1:
-        return list(struct.unpack_from(bo + "%df" % k, b, q))
+    match type_name:
+        case "string":
+            return None if k < 1 else b[q + 4 : q + 4 * k].split(b"\0", 1)[0].decode("latin1")
+        case "number" if k == 1:
+            return struct.unpack_from(bo + "f", b, q)[0]
+        case "integer" | "enum" if k == 1:
+            return struct.unpack_from(bo + "i", b, q)[0]
+        case "truth" if k == 1:
+            return bool(struct.unpack_from(bo + "I", b, q)[0])
+        case "id" if k == 2:
+            hi, lo = struct.unpack_from(bo + "II", b, q)
+            return (hi << 32) | lo
+        case "vector" | "color" | "quaternion" if k >= 1:
+            return list(struct.unpack_from(bo + "%df" % k, b, q))
     return None
 
 
@@ -359,7 +357,7 @@ def _rdname(b, p, bo="<"):
     if 2 <= nl <= 64 and p + 4 + nl <= n:
         nm = b[p + 4 : p + 4 + nl]
         if nm.endswith(b"\0") and all(32 <= c < 127 for c in nm[:-1]):
-            return nm[:-1].decode(), p + 4 + nl
+            return nm.removesuffix(b"\0").decode(), p + 4 + nl
     return None
 
 
@@ -376,19 +374,28 @@ def detect_order(b):
 def _value(tn, typ, b, q, k, bo):
     """JSON value of one record payload as parse() writes it (tn = type name or
     None, typ = the type hash shown for a raw value)."""
-    if tn == "string":
-        wc = struct.unpack_from(bo + "I", b, q)[0]
-        return b[q + 4 : q + 4 + wc * 4].rstrip(b"\0").decode("latin1")
-    if tn == "number":
-        fs = [struct.unpack_from(bo + "f", b, q + 4 * j)[0] for j in range(k)]
-        return fs[0] if k == 1 else fs
-    if tn in ("integer", "truth", "enum"):
-        iv = [struct.unpack_from(bo + "i", b, q + 4 * j)[0] for j in range(k)]
-        return iv[0] if k == 1 else iv
+    match tn:
+        case "string":
+            wc = struct.unpack_from(bo + "I", b, q)[0]
+            return b[q + 4 : q + 4 + wc * 4].rstrip(b"\0").decode("latin1")
+        case "number":
+            fs = [struct.unpack_from(bo + "f", b, q + 4 * j)[0] for j in range(k)]
+            return fs[0] if k == 1 else fs
+        case "integer" | "truth" | "enum":
+            iv = [struct.unpack_from(bo + "i", b, q + 4 * j)[0] for j in range(k)]
+            return iv[0] if k == 1 else iv
+    # a type with no reader here (vector, color, quaternion, unknown): the raw value
     fs = [struct.unpack_from(bo + "f", b, q + 4 * j)[0] for j in range(k)]
+    import f32json
+
+    if f32json.mode() == "exact":
+        # every finite value as stored (f32json); NaN and the infinities: null
+        floats = [f32json.f32(x) for x in fs]
+    else:  # $WATCHMEN_JSON_FLOATS=rounded: the 1.4.0 output
+        floats = [round(x, 6) if abs(x) < 1e9 else None for x in fs]
     return {
         "raw_type": "%08x" % typ,
-        "floats": [round(x, 6) if abs(x) < 1e9 else None for x in fs],
+        "floats": floats,
         "hex": b[q : q + 4 * k].hex(),
     }
 

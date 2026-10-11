@@ -424,24 +424,41 @@ def test_empty_fragment_does_not_take_the_class_tree_down():
 
 # -------------------------------------------------------------------- glb
 @pytest.mark.usefixtures("engine_frame")  # pins the engine numbers; true frame: test_frame.py
-def test_write_glb_embeds_names_parents_and_conventions(rig, tmp_path):
+@pytest.mark.parametrize("rig_mode", ["hierarchy", "flat"])
+def test_write_glb_embeds_names_parents_and_conventions(rig, tmp_path, monkeypatch, rig_mode):
     """Importers key on these: without them every skeleton needs a hand-made
-    joint layout."""
+    joint layout.  Hierarchy (default): nodes named after the bones, parented as
+    `joint_parents` says, extras.index = palette index.  Flat (`--rig flat`): the
+    1.4.0 names b0..bN, every joint a child of `root`."""
     import variant_glb
     from conftest import parse_glb
 
+    monkeypatch.setenv("WATCHMEN_RIG", rig_mode)
     out = tmp_path / "x.glb"
     variant_glb.write_glb(rig.parts, rig.manifest, str(out), str(rig.bind_npz))
     J = parse_glb(out).j
     assert J["asset"]["extras"]["watchmen"]["format"] == am.FORMAT
+    assert J["asset"]["extras"]["watchmen"]["rig"] == {"mode": rig_mode}
     assert "MIRROR" in J["asset"]["extras"]["watchmen"]["conventions"]["handedness"]
     sk = J["skins"][0]
     ex = sk["extras"]["watchmen"]
     assert ex["joint_names"] == [str(n) for n in rig.names]
     assert ex["joint_parents"] == [int(p) for p in rig.par]
+    assert ex["joint_space"].startswith(rig_mode + ":")
+    parent = {c: i for i, n in enumerate(J["nodes"]) for c in n.get("children", [])}
+    root = [n["name"] for n in J["nodes"]].index("root")
     for k, jn in enumerate(sk["joints"]):
-        assert J["nodes"][jn]["name"] == "b%d" % k, "node names are unchanged"
-        assert J["nodes"][jn]["extras"] == {"bone": str(rig.names[k]), "parent": int(rig.par[k])}
+        bone = {"bone": str(rig.names[k]), "parent": int(rig.par[k])}
+        if rig_mode == "flat":
+            assert J["nodes"][jn]["name"] == "b%d" % k, "the 1.4.0 node names"
+            assert J["nodes"][jn]["extras"] == bone
+            assert parent[jn] == root
+        else:
+            assert J["nodes"][jn]["name"] == str(rig.names[k])
+            assert J["nodes"][jn]["extras"] == dict(bone, index=k)
+            want = root if rig.par[k] < 0 else sk["joints"][int(rig.par[k])]
+            assert parent[jn] == want
+    assert ("joint_nodes" in ex) == (rig_mode == "hierarchy")
     assert "extras" not in J["animations"][0], "no table given -> no per-clip extras"
 
 

@@ -7,21 +7,19 @@ enum family each ANIMATION_ENUM criteria variable takes its values from, and a
 per-event summary of what the engine does with each ANIMATION_EVENT id.
 """
 
+import functools
 import json
 import os
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _PATH = os.path.join(_HERE, "engine_enums.json")
-_DATA = None
 
 
+@functools.cache
 def data():
     """The whole table (parsed once)."""
-    global _DATA
-    if _DATA is None:
-        with open(_PATH, encoding="utf-8") as fh:
-            _DATA = json.load(fh)
-    return _DATA
+    with open(_PATH, encoding="utf-8") as fh:
+        return json.load(fh)
 
 
 def families():

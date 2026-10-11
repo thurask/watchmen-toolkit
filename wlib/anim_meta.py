@@ -61,6 +61,7 @@ import anim_state_machine as asm
 import engine_enums as ee
 import frame as _frame
 import kapow_json as _kj
+from wutil import load_npz, order_name
 
 FORMAT = "watchmen-anim-meta/2"
 # Content revision of the table (top-level "revision").  The format strings name
@@ -68,7 +69,9 @@ FORMAT = "watchmen-anim-meta/2"
 # export rebuilds a cached anim_meta.json whose revision is missing or different
 # (characters_export.anim_meta_is_current), so a table from before a rule was
 # added or corrected is never reused.  Raise it with every change of content.
-REVISION = 5
+# 6 (1.5.0): fragment floats exact by default; the table records `float_values`
+# (f32json.mode()), and a table written in the other mode is rebuilt.
+REVISION = 6
 
 # Engine rules (criteria evaluation, event triggers, sync markers, start
 # position, fragment splicing, reference resolution) live in anim_state_machine;
@@ -103,8 +106,7 @@ TRIG_LEAVE_STATE, TRIG_TOTAL_PLAY_TIME = asm.EV_LEAVE_STATE, asm.EV_TOTAL_PLAY_T
 
 # ------------------------------------------------------------------ helpers
 def _label(node):
-    s = (node.name or "").strip("{}").strip()
-    return s[len("criteria: ") :] if s.startswith("criteria: ") else s
+    return (node.name or "").strip("{}").strip().removeprefix("criteria: ")
 
 
 def _walk(n, out):
@@ -534,7 +536,7 @@ def find_class_fragments(extract_out):
     hits = set()
     for ext in (".fragment", ".fragment.json"):  # the JSON alone is enough
         for f in _kj.glob_tree(root, "CharacterAnimation", "AnimationClass*" + ext):
-            hits.add(f[: -len(".json")] if f.endswith(".json") else f)
+            hits.add(f.removesuffix(".json"))
     out = {}
     for f in sorted(hits):
         nm = os.path.basename(f)[len("AnimationClass") : -len(".fragment")]
@@ -560,7 +562,11 @@ def load_class_tree(path, _open=()):
     """Roots of one AnimationClass fragment with every nested fragment spliced
     in whole (asm.load_tree; kept as a name for format-2 callers): the state-group
     fragments and the event-list fragments of the states."""
-    return asm.load_tree(path, True, _open, hosts=_class_hosts)
+    try:
+        return asm.load_tree(path, True, _open, hosts=_class_hosts)
+    except Exception as ex:
+        ex.add_note("anim_meta: AnimationClass fragment %s" % path)
+        raise
 
 
 def event_source(e):
@@ -808,8 +814,12 @@ def clip_facts(path):
     with open(path, "rb") as fh:
         h = fh.read()
     order = bake_v4._detect_clip_order(h)
-    rate, dur, _z, keys, scale = struct.unpack_from(order + "2f3I", h, 0)
-    tr = bake_v4.walk(h, order)
+    try:
+        rate, dur, _z, keys, scale = struct.unpack_from(order + "2f3I", h, 0)
+        tr = bake_v4.walk(h, order)
+    except Exception as ex:
+        ex.add_note("anim_meta: clip %s, %d bytes, %s" % (path, len(h), order_name(order)))
+        raise
     out = {
         "file": path,
         "duration_s": round(float(dur), 5),
@@ -868,7 +878,8 @@ def _sample(series, u):
     i = min(int(f), len(series) - 2)
     a, b, w = series[i], series[i + 1], f - i
     if isinstance(a, (list, tuple)):
-        return [x + (y - x) * w for x, y in zip(a, b)]
+        # two keys of one track: the same width by construction
+        return [x + (y - x) * w for x, y in zip(a, b, strict=True)]
     return a + (b - a) * w
 
 
@@ -1272,8 +1283,7 @@ def _block_failed(failed, block, fmt, said, prefix):
     reporting a failure (a hook switched off) leaves no entry."""
     line = next((x for x in reversed(said) if x.startswith(prefix)), None)
     if line is not None:
-        reason = line[len(prefix) :]
-        reason = reason[:-1] if reason.endswith(")") else reason
+        reason = line.removeprefix(prefix).removesuffix(")")
         failed[block] = {"format": fmt, "status": "attempted, failed", "reason": reason}
 
 
@@ -1564,9 +1574,13 @@ def _build(extract_out, binds, log, frame):
             _p.pop("face", None)
         _log("  face: skipped (%s: %s)" % (type(ex).__name__, ex))
         _block_failed(failed, "face", face_rule.FACE_FORMAT, said, "  face: skipped (")
+    import f32json
+
     out = {
         "format": FORMAT,
         "revision": REVISION,
+        # how the fragment floats the table copies were read ($WATCHMEN_JSON_FLOATS)
+        "float_values": f32json.mode(),
         "conventions": CONVENTIONS,
         # caption-learned names (format 1); the records use the exe's names
         "event_names": {
@@ -1580,6 +1594,8 @@ def _build(extract_out, binds, log, frame):
             for k, v in sorted(ee.data()["enum_variable_family"].items(), key=lambda kv: int(kv[0]))
         },
         "transition_start_priority": TRANSITION_START_PRIORITY,
+        # the layout `skeletons` describes: the rig of this run's GLBs
+        "skeleton_rig": _rig_mode(),
         "skeletons": skeletons(binds) if binds else {},
         "classes": out_classes,
         "clips": dict(sorted(clips.items())),
@@ -1727,20 +1743,44 @@ def to_frame(meta, frame=None):
     return _frame.stamp_json(out, mode)
 
 
-def skeletons(binddir):
-    """{bind key: skeleton_extras()} for every bind in `binddir`.  The joint
-    order is the palette order, i.e. the order of the b0..bN nodes of every GLB
-    written with that bind -- so this table also describes GLBs written before
-    the names were embedded."""
-    import numpy as np
+def _rig_mode():
+    import variant_glb
 
+    return variant_glb.rig_mode()
+
+
+def skeletons(binddir, rig=None):
+    """{bind key: skeleton_extras()} for every bind in `binddir`, in the skeleton
+    layout the character GLBs of this run get (`rig`, else variant_glb.rig_mode():
+    --rig / $WATCHMEN_RIG, default "hierarchy").  The joint order is the palette
+    order, the order of `skins[0].joints` of every GLB written with that bind.
+    "hierarchy": the record is the one variant_glb.write_glb puts into
+    `skins[0].extras.watchmen` -- `joint_space` says the transforms are local, and
+    `joint_nodes` gives the joint node names (variant_glb.glb_joint_names; a GLB in
+    which an attachment or outfit node shares a bone's name gives that joint ' #<k>'
+    on top: the GLB's own `joint_nodes` is the authority).  A bind whose parent
+    table is not a tree is written flat, as write_glb writes it.  "flat": the 1.4.0
+    layout, joint nodes b0..bN holding world transforms."""
+    import variant_glb
+
+    mode = variant_glb.rig_mode(rig)
     out = {}
     for f in sorted(glob.glob(os.path.join(binddir, "bind_*_file_v1.npz"))):
         key = os.path.basename(f)[len("bind_") : -len("_file_v1.npz")]
-        b = np.load(f, allow_pickle=True)
+        try:
+            b = load_npz(f)
+        except Exception as ex:
+            ex.add_note("anim_meta: bind skeleton %s" % f)
+            raise
         if "names" in b and "par" in b:
-            out[key] = skeleton_extras(b["names"], b["par"])
-            out[key]["joint_count"] = len(b["names"])
+            names = [str(x) for x in b["names"]]
+            par = [int(x) for x in b["par"]]
+            jn = variant_glb.glb_joint_names(names, par, rig=mode)
+            if jn is not None:
+                out[key] = skeleton_extras(names, par, rig="hierarchy", joint_nodes=jn)
+            else:
+                out[key] = skeleton_extras(names, par)
+            out[key]["joint_count"] = len(names)
     return out
 
 
@@ -2039,18 +2079,35 @@ def conventions(frame=None):
     return CONVENTIONS_TRUE if _frame.is_true(frame) else CONVENTIONS
 
 
-def skeleton_extras(names, parents):
+def skeleton_extras(names, parents, rig="flat", joint_nodes=None):
     """glTF `extras` for a skin: the real bone names and hierarchy.
 
-    The joints are written flat (every joint a child of one identity root,
-    transforms in GamePivot-relative world space), so this is what lets an
-    importer rebuild the hierarchy without a hand-made table per skeleton.
+    rig "flat" (the 1.4.0 layout, `--rig flat`): the joints are written flat
+    (every joint a child of one identity root, transforms in GamePivot-relative
+    world space), so this is what lets an importer rebuild the hierarchy without
+    a hand-made table per skeleton.  rig "hierarchy" (variant_glb.write_glb's
+    default): the joint nodes are parented as `joint_parents` says and their
+    transforms are local; `joint_nodes` (the node names) is added.
     """
     names = [str(n) for n in names]
     par = [int(p) for p in parents]
     idx = {n: i for i, n in enumerate(names)}
     attach = {n: i for i, n in enumerate(names) if "attach" in n.lower()}
-    return {
+    if rig == "hierarchy":
+        space = (
+            "hierarchy: joint node k is a child of the joint node of joint_parents[k] "
+            "(roots: children of `root`) and its transform is local to that parent; "
+            "the product down the chain is the joint's world transform RELATIVE TO "
+            "GamePivot (interact included).  GamePivot alone carries the absolute "
+            "scene track."
+        )
+    else:
+        space = (
+            "flat: every joint node is a child of `root`; its transform is the "
+            "joint's world transform RELATIVE TO GamePivot (interact included). "
+            "GamePivot alone carries the absolute scene track."
+        )
+    out = {
         "joint_names": names,
         "joint_parents": par,
         "motion_root": "GamePivot" if "GamePivot" in idx else None,
@@ -2058,13 +2115,12 @@ def skeleton_extras(names, parents):
         "interact_joint": idx.get("interact"),
         "body_root_joint": idx.get("Bip"),
         "roots": [i for i, p in enumerate(par) if p < 0],
-        "joint_space": (
-            "flat: every joint node is a child of `root`; its transform is the "
-            "joint's world transform RELATIVE TO GamePivot (interact included). "
-            "GamePivot alone carries the absolute scene track."
-        ),
+        "joint_space": space,
         "attach_joints": attach,
     }
+    if joint_nodes is not None:
+        out["joint_nodes"] = [str(n) for n in joint_nodes]
+    return out
 
 
 _LOWER = {}  # id(meta["clips"]) -> {lowercased clip name: clip name}
@@ -2204,7 +2260,11 @@ class _ContactCheck:
         if not os.path.exists(bp):
             raise OSError("bind_%s_file_v1.npz is not in %s" % (key, self.binddir))
         if key not in self._bind:
-            b = np.load(bp, allow_pickle=True)
+            try:
+                b = load_npz(bp)
+            except Exception as ex:
+                ex.add_note("anim_meta: bind skeleton %s (for clip %s)" % (bp, f))
+                raise
             names = [str(x) for x in b["names"]]
             B4 = np.tile(np.eye(4), (len(names), 1, 1))
             B4[:, :3, :3], B4[:, :3, 3] = b["Rb"], b["tb"]

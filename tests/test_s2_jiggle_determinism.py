@@ -42,11 +42,8 @@ def _grid(lo, hi, n):
 
 
 def _next_up(v):
-    """The next double above v (math.nextafter needs Python 3.9)."""
-    (n,) = struct.unpack("<q", struct.pack("<d", v))
-    if v == 0.0:
-        return 5e-324
-    return struct.unpack("<d", struct.pack("<q", n + 1 if v > 0 else n - 1))[0]
+    """The next double above v."""
+    return math.nextafter(v, math.inf)
 
 
 def _ulps(a, b):
@@ -222,7 +219,7 @@ def test_the_clips_exercise_the_limit_and_the_clamp(tmp_path):
 
 
 def test_bake_digests_are_pinned(tmp_path):
-    """The same bytes on every platform (Windows / Linux, any Python from 3.8, any numpy)."""
+    """The same bytes on every platform (Windows / Linux, any supported Python and numpy)."""
     props = dict(jiggle_d6._FILE_DEFAULTS)
     got = {
         k: hashlib.sha256(v.tobytes()).hexdigest()[:16]

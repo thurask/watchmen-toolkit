@@ -266,6 +266,25 @@ mesh" with int16 positions that could not be decoded from the `.naz`.
   index, and writes neither shadow hulls nor proxy slabs. Console files and
   Part 1 PC headers do not follow this layout and take the older descriptor
   scan (`find_descriptors`, IB-validated VB pick + tri gate), unchanged.
+- *1.5.0:* **the character pieces read the header too.** `char_lib.load_parts`,
+  `variant_glb.load_parts`, the weapon / rigid attachments of
+  `characters_export` and `export_female_anims.mesh_arrays` all go through
+  `wlib/mesh_loader.py` `load_submeshes`: every render buffer of format 5 / 6
+  at the stream offset `decode_model_mesh` gives (part-local positions, the
+  primitive type honoured), paired with its geometry descriptor so that the
+  material is the one the descriptor index selects as before; a buffer the
+  header lists without a descriptor (a strip: the descriptor's last word is
+  the primitive type, `find_descriptors` wants 1) is decoded from the header.
+  The 1.4.0 search (`_vb_ok` / `_ib_ok` from the end of the previous piece,
+  then `char_lib.flat_buffer`) runs only when the header path does not apply,
+  and logs `note: <model> sub<i>: header path not applicable (<why>);
+  scanned`. Measured on the six pass-9 sets: every pipeline load (body parts
+  of every variant with its bind, face heads with their face binds, weapon
+  attachments) took the header path — 2,091 piece loads, 0 scanned, 0
+  strips, 3 degenerate triangles (one per Part 2 set) — and gave arrays
+  bit-identical to 1.4.0's; on the 900 character models with a stream the
+  1.4.0 scan had found every piece at the header's offset (1,788 of 1,788
+  descriptors, 6 of them by the planar fallback).
 - CVarList = 24-bit count + 8-bit flags (the `& 0xFFFFFF` seen everywhere).
   Stream primitive: `ReadU32 = 0x435459`.
 

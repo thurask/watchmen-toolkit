@@ -540,6 +540,23 @@ After the property bag (`pe` = its end; loader 0x449e40):
 `extract` writes `audio/sound_info.json` with these fields per sound. Up to 1.3.0 every sound was
 written at 44100 Hz and PCM data was read from pe+30.
 
+**How the game plays an ADPCM sound** *(1.5.0; read from code, 0x40271b)*. The voice is
+created with a `WAVE_FORMAT_ADPCM` format built from this header — format tag 2, the
+channels, block align = the header's, 4 bits per sample, 128 samples per block, and the
+header's seven coefficient pairs — and handed to XAudio2 (`CreateSourceVoice`, vtable +0x20 of
+the audio engine): the game does not decode MS-ADPCM itself, Windows does. `extract` decodes
+as Microsoft's decoder computes (the predictor `(s1·c1 + s2·c2) / 256` in C integer division,
+truncating toward zero — that XAudio2 rounds so, as the ACM codec and ffmpeg do, is inferred),
+with the header's coefficient table, exactly `data bytes` of data and a final partial block,
+trimmed to the sample count. Measured on PC Part 2: 3,146 ADPCM sounds (3,113 mono with block
+align 70, 33 stereo with 140, 336,433,920 samples): all decode to their stored sample count, all
+bit-identical to ffmpeg 6.1.1; none has a non-standard coefficient table, a cue list or a
+partial last block. 1.4.0 floored the predictor (`>> 8`): 177,671,061 samples (53 %) differ,
+by up to 725 (of 32,768), because the error feeds back through the predictor. 1.4.0 also
+searched the standard coefficient table instead of reading the header's and decoded from it to
+the end of the header (a cue list would have become audio); that search is kept as the fallback
+for a header whose layout does not fit.
+
 **Console** *(added 2026-10-05, from data on all 2,921 Part 2 and 3,953 Part 1 sounds of
 each console; the console loaders were not read)*. Big-endian.
 

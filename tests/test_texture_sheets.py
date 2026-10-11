@@ -176,9 +176,16 @@ def test_blend_states_of_every_type():
         op="add",
         gltf="exact",
         cause="renderType",
+        **{"pass": "standard"},  # the pass that draws the sheet
     )
     assert b(blendType=1) == dict(
-        type="add", src="srcAlpha", dst="one", op="add", gltf="glow", cause="renderType"
+        type="add",
+        src="srcAlpha",
+        dst="one",
+        op="add",
+        gltf="glow",
+        cause="renderType",
+        **{"pass": "standard"},
     )
     sub = b(blendType=2)
     assert (sub["src"], sub["dst"], sub["op"], sub["gltf"]) == (
@@ -199,7 +206,7 @@ def test_blend_states_of_every_type():
     assert b(blendType=3, srcBlend=5, dstBlend=2, blendOp=1)["gltf"] == "glow"
     # the sky box pass uses one/one, and plain subtract there
     sky = we.sheet_blend(dict(renderType=7, blendType=1))
-    assert (sky["src"], sky["dst"], sky["op"]) == ("one", "one", "add")
+    assert (sky["src"], sky["dst"], sky["op"], sky["pass"]) == ("one", "one", "add", "sky")
     assert we.sheet_blend(dict(renderType=7, blendType=2))["op"] == "subtract"
     # "Standard with blending", SkyBox and Sprite blend; Standard / FallOff only
     # with an opacity below 0.99 (tests/test_p1_materials.py)

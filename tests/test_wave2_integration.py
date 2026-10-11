@@ -24,6 +24,8 @@ def _cached_table(tmp_path, monkeypatch, face_format):
     table = {
         "format": anim_meta.FORMAT,
         "revision": anim_meta.REVISION,
+        "float_values": "exact",
+        "skeleton_rig": "hierarchy",
         "marker": "cached",
         "combat_format": combat_meta.COMBAT_FORMAT,
         "fx_format": fx_meta.FORMAT,

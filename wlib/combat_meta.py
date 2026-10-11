@@ -1627,39 +1627,40 @@ def render_criterion(k):
     0x5c5781 says which properties each kind reads).  The node caption is used
     only for kinds without values of their own."""
     kind = k.p("m_ianimationcriteria") or 0
-    if kind == asm.CRIT_VALUE:
-        v = k.p("m_ianimationvalue") or 0
-        var = ee.name("ANIMATION_VALUE", v, "VALUE_%s" % v)
-        t = k.p("m_iintervaltype") or 0
-        lo, hi = k.p("m_nintervalmin"), k.p("m_nintervalmax")
-        if t == 0:
-            s = "%s in [%s;%s[" % (var, _g(lo), _g(hi))
-        elif t == 1:
-            s = "%s < %s" % (var, _g(hi))
-        elif t == 2:
-            s = "%s >= %s" % (var, _g(lo))
-        else:
-            s = "%s interval type %s" % (var, t)
-    elif kind == asm.CRIT_ACTION:
-        a = k.p("m_ianimationaction") or 0
-        s = "ACTION " + ee.name("CONTROL_ACTION_TYPES", a, "ACTION_%s" % a)
-    elif kind == asm.CRIT_ENUM:
-        var = k.p("m_ianimationenum") or 0
-        val = ee.signed(k.p("m_ianimationenumvalue") or 0)
-        fam = ee.enum_variable_family(var)
-        if var == VAR_TARGET_MODE:
-            nm = TARGET_MODE.get(val, "VALUE_%s" % val)
-        else:
-            nm = ee.name(fam, val, "VALUE_%s" % val) if fam else "VALUE_%s" % val
-        s = "%s = %s" % (ee.name("ANIMATION_ENUM", var, "ENUM_%s" % var), nm)
-    elif kind in (asm.CRIT_ANY_OF, asm.CRIT_ALL_OF):
-        kids = [render_criterion(x) for x in k.children if x.cls == asm.CLS_CRIT]
-        s = ("ANY OF(" if kind == asm.CRIT_ANY_OF else "ALL OF(") + " | ".join(kids) + ")"
-    else:
-        s = (k.name or "").strip("{}").strip()
-        s = s[len("criteria: ") :] if s.startswith("criteria: ") else s
-        if s.startswith("NOT ") and k.p("m_tnot"):
-            s = s[4:]
+    match kind:
+        case asm.CRIT_VALUE:
+            v = k.p("m_ianimationvalue") or 0
+            var = ee.name("ANIMATION_VALUE", v, "VALUE_%s" % v)
+            t = k.p("m_iintervaltype") or 0
+            lo, hi = k.p("m_nintervalmin"), k.p("m_nintervalmax")
+            match t:
+                case 0:
+                    s = "%s in [%s;%s[" % (var, _g(lo), _g(hi))
+                case 1:
+                    s = "%s < %s" % (var, _g(hi))
+                case 2:
+                    s = "%s >= %s" % (var, _g(lo))
+                case _:
+                    s = "%s interval type %s" % (var, t)
+        case asm.CRIT_ACTION:
+            a = k.p("m_ianimationaction") or 0
+            s = "ACTION " + ee.name("CONTROL_ACTION_TYPES", a, "ACTION_%s" % a)
+        case asm.CRIT_ENUM:
+            var = k.p("m_ianimationenum") or 0
+            val = ee.signed(k.p("m_ianimationenumvalue") or 0)
+            fam = ee.enum_variable_family(var)
+            if var == VAR_TARGET_MODE:
+                nm = TARGET_MODE.get(val, "VALUE_%s" % val)
+            else:
+                nm = ee.name(fam, val, "VALUE_%s" % val) if fam else "VALUE_%s" % val
+            s = "%s = %s" % (ee.name("ANIMATION_ENUM", var, "ENUM_%s" % var), nm)
+        case asm.CRIT_ANY_OF | asm.CRIT_ALL_OF:
+            kids = [render_criterion(x) for x in k.children if x.cls == asm.CLS_CRIT]
+            s = ("ANY OF(" if kind == asm.CRIT_ANY_OF else "ALL OF(") + " | ".join(kids) + ")"
+        case _:
+            s = (k.name or "").strip("{}").strip().removeprefix("criteria: ")
+            if s.startswith("NOT ") and k.p("m_tnot"):
+                s = s.removeprefix("NOT ")
     if k.p("m_tnot"):
         s = "NOT " + s
     return s
@@ -2233,6 +2234,7 @@ def react(rows, history):
         seq = row["newest_first_ids"]
         if len(seq) > len(hist) or any(not h for h in hist[: len(seq)]):
             continue
+        # plain zip: a row matches the newest len(seq) attacks; older history is not compared
         if all(s == AT_ANY or s == h for s, h in zip(seq, hist)):
             return row
     return None
@@ -2268,7 +2270,7 @@ def link_classes(data, classes, extract_out):
     visual = {}
     for row in face_rule.charvisual_table(extract_out):
         key = row["fragment"].replace(os.sep, "/").lower()
-        key = key[len("extracted/") :] if key.startswith("extracted/") else key
+        key = key.removeprefix("extracted/")
         visual[key] = by_id.get(row["body_class_id"])
     for d in data.character_defs:
         v = (d.get("visual_fragment") or "").lower()
@@ -3045,8 +3047,13 @@ def main(argv):
     if len(argv) != 2:
         print(_USAGE)
         return 2
-    with open(argv[1], encoding="utf-8") as fh:
-        print(summary(json.load(fh)))
+    try:
+        with open(argv[1], encoding="utf-8") as fh:
+            meta = json.load(fh)
+    except Exception as ex:
+        ex.add_note("combat_meta: anim_meta table %s" % argv[1])
+        raise
+    print(summary(meta))
     return 0
 
 

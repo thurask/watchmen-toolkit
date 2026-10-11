@@ -4,7 +4,7 @@ A file opened as `open(p, "rb").read()` or `json.load(open(p))` is closed only w
 the garbage collector gets to it: at once on CPython, later (or never before exit) on
 other interpreters, and on Windows an open file cannot be replaced or removed in the
 meantime.  Every `open()` in the toolkit's code is the subject of a `with`; a module
-that only wants the bytes has a `_read_bytes` helper.
+that only wants the bytes uses `wutil.read_bytes` (imported as `_read_bytes`).
 
 Synthetic data only: no game files.
 """
@@ -66,17 +66,21 @@ def test_every_open_in_the_toolkit_is_a_with_item():
     assert bad == []
 
 
-def test_read_bytes_helpers_are_the_same_function_everywhere():
-    """One three-line helper per module that needs it (the modules are flat scripts and
-    several run on their own): all copies must stay the same."""
-    bodies = {}
+def test_read_bytes_is_defined_once():
+    """One helper, wlib/wutil.read_bytes; every module that reads whole files imports it
+    as `_read_bytes` (1.4.0 had 16 copies of the three lines)."""
+    defs, users = [], []
     for p in SOURCES:
         with io.open(p, encoding="utf-8") as fh:
             tree = ast.parse(fh.read())
-        for node in tree.body:
-            if isinstance(node, ast.FunctionDef) and node.name == "_read_bytes":
-                bodies[os.path.basename(p)] = ast.dump(node)
-    assert len(bodies) >= 10 and len(set(bodies.values())) == 1
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name in ("_read_bytes", "read_bytes"):
+                defs.append(os.path.basename(p))
+            if isinstance(node, ast.ImportFrom) and node.module == "wutil":
+                if any(a.name == "read_bytes" and a.asname == "_read_bytes" for a in node.names):
+                    users.append(os.path.basename(p))
+    assert defs == ["wutil.py"]
+    assert len(users) >= 15 and "watchmen.py" in users
 
 
 @pytest.fixture
@@ -96,7 +100,10 @@ def test_read_bytes_reads_and_closes(tmp_path, strict):
 
     p = tmp_path / "x.bin"
     p.write_bytes(b"\x00\x01kapow\xff")
+    import wutil
+
     for mod in (characters_export, kapow_json, watchmenlib):
+        assert mod._read_bytes is wutil.read_bytes
         assert mod._read_bytes(str(p)) == b"\x00\x01kapow\xff"
     with pytest.raises(OSError):
         kapow_json._read_bytes(str(tmp_path / "missing.bin"))

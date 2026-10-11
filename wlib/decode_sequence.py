@@ -47,13 +47,11 @@
 # mark to 0 (0x498192).  Nothing fires on a falling position; a delay equal to the
 # duration never fires; a loop wrap skips the rest.  actions_fired() is that test.
 # The position advances by speedFactor x the node's frame step (0x49d7fe).
-import math, os, struct, sys, json, threading
+import math, os, struct, sys, threading
+from itertools import batched
 
 
-def _read_bytes(path):
-    """The file's bytes; the handle is closed before returning."""
-    with open(path, "rb") as fh:
-        return fh.read()
+from wutil import read_bytes as _read_bytes  # one copy, in wlib/wutil.py
 
 
 def rdname(b, p, maxl=64, bo="<"):
@@ -63,7 +61,7 @@ def rdname(b, p, maxl=64, bo="<"):
     if 2 <= nl <= maxl and p + 4 + nl <= len(b):
         nm = b[p + 4 : p + 4 + nl]
         if nm.endswith(b"\0") and all(32 <= c < 127 for c in nm[:-1]):
-            return nm[:-1].decode(), p + 4 + nl
+            return nm.removesuffix(b"\0").decode(), p + 4 + nl
     return None
 
 
@@ -237,15 +235,16 @@ def play_position(seq, t, mode=None, dt=None, speed=1.0):
         t *= speed
         if dur <= 0.0:
             return 0.0
-        if mode == 1:
-            return min(t, dur)
-        if mode == 2:
-            return max(dur - t, 0.0)
-        if mode == 0:
-            return math.fmod(t, dur)
-        if mode == 3:
-            return dur - math.fmod(t, dur)
-        u = math.fmod(t, 2.0 * dur)
+        match mode:
+            case 1:  # oneshot
+                return min(t, dur)
+            case 2:  # oneshot_reverse
+                return max(dur - t, 0.0)
+            case 0:  # loop
+                return math.fmod(t, dur)
+            case 3:  # loop_reverse
+                return dur - math.fmod(t, dur)
+        u = math.fmod(t, 2.0 * dur)  # 4 pingpong: a triangle wave
         return u if u <= dur else 2.0 * dur - u
     if dt <= 0.0:
         raise ValueError("dt must be positive")
@@ -304,6 +303,8 @@ def evaluate(track, t):
     va, vb = val(ka), val(kb)
     if mode == 2:
         vt = track.get("value_type", "number")
+        # plain zip: every key stores its own dimension, and two keys of one track
+        # that differ blend the components both have (as since 1.4.0)
         if vt in LERP_TYPES:
             return [x + (y - x) * u for x, y in zip(va, vb)]
         if vt == "integer":
@@ -343,9 +344,21 @@ def _rstr(b, p, bo, maxl=1024):
     return raw[:-1].decode("latin1") if n else "", p + 4 + n
 
 
+def _writer5():
+    """x -> value of a stored float32 key: exact (f32json.value, the default; a NaN
+    or an infinity stays a float, written as null by f32json.dumps) or rounded to 5
+    places ($WATCHMEN_JSON_FLOATS=rounded, the 1.4.0 output)."""
+    import f32json
+
+    if f32json.mode() == "exact":
+        return f32json.value
+    return lambda x: round(x, 5)
+
+
 def _keys(b, p, nk, spline, bo):
     out = []
     n = len(b)
+    w = _writer5()
     for _ in range(nk):
         if p + 12 > n:
             raise _Bad("key")
@@ -353,9 +366,9 @@ def _keys(b, p, nk, spline, bo):
         p += 12
         if mode > 3 or not 1 <= dim <= 4 or p + 4 * dim > n or not math.isfinite(t):
             raise _Bad("key")
-        val = [round(x, 5) for x in struct.unpack_from(bo + "%df" % dim, b, p)]
+        val = [w(x) for x in struct.unpack_from(bo + "%df" % dim, b, p)]
         p += 4 * dim
-        kd = {"t": round(t, 5), "mode": mode, "value": val[0] if dim == 1 else val}
+        kd = {"t": w(t), "mode": mode, "value": val[0] if dim == 1 else val}
         if spline:
             if p + 4 > n:
                 raise _Bad("handles")
@@ -363,11 +376,12 @@ def _keys(b, p, nk, spline, bo):
             p += 4
             if not 1 <= hn <= 4 or p + 16 * hn > n:
                 raise _Bad("handles")
-            hh = [round(x, 5) for x in struct.unpack_from(bo + "%df" % (4 * hn), b, p)]
+            hh = [w(x) for x in struct.unpack_from(bo + "%df" % (4 * hn), b, p)]
             p += 16 * hn
             kd["handles"] = hh  # file order: inT, inV, outT, outV per component
-            kd["in"] = [hh[4 * c : 4 * c + 2] for c in range(hn)]
-            kd["out"] = [hh[4 * c + 2 : 4 * c + 4] for c in range(hn)]
+            quads = list(batched(hh, 4))
+            kd["in"] = [list(q[:2]) for q in quads]
+            kd["out"] = [list(q[2:]) for q in quads]
         out.append(kd)
     return out, p
 
@@ -418,7 +432,13 @@ def _tracks(b, p, nt, bo, rest):
                 v = k["value"] if isinstance(k["value"], list) else [k["value"]]
                 if len(v) >= 3:
                     k["euler_deg"] = v[:3]
-                    k["quat"] = [round(x, 6) for x in euler_deg_to_quat(*v[:3])]
+                    # derived from the stored Euler angles: rounded in both modes;
+                    # null when an angle is NaN or infinite (no rotation)
+                    k["quat"] = (
+                        [round(x, 6) for x in euler_deg_to_quat(*v[:3])]
+                        if all(isinstance(x, float) and math.isfinite(x) for x in v[:3])
+                        else None
+                    )
         return [tr] + more, tail
     raise _Bad("track")
 
@@ -503,6 +523,7 @@ def _parse_scan(b, order=None):
     not follow the engine grammar (truncated / carved blobs)."""
     bo = order or detect_order(b)
     n = len(b)
+    w = _writer5()
     # .sequence payloads are carved heuristically, so a short/truncated buffer is
     # routine: report it through the same `warn` channel the desync path uses
     # rather than letting struct.error escape into the caller's whole pass.
@@ -582,9 +603,9 @@ def _parse_scan(b, order=None):
                 if not 1 <= dim <= 4 or p2 + 4 * dim > n:
                     ok = False
                     break
-                val = [round(x, 5) for x in struct.unpack_from(bo + "%df" % dim, b, p2)]
+                val = [w(x) for x in struct.unpack_from(bo + "%df" % dim, b, p2)]
                 p2 += 4 * dim
-                kd = {"t": round(t, 5), "mode": mode, "value": val[0] if dim == 1 else val}
+                kd = {"t": w(t), "mode": mode, "value": val[0] if dim == 1 else val}
 
                 def plaus_key(q):
                     if q + 12 > n:
@@ -615,7 +636,7 @@ def _parse_scan(b, order=None):
                         okctx = plaus_bound(q) if last else plaus_key(q)
                         okctx_wo = plaus_bound(p2) if last else plaus_key(p2)
                         if all(abs(x) < 1e9 for x in hh) and (okctx or not okctx_wo):
-                            kd["handles"] = [round(x, 5) for x in hh]
+                            kd["handles"] = [w(x) for x in hh]
                             p2 = q
                 keys.append(kd)
             if not ok:
@@ -639,7 +660,9 @@ def _parse_scan(b, order=None):
 if __name__ == "__main__":
     b = _read_bytes(sys.argv[1])
     d = parse(b)
-    j = json.dumps(d, indent=1)
+    import f32json
+
+    j = f32json.dumps(d, indent=1)  # exact mode: NaN / infinity -> null
     if len(sys.argv) > 2:
         with open(sys.argv[2], "w", encoding="utf-8", newline="\n") as _f:
             _f.write(j)

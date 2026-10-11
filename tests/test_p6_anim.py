@@ -228,7 +228,7 @@ def test_a_blend_member_of_a_looping_state_loops(tmp_path):
     assert m["clips"]["RSH_COM_MOV_run_cycle"]["loop"] is True  # a blend member, not the main clip
     assert m["clips"]["RSH_COM_WPN_1H_right_arm_layer"]["loop"] is False  # a partial-body overlay
     assert m["clips"]["RSH_COM_ATT_kick"]["loop"] is False
-    assert m["revision"] == am.REVISION == 5
+    assert m["revision"] == am.REVISION == 6 and m["float_values"] == "exact"
 
 
 SE = "TNT/CharacterAnimation/SoundEvents/SE_RSH_COM_ATT_kick.fragment"

@@ -442,8 +442,7 @@ def test_terrain_height_field_and_maps(tmp_path):
     )
     assert "no height map" in h["source"] and "not reflected" in h["axes"]
     px = np.array(Image.open(base + ".height.png"))
-    # Pillow before 10.3 reads a 16-bit grey PNG as int32 (mode I); the file is the same
-    assert px.dtype in (np.uint16, np.int32) and px.shape == (65, 33)
+    assert px.dtype == np.uint16 and px.shape == (65, 33)  # 16-bit grey (I;16)
     assert px[0, 0] == 0 and px[32, 0] == 1 and px[34, 2] == 65535  # no data, min, max
     assert abs(h["min_height"] + (int(px[33, 1]) - 1) / 65534 * 2.0 - 0.75) < 1e-4
     ly = np.array(Image.open(base + ".layers.png"))

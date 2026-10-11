@@ -236,7 +236,7 @@ def test_scanned_model_with_more_textures_than_buffers_logs_the_missing_material
     )
     verts = [(float(i), 0.0, float(i % 3)) for i in range(9)]
     monkeypatch.setattr(wx, "_pick_vb", lambda s: (0, 32, True, 9, [0, 1, 2, 3, 4, 5]))
-    monkeypatch.setattr(wx, "_decode_sub", lambda s, off, nv, stride, be: (verts, None, None))
+    monkeypatch.setattr(wx, "_decode_sub", lambda s, off, nv, stride, be, *a: (verts, None, None))
     written = {}
     monkeypatch.setattr(wx, "_write_obj_mtl", lambda *a: written.update(mats=a[7]))
     monkeypatch.setitem(wx._RIG, "on", False)

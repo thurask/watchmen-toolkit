@@ -53,6 +53,7 @@ import math
 import os
 import struct
 import sys
+from itertools import batched, pairwise
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
@@ -557,7 +558,7 @@ def gradient_at(keys, t, default=(1.0, 1.0, 1.0, 1.0)):
     ks = sorted(keys, key=lambda k: k[0])
     if t <= ks[0][0]:
         return list(ks[0][1:])
-    for a, b in zip(ks, ks[1:]):
+    for a, b in pairwise(ks):
         if t <= b[0]:
             u = 0.0 if b[0] == a[0] else (t - a[0]) / (b[0] - a[0])
             return [a[i] + u * (b[i] - a[i]) for i in range(1, 5)]
@@ -590,38 +591,40 @@ def _decode_value(typ, payload, bo):
     n = TYPE_DWORDS.get(typ)
     if n is None or k != n:
         return None, False
-    if typ == "number":
-        v = _f32(payload, bo)
-        return v, v is not None
-    if typ in ("vector", "quaternion"):
-        v = [_f32(payload[4 * i : 4 * i + 4], bo) for i in range(n)]
-        return v, None not in v
-    if typ == "integer":
-        return struct.unpack(bo + "i", payload)[0], True
-    if typ == "truth":
-        u = struct.unpack(bo + "I", payload)[0]
-        return (bool(u), True) if u in (0, 1) else (u, False)
-    if typ == "color":
-        return "%08x" % struct.unpack(bo + "I", payload)[0], True
+    match typ:
+        case "number":
+            v = _f32(payload, bo)
+            return v, v is not None
+        case "vector" | "quaternion":
+            v = [_f32(bytes(w), bo) for w in batched(payload, 4)]
+            return v, None not in v
+        case "integer":
+            return struct.unpack(bo + "i", payload)[0], True
+        case "truth":
+            u = struct.unpack(bo + "I", payload)[0]
+            return (bool(u), True) if u in (0, 1) else (u, False)
+        case "color":
+            return "%08x" % struct.unpack(bo + "I", payload)[0], True
     return None, False
 
 
 def _encode_value(typ, value, bo):
-    if typ == "string":
-        return _encode_string(value, bo)
-    if typ == "number":
-        return _pack_f32(value, bo)
-    if typ in ("vector", "quaternion"):
-        if not isinstance(value, (list, tuple)) or len(value) != TYPE_DWORDS[typ]:
-            return None
-        parts = [_pack_f32(x, bo) for x in value]
-        return None if None in parts else b"".join(parts)
-    if typ == "integer":
-        return struct.pack(bo + "i", value)
-    if typ == "truth":
-        return struct.pack(bo + "I", int(value))
-    if typ == "color":
-        return struct.pack(bo + "I", int(value, 16))
+    match typ:
+        case "string":
+            return _encode_string(value, bo)
+        case "number":
+            return _pack_f32(value, bo)
+        case "vector" | "quaternion":
+            if not isinstance(value, (list, tuple)) or len(value) != TYPE_DWORDS[typ]:
+                return None
+            parts = [_pack_f32(x, bo) for x in value]
+            return None if None in parts else b"".join(parts)
+        case "integer":
+            return struct.pack(bo + "i", value)
+        case "truth":
+            return struct.pack(bo + "I", int(value))
+        case "color":
+            return struct.pack(bo + "I", int(value, 16))
     return None
 
 
@@ -639,7 +642,7 @@ def _same(a, b):
 
 
 # --- reader -------------------------------------------------------------------------------
-class _Reader(object):
+class _Reader:
     def __init__(self, data, bo):
         self.b = data
         self.bo = bo
@@ -821,7 +824,8 @@ def parse(data, order=None):
     except ParticleError as ex:
         try:
             out = _parse(data, bo, False)
-        except ParticleError:
+        except ParticleError as ex_untyped:
+            ex.add_note(f"particle_asset: the untyped record layout fails too: {ex_untyped}")
             raise ex
     else:
         s = out["summary"]

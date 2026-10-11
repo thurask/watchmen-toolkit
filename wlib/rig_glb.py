@@ -4,46 +4,28 @@ character models, designed to be called from watchmen_extract.py.
 Given the per-submesh geometry the master script already carves (positions / normals /
 UVs / triangles / per-submesh material names) plus the SKIN channel read from the same
 stride-56 vertices, this builds a single .glb containing:
-  - per-submesh primitives, each with its own PBR material + embedded diffuse texture
-  - a flat skinned armature (IBM = identity, bind pose); joint names/order come from
-    the MODEL's own embedded skeleton header (file-derived; no capture artifacts)
+  - per-submesh primitives, each with its own PBR material + embedded textures (full
+    size; `tex_size` / extract --glb-texture-size shrinks them)
+  - bind-pose geometry, skin weights and the skeleton: one joint node per node of
+    the MODEL's own embedded skeleton header (names, parents, rest transforms built
+    as build_bind_file builds a bind), real inverse bind matrices -- no animation.
+    rig "flat" (--rig flat, or a header whose node table does not cover the joints)
+    writes the 1.4.0 armature instead: joints without a transform, all children of
+    `Armature`, identity inverse binds.  The mesh renders the same in both.
   - Y-up orientation so it stands in Blender on import
 Engine-exact ANIMATED per-character glbs are produced by the `watchmen.py characters`
 pipeline (file-only binds + baked clips), not here.
 
 Skin channel (verified): BLENDINDICES = D3DCOLOR ubyte4 @ +44 read BGRA (bytes 2,1,0,3);
-BLENDWEIGHT = float16 x4 @ +48. Animation decode (_decode_anim / decode_animation --
-LEGACY, caller-less; engine-exact clips come from bake_v4): per-bone local
-quaternions ONLY (XYZW in-file, /10000, reordered to WXYZ on read); position keys
-are skipped and translations come from the skeleton's rest offsets, so root motion
-is not reproduced on that path (2026-08-17: docstring corrected -- it used to
-claim translations (/1000) were decoded).
+BLENDWEIGHT = float16 x4 @ +48.  Clips are not decoded here: engine-exact clips come
+from bake_v4 (the caller-less 1.4.0 template loader, clip decoder and bundled-clip
+loader of this module were removed in 1.5.0).
 """
 
-import json, struct, math, io
+import io
 import numpy as np
 
-# ---------------- skeleton template (LEGACY: retired capture-artifact loader;
-# no callers since 2026-07-13 -- the rig now takes its joint table from the
-# model's own header via watchmen_extract._model_palette) ----------------
-_TPL = None
-
-
-def load_skeleton(path):
-    global _TPL
-    if _TPL is None and path and path.exists():
-        _TPL = json.loads(path.read_text())
-    return _TPL
-
-
-def _skel_arrays(tpl):
-    n = tpl["bone_count"]
-    names = [b["name"] for b in tpl["bones"]]
-    par = [b["parent"] for b in tpl["bones"]]
-    rest_t = np.array([b["rest_t"] for b in tpl["bones"]], float)
-    rest_q = np.array([b["rest_q"] for b in tpl["bones"]], float)  # xyzw
-    ibm = np.array([b["ibm"] for b in tpl["bones"]], np.float32)  # column-major 16
-    return n, names, par, rest_t, rest_q, ibm
+from wutil import GlbPacker, glb_bytes
 
 
 # ---------------- skin read ----------------
@@ -89,191 +71,6 @@ def decode_skin(stream, vbo, nv, stride, order="<"):
 # (static props/heads flat on their back; rigged bodies likewise).  Measured on
 # shipped character output: skinned frame-0 bbox 1.75 m tall along Y, while raw
 # POSITION measured 1.80 m along Z.  See variant_glb.py for the full evidence.
-
-
-def _qmat(q):  # wxyz -> 3x3
-    w, x, y, z = q
-    nrm = (x * x + y * y + z * z + w * w) ** 0.5
-    if nrm < 1e-9:
-        return np.eye(3)
-    x, y, z, w = x / nrm, y / nrm, z / nrm, w / nrm
-    return np.array(
-        [
-            [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
-            [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
-            [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
-        ]
-    )
-
-
-def _decomp(M):
-    t = M[:3, 3].astype(float).copy()
-    L = M[:3, :3].astype(float).copy()
-    s = np.array([np.linalg.norm(L[:, k]) for k in range(3)])
-    s[s < 1e-12] = 1e-12
-    R = L / s
-    if np.linalg.det(R) < 0:
-        s[0] *= -1
-        R = L / s
-    tr = R[0, 0] + R[1, 1] + R[2, 2]
-    if tr > 0:
-        S = math.sqrt(tr + 1) * 2
-        q = [(R[2, 1] - R[1, 2]) / S, (R[0, 2] - R[2, 0]) / S, (R[1, 0] - R[0, 1]) / S, 0.25 * S]
-    elif R[0, 0] > R[1, 1] and R[0, 0] > R[2, 2]:
-        S = math.sqrt(1 + R[0, 0] - R[1, 1] - R[2, 2]) * 2
-        q = [0.25 * S, (R[0, 1] + R[1, 0]) / S, (R[0, 2] + R[2, 0]) / S, (R[2, 1] - R[1, 2]) / S]
-    elif R[1, 1] > R[2, 2]:
-        S = math.sqrt(1 + R[1, 1] - R[0, 0] - R[2, 2]) * 2
-        q = [(R[0, 1] + R[1, 0]) / S, 0.25 * S, (R[1, 2] + R[2, 1]) / S, (R[0, 2] - R[2, 0]) / S]
-    else:
-        S = math.sqrt(1 + R[2, 2] - R[0, 0] - R[1, 1]) * 2
-        q = [(R[0, 2] + R[2, 0]) / S, (R[1, 2] + R[2, 1]) / S, 0.25 * S, (R[1, 0] - R[0, 1]) / S]
-    q = np.array(q)
-    q /= np.linalg.norm(q) or 1
-    return t, q, s  # q xyzw
-
-
-# ---------------- .animation decode + FK ----------------
-def _decode_anim(h):
-    gi = h.find(b"GamePivot")
-    o = gi - 4
-    nm = []
-    while o < len(h) - 4:
-        L = struct.unpack_from("<I", h, o)[0]
-        if L < 1 or L > 40 or o + 4 + L > len(h):
-            break
-        s = h[o + 4 : o + 4 + L]
-        if not all(32 <= c < 127 or c == 0 for c in s):
-            break
-        nm.append(s.rstrip(b"\x00").decode())
-        o += 4 + L
-    nf = struct.unpack_from("<I", h, 12)[0]
-    p = o
-    tr = {}
-    for bi in range(len(nm)):
-        t = h[p]
-        p += 1
-        if t == 0:
-            kc = struct.unpack_from("<H", h, p)[0]
-            p += 2
-            bq = struct.unpack_from("<4f", h, p)
-            p += 16
-            p += kc * 6
-            tr[nm[bi]] = np.array([[bq[3], bq[0], bq[1], bq[2]]])  # const rot wxyz
-        elif t == 1:
-            kc = struct.unpack_from("<H", h, p)[0]
-            p += 2
-            p += 12
-            k = np.frombuffer(h[p : p + kc * 8], np.int16).reshape(kc, 4).astype(float) / 10000.0
-            p += kc * 8
-            tr[nm[bi]] = k[:, [3, 0, 1, 2]]  # xyzw -> wxyz
-        elif t == 2:
-            kc = struct.unpack_from("<H", h, p)[0]
-            p += 2
-            raw = np.frombuffer(h[p : p + kc * 14], np.int16).reshape(kc, 7).astype(float)
-            p += kc * 14
-            tr[nm[bi]] = (raw[:, 3:7] / 10000.0)[:, [3, 0, 1, 2]]
-        elif t == 3:
-            p += 12
-            p += 4
-            q = struct.unpack_from("<4f", h, p)
-            p += 16
-            tr[nm[bi]] = np.array([[q[3], q[0], q[1], q[2]]])
-    return nm, nf, tr
-
-
-def _resample(k, NF):
-    out = np.zeros((NF, 4))
-    idx = np.linspace(0, len(k) - 1, NF)
-    for i, t in enumerate(idx):
-        a = int(t)
-        b = min(a + 1, len(k) - 1)
-        f = t - a
-        qa, qb = k[a], k[b]
-        if np.dot(qa, qb) < 0:
-            qb = -qb
-        q = qa * (1 - f) + qb * f
-        out[i] = q / (np.linalg.norm(q) or 1)
-    return out
-
-
-def decode_animation(anim_header_bytes, tpl, fps=24.0, max_frames=120):
-    """FK a .animation on the skeleton template -> per-bone local TRS tracks in glb space.
-    Returns (name_unused, times, per_bone_T (F,B,3), per_bone_Q (F,B,4 xyzw)) or None."""
-    n, names, par, rest_t, rest_q, ibm = _skel_arrays(tpl)
-    # engine-space rest world (FK with offsets); offsets come from template rest_t in glb -> engine
-    glb_restW = np.zeros((n, 4, 4))
-    order = sorted(range(n), key=lambda i: _depth(par, i))
-    for i in order:
-        L = np.eye(4)
-        L[:3, :3] = _qmat([rest_q[i][3], rest_q[i][0], rest_q[i][1], rest_q[i][2]])
-        L[:3, 3] = rest_t[i]
-        Wp = glb_restW[par[i]] if par[i] >= 0 else np.eye(4)
-        glb_restW[i] = Wp @ L
-    engRestW = glb_restW  # engine == glb frame (both Y-up); no conversion
-    offset = np.zeros((n, 3))
-    engRestLocR = np.zeros((n, 3, 3))
-    for i in range(n):
-        Wp = engRestW[par[i]] if par[i] >= 0 else np.eye(4)
-        Lloc = np.linalg.inv(Wp) @ engRestW[i]
-        offset[i] = Lloc[:3, 3]
-        # engine-convention rest local rotation (consistent frame with clip tracks)
-        U, _, Vt = np.linalg.svd(Lloc[:3, :3])
-        Rr = U @ Vt
-        if np.linalg.det(Rr) < 0:
-            U[:, -1] *= -1
-            Rr = U @ Vt
-        engRestLocR[i] = Rr
-    anames, nf, tr = _decode_anim(anim_header_bytes)
-    NF = min(max(nf, 2), max_frames)
-    rot = {}
-    for i in range(n):
-        rot[i] = _resample(tr[names[i]], NF) if names[i] in tr else None
-    # FK in engine space -> glb node world -> local TRS
-    locT = np.zeros((NF, n, 3), np.float32)
-    locQ = np.zeros((NF, n, 4), np.float32)
-    for f in range(NF):
-        eW = [None] * n
-        for i in order:
-            R = _qmat(rot[i][f]) if rot[i] is not None else engRestLocR[i]
-            L = np.eye(4)
-            L[:3, :3] = R
-            L[:3, 3] = offset[i]
-            Wp = eW[par[i]] if par[i] >= 0 else np.eye(4)
-            eW[i] = Wp @ L
-        gW = eW  # engine == glb frame (both Y-up); no conversion
-        for b in range(n):
-            Wp = gW[par[b]] if par[b] >= 0 else np.eye(4)
-            t, q, s = _decomp(np.linalg.inv(Wp) @ gW[b])
-            locT[f, b] = t
-            locQ[f, b] = q
-    times = np.arange(NF, dtype=np.float32) / fps
-    return times, locT, locQ
-
-
-def _depth(par, i):
-    d = 0
-    p = par[i]
-    while p >= 0:
-        d += 1
-        p = par[p]
-    return d
-
-
-def load_bundled_clip(npz_path):
-    """LEGACY (retired 2026-07-13, no callers): loader for the pre-baked capture
-    npz clips (bundled_clip_*.npz). Returns a dict with
-    name, times, locT (F,B,3), locQ (F,B,4 xyzw), locS (F,B,3 or None), flat(bool).
-    Flat clips bake per-bone WORLD transforms (Y-up baked) for a flat IBM=identity rig."""
-    d = np.load(npz_path, allow_pickle=True)
-    return {
-        "name": str(d["name"]),
-        "times": d["times"],
-        "locT": d["locT"],
-        "locQ": d["locQ"],
-        "locS": d["locS"] if "locS" in d else None,
-        "flat": bool(d["flat"]) if "flat" in d else False,
-    }
 
 
 # ---------------- optional vertex attributes ----------------
@@ -467,6 +264,72 @@ def mesh_vertex_attributes(header, stream, subs, lod=0):
 
 
 # ---------------- glb assembly ----------------
+def header_rig(tpl, nodes, rig=None):
+    """The skeleton build_rigged_glb writes for the joint table `tpl` -> (record,
+    W, parents): W (n, 4, 4) the joints' rest world transforms and parents their
+    parent joint indices for the hierarchy; (None, None, None) for the flat rig
+    asked for; ({"mode": "flat", "reason": ...}, None, None) when the hierarchy
+    cannot be built from `nodes` (parse_model_nodes.parse's names, pos, quat xyzw,
+    parent; joint k = node k).
+
+    W follows build_bind_file exactly: node 0 (the unnamed root) at the origin,
+    rotations by fk_conj (conjugated locals, parent then child), positions
+    t_k = t_p + R_p pos_k -- the conventions the binds of `watchmen binds` use, so
+    a model whose header carries a bind's skeleton gets that bind's Rb / tb."""
+    import variant_glb as _vg
+    import build_bind_file as _bbf
+
+    if _vg.rig_mode(rig) == "flat":
+        return None, None, None
+    n = int(tpl["bone_count"])
+
+    def flat(reason):
+        return {"mode": "flat", "reason": reason}, None, None
+
+    if nodes is None:
+        return flat("no node table for the model's skeleton")
+    names, pos, quat, parent = nodes
+    if len(names) < n:
+        return flat(
+            "the header's node table has %d nodes, the skin uses %d joints" % (len(names), n)
+        )
+    if [str(b["name"]) for b in tpl["bones"][:n]] != [str(x) for x in names[:n]]:
+        return flat("the joint names are not the header's node names")
+    par = [int(p) for p in parent[:n]]
+    par[0] = -1
+    if not _vg.parent_table_ok(par):
+        return flat("the header's parent table is not a tree over the joints")
+    pos = np.array(pos[:n], np.float64).reshape(n, 3)
+    quat = np.array(quat[:n], np.float64).reshape(n, 4)
+    pos[0] = 0.0
+    quat[0] = [0.0, 0.0, 0.0, 1.0]
+    if (
+        not (np.isfinite(pos).all() and np.isfinite(quat).all())
+        or (np.linalg.norm(quat, axis=1) < 1e-6).any()
+    ):
+        return flat("the header's rest transforms are not valid")
+    Wq = _bbf.fk_conj(names[:n], pos, quat, par)
+    W = np.tile(np.eye(4), (n, 1, 1))
+    for k in range(n):
+        W[k, :3, :3] = _bbf.q2m(Wq[k])
+    done = [False] * n
+
+    def place(k):
+        if done[k]:
+            return
+        p = par[k]
+        if p >= 0:
+            place(p)
+            W[k, :3, 3] = W[p, :3, 3] + W[p, :3, :3] @ pos[k]
+        else:
+            W[k, :3, 3] = pos[k]
+        done[k] = True
+
+    for k in range(n):
+        place(k)
+    return {"mode": "hierarchy", "source": "the model header's node table"}, W, par
+
+
 def build_rigged_glb(
     out_path,
     V,
@@ -481,7 +344,7 @@ def build_rigged_glb(
     tpl,
     clips,
     log,
-    tex_size=512,
+    tex_size=None,
     static=False,
     normals=None,
     colors=None,
@@ -494,12 +357,28 @@ def build_rigged_glb(
     has_color=None,
     has_alpha=None,
     engine_materials=False,
+    nodes=None,
+    rig=None,
 ):
-    """Carved submeshes -> one rigged + textured + animated .glb (FLAT exact rig:
-    48 bones, inverseBind = identity, per-bone WORLD transform from the bundled clip
-    with Y-up baked in -- the validated exact path). subs = list of
-    (base, nverts, tstart, ntris, stride); materials[i] = texture basename; clips =
-    list of dicts from load_bundled_clip. Needs Pillow for textures.
+    """Carved submeshes -> one rigged + textured .glb in bind pose. subs = list of
+    (base, nverts, tstart, ntris, stride); materials[i] = texture basename; tpl =
+    {'bone_count', 'bones': [{'name'}]} in joint (palette) order; clips = list of
+    dicts with times / locT / locQ (LEGACY, the extractor passes None). Needs Pillow
+    for textures.
+
+    tex_size: None (default) embeds every texture at the size of its PNG; N
+    shrinks each to fit N x N (aspect kept; 512 = what 1.4.0 always did).
+
+    nodes: the model header's node table, (names, pos, quat xyzw, parent) as
+    parse_model_nodes.parse gives it, joint k = node k.  rig: "hierarchy" / "flat"
+    (None = variant_glb.rig_mode(), $WATCHMEN_RIG).  In the hierarchy the joints
+    get the header's rest pose -- world W_k built as build_bind_file builds a bind
+    (rotation: fk_conj, position: t_k = t_p + R_p pos_k; node 0 at the origin) --
+    as TRS local to the parent joint, and IBM_k = inverse(W_k), so the skinned
+    rest pose is the mesh as stored.  Without `nodes`, when the table has fewer
+    nodes than the joints the skin uses, or when its parents are not a tree, the
+    file gets the flat rig and asset.extras.watchmen.rig says why; "flat" asked
+    for writes the 1.4.0 armature with no record.
 
     `N` is accepted and ignored, as in 1.2.0 (callers that passed normals there
     got none written, and still get the same file).
@@ -541,6 +420,9 @@ def build_rigged_glb(
     # document when the output frame is "true" (default)
     true_frame = _frame.is_true()
     n = tpl["bone_count"]
+    rig_rec, rig_W, rig_par = None, None, None
+    if not static and n:
+        rig_rec, rig_W, rig_par = header_rig(tpl, nodes, rig)
     V = np.asarray(V, np.float64)
     Vg = np.ascontiguousarray(V, np.float32)
     j = {
@@ -559,47 +441,20 @@ def build_rigged_glb(
         "materials": [],
         "samplers": [{"wrapS": 10497, "wrapT": 10497}],
     }
-    BIN = bytearray()
-
-    def av(x, tgt=None):
-        while len(BIN) % 4:
-            BIN.append(0)
-        o = len(BIN)
-        BIN.extend(x)
-        bv = {"buffer": 0, "byteOffset": o, "byteLength": len(x)}
-        if tgt:
-            bv["target"] = tgt
-        j["bufferViews"].append(bv)
-        return len(j["bufferViews"]) - 1
-
-    def ac(bv, ct, c, t, mn=None, mx=None, normalized=False):
-        A = {"bufferView": bv, "componentType": ct, "count": c, "type": t}
-        if normalized:
-            A["normalized"] = True
-        if mn is not None:
-            A["min"] = mn
-            A["max"] = mx
-        j["accessors"].append(A)
-        return len(j["accessors"]) - 1
+    _pk = GlbPacker(j["bufferViews"], j["accessors"])
+    BIN = _pk.bin
+    av = _pk.view  # (data, target=None) -> bufferView index
+    ac = _pk.accessor  # (bv, ct, count, type, mn=None, mx=None, normalized=False)
 
     matmap = {}
 
     def _sheet(td):
+        # the first sheet in full, as the MTL writer reads it
         if not (engine_materials and td):
             return {}
-        try:
-            with open(str(td) + "/sheet.json", encoding="utf-8") as f:
-                d = json.load(f)
-            if not isinstance(d, dict):
-                return {}
-            # the first sheet in full (srcBlend / dstBlend / blendOp of a manual
-            # blend are only in "sheets"), under the top-level first-sheet keys
-            full = d.get("sheets")
-            if isinstance(full, list) and full and isinstance(full[0], dict):
-                d = dict(full[0], **{k: v for k, v in d.items() if k != "sheets"})
-            return d
-        except Exception:
-            return {}
+        import watchmen_extract as _we
+
+        return _we.first_sheet(td)
 
     import materials as _mt
 
@@ -689,7 +544,8 @@ def build_rigged_glb(
                 # the alpha channel is kept where it is used (always in legacy mode)
                 keep_a = pix_alpha and (bool(mode) or bool(sblend) or not engine_pbr)
                 img = rgba if keep_a else src.convert("RGB")
-                img.thumbnail((tex_size, tex_size))
+                if tex_size:
+                    img.thumbnail((tex_size, tex_size))
                 buf = io.BytesIO()
                 img.save(buf, "PNG")
                 data = buf.getvalue()
@@ -725,7 +581,8 @@ def build_rigged_glb(
                         g = sorted(over.get("normal", td).glob("*_normal_*.png"))
                         if g:
                             nimg = Image.open(g[0]).convert("RGB")
-                            nimg.thumbnail((tex_size, tex_size))
+                            if tex_size:
+                                nimg.thumbnail((tex_size, tex_size))
                             nb = io.BytesIO()
                             nimg.save(nb, "PNG")
                             nrm = gltf_normal_png(nb.getvalue())
@@ -750,7 +607,8 @@ def build_rigged_glb(
                                 return None
                             im = Image.open(g[0])
                             im.load()  # read now: the file is closed, not left to the collector
-                            im.thumbnail((tex_size, tex_size))
+                            if tex_size:
+                                im.thumbnail((tex_size, tex_size))
                             return im
 
                         def _add(data, label):
@@ -815,14 +673,36 @@ def build_rigged_glb(
                 matmap.setdefault((key[0], False, key[2]), mi)
         return mi
 
-    # flat skeleton: 48 bones (rest = identity), children of Armature, IBM = identity.
+    # flat skeleton (rig "flat"): bones with rest = identity, children of Armature,
+    # IBM = identity.  Hierarchy: the header's skeleton (header_rig).
     # static=True (head/accessory models with their own non-body palette): emit mesh +
     # materials only, no skin/armature/anim, so it lands at its authored position.
     bn = []
     if not static:
+        hier = rig_W is not None
+        names = [tpl["bones"][b]["name"] for b in range(n)]
+        if hier:
+            import variant_glb as _vg
+
+            names = _vg.joint_node_names(names, ("Armature", out_path.stem + "_mesh"))
+            L = _vg.local_from_world(rig_W, rig_par)
         for b in range(n):
             bn.append(len(j["nodes"]))
-            j["nodes"].append({"name": tpl["bones"][b]["name"]})
+            nd = {"name": names[b]}
+            if hier:
+                q = _vg.batch_m2q(np.ascontiguousarray(L[b, :3, :3])[None])[0]
+                nd["rotation"] = [float(x) for x in q]
+                nd["translation"] = [float(x) for x in L[b, :3, 3]]
+                nd["extras"] = {
+                    "bone": str(tpl["bones"][b]["name"]),
+                    "parent": int(rig_par[b]),
+                    "index": b,
+                }
+            j["nodes"].append(nd)
+        if hier:
+            for b in range(n):
+                if rig_par[b] >= 0:
+                    j["nodes"][bn[rig_par[b]]].setdefault("children", []).append(bn[b])
     Tn = np.asarray(T, np.uint32)
     have_skin = (SKIN_I is not None) and (not static)
     prims = []
@@ -857,7 +737,9 @@ def build_rigged_glb(
         if Np is not None and len(Np) == nverts:
             attrs["NORMAL"] = ac(av(Np.tobytes(), 34962), 5126, nverts, "VEC3")
             Tp = None
-            want_t = mat_index is None or "normalTexture" in j["materials"][mat_index]
+            # TANGENT only serves a normal map: only engine materials get one (a
+            # material resolved without engine_materials never has normalTexture)
+            want_t = mat_index is not None and "normalTexture" in j["materials"][mat_index]
             if write_tangents and tangents is not None and want_t:
                 Tp = well_formed_tangents(tangents[base : base + nverts])
                 if Tp is not None and orthogonalize_tangents:
@@ -874,8 +756,11 @@ def build_rigged_glb(
                 Cf = np.ascontiguousarray(linear_vertex_colors(Cp))
                 attrs["COLOR_0"] = ac(av(Cf.tobytes(), 34962), 5126, nverts, "VEC4")
         if have_skin:
-            Ip = np.ascontiguousarray(SKIN_I[vidx])
+            import variant_glb as _vg
+
             Wp = np.ascontiguousarray(SKIN_W[vidx]).astype(np.float32)
+            # JOINTS_0 of a zero-weight influence is 0 (glTF 3.7.3.3; skinning unchanged)
+            Ip = _vg.used_joints(SKIN_I[vidx], Wp)
             attrs["JOINTS_0"] = ac(av(Ip.tobytes(), 34962), 5121, nverts, "VEC4")
             attrs["WEIGHTS_0"] = ac(av(Wp.tobytes(), 34962), 5126, nverts, "VEC4")
         tri = Tn[tstart : tstart + ntris] - base
@@ -900,18 +785,30 @@ def build_rigged_glb(
         j["nodes"].append({"name": out_path.stem + "_mesh", "mesh": 0})
         j["scenes"][0]["nodes"] = [mnode]
     else:
-        ident = np.tile(np.eye(4, dtype=np.float32).reshape(16), (n, 1))
-        ibmacc = ac(av(ident.tobytes()), 5126, n, "MAT4")
+        if rig_W is not None:
+            ibm = np.array([np.linalg.inv(m).T.reshape(16) for m in rig_W], np.float32)
+        else:
+            ibm = np.tile(np.eye(4, dtype=np.float32).reshape(16), (n, 1))
+        ibmacc = ac(av(ibm.tobytes()), 5126, n, "MAT4")
         mnode = len(j["nodes"])
         mn = {"name": out_path.stem + "_mesh", "mesh": 0}
         if have_skin:
             mn["skin"] = 0
         j["nodes"].append(mn)
         arm = len(j["nodes"])
-        j["nodes"].append({"name": "Armature", "children": bn + [mnode]})
+        if rig_W is not None:
+            # the skinned mesh at the scene root; the joints alone under Armature
+            j["nodes"].append(
+                {"name": "Armature", "children": [bn[b] for b in range(n) if rig_par[b] < 0]}
+            )
+            j["scenes"][0]["nodes"] = [arm, mnode]
+        else:
+            j["nodes"].append({"name": "Armature", "children": bn + [mnode]})
+            j["scenes"][0]["nodes"] = [arm]
         if have_skin:
             j["skins"].append({"joints": bn, "inverseBindMatrices": ibmacc, "skeleton": arm})
-        j["scenes"][0]["nodes"] = [arm]
+        if rig_rec is not None:
+            j["asset"].setdefault("extras", {}).setdefault("watchmen", {})["rig"] = rig_rec
         for clip in clips or []:
             times = np.asarray(clip["times"], np.float32)
             F = len(times)
@@ -951,20 +848,5 @@ def build_rigged_glb(
             j.pop(_k, None)
     _frame.finish_gltf(j, BIN)
     j["buffers"].append({"byteLength": len(BIN)})
-    jb = json.dumps(j, separators=(",", ":")).encode()
-    while len(jb) % 4:
-        jb += b" "
-    bb = bytes(BIN)
-    while len(bb) % 4:
-        bb += b"\x00"
-    out_path.write_bytes(
-        b"glTF"
-        + struct.pack("<II", 2, 12 + 8 + len(jb) + 8 + len(bb))
-        + struct.pack("<I", len(jb))
-        + b"JSON"
-        + jb
-        + struct.pack("<I", len(bb))
-        + b"BIN\x00"
-        + bb
-    )
+    out_path.write_bytes(glb_bytes(j, BIN))
     return True

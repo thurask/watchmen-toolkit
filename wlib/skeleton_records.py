@@ -44,10 +44,7 @@ VOLUME_TYPES = {2: "concave_mesh", 4: "convex_mesh", 5: "box", 6: "sphere", 7: "
 _MAX_VOLUMES = 4096  # sanity bound on a count field, not an engine limit
 
 
-def _read_bytes(path):
-    """The file's bytes; the handle is closed before returning."""
-    with open(path, "rb") as fh:
-        return fh.read()
+from wutil import read_bytes as _read_bytes  # one copy, in wlib/wutil.py
 
 
 def parse_volume_lists(mb, p, order="<", limit=None):
@@ -74,25 +71,26 @@ def parse_volume_lists(mb, p, order="<", limit=None):
         for _ in range(n):
             t, base = take("2I")
             v = dict(type=t, kind=VOLUME_TYPES.get(t), base=base)
-            if t == 5:
-                v["size"] = take("3f")  # full extents (AABB method 0x5213c7 = +-0.5*size)
-            elif t == 6:
-                (v["radius"],) = take("f")
-            elif t == 7:
-                v["diameter"], v["height"] = take("2f")  # height = total, local Y (0x522164)
-            elif t in (2, 4):
-                v["mode"], nv = take("2I")  # mode 1 = triangle list, else strip (0x522d17)
-                if p + 12 * nv > limit:
-                    raise ValueError("mesh vertices run past the node region")
-                v["verts"] = np.frombuffer(mb, order + "f4", 3 * nv, p).reshape(nv, 3).copy()
-                p += 12 * nv
-                (ni,) = take("I")
-                if p + 4 * ni > limit:
-                    raise ValueError("mesh indices run past the node region")
-                v["indices"] = np.frombuffer(mb, order + "u4", ni, p).copy()
-                p += 4 * ni
-            else:
-                raise ValueError("unknown collision volume type %d" % t)  # 0x524b23 returns null
+            match t:
+                case 5:  # box: full extents (AABB method 0x5213c7 = +-0.5*size)
+                    v["size"] = take("3f")
+                case 6:  # sphere
+                    (v["radius"],) = take("f")
+                case 7:  # capsule: height = total, local Y (0x522164)
+                    v["diameter"], v["height"] = take("2f")
+                case 2 | 4:  # concave / convex mesh
+                    v["mode"], nv = take("2I")  # mode 1 = triangle list, else strip (0x522d17)
+                    if p + 12 * nv > limit:
+                        raise ValueError("mesh vertices run past the node region")
+                    v["verts"] = np.frombuffer(mb, order + "f4", 3 * nv, p).reshape(nv, 3).copy()
+                    p += 12 * nv
+                    (ni,) = take("I")
+                    if p + 4 * ni > limit:
+                        raise ValueError("mesh indices run past the node region")
+                    v["indices"] = np.frombuffer(mb, order + "u4", ni, p).copy()
+                    p += 4 * ni
+                case _:  # 0x524b23 returns null
+                    raise ValueError("unknown collision volume type %d" % t)
             v["pos"] = take("3f")
             v["quat"] = take("4f")
             (bl,) = take("I")
@@ -617,22 +615,23 @@ def record_value(type_id, data, order="<"):
     """Decode one record's data by its type id (unknown types: by size)."""
     kind = RECORD_TYPES.get(type_id)
     nw = len(data) // 4
-    if kind == "string":
-        return data[4:].split(b"\0", 1)[0].decode("latin1")
-    if kind == "truth" and nw == 1:
-        return bool(struct.unpack(order + "I", data)[0])
-    if kind == "integer" and nw == 1:
-        return struct.unpack(order + "i", data)[0]
-    if kind == "number" and nw == 1:
-        return struct.unpack(order + "f", data)[0]
-    if kind in ("vector", "quaternion"):
-        return list(struct.unpack(order + "%df" % nw, data))
-    if kind == "biginteger" and nw == 2:
-        # two u32 words, LOW word first on every platform (console swaps the bytes of
-        # each word, not of the eight): the Ragdoll sheet id reads 0x43b830d445af888d
-        # on PC, Xbox 360 and PS3 this way (kapow_fragment reads biginteger the same)
-        lo, hi = struct.unpack(order + "II", data)
-        return lo | (hi << 32)
+    match kind:
+        case "string":
+            return data[4:].split(b"\0", 1)[0].decode("latin1")
+        case "truth" if nw == 1:
+            return bool(struct.unpack(order + "I", data)[0])
+        case "integer" if nw == 1:
+            return struct.unpack(order + "i", data)[0]
+        case "number" if nw == 1:
+            return struct.unpack(order + "f", data)[0]
+        case "vector" | "quaternion":
+            return list(struct.unpack(order + "%df" % nw, data))
+        case "biginteger" if nw == 2:
+            # two u32 words, LOW word first on every platform (console swaps the bytes of
+            # each word, not of the eight): the Ragdoll sheet id reads 0x43b830d445af888d
+            # on PC, Xbox 360 and PS3 this way (kapow_fragment reads biginteger the same)
+            lo, hi = struct.unpack(order + "II", data)
+            return lo | (hi << 32)
     return {"type_id": "0x%08x" % type_id, "hex": data.hex()}
 
 

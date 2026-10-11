@@ -11,6 +11,12 @@
     text/<..>/Localize/Menu_uk_pc.txt.json               decoded, rows in file order
     text/<..>/Localize/Menu_uk_pc.txt.csv                index,key,text (UTF-8 with BOM)
 
+The `.csv` holds the rows that are not empty. A key or text that starts with `=`, `+`, `-`, `@`, a
+tab or a carriage return gets a leading `'` there (1.5.0), so that Excel or LibreOffice shows it as
+text and does not evaluate it as a formula; a plain number (`-5`, `+1.25`) is left as it is. The
+`.json` keeps every string verbatim. In the six game sets this touches 6 cells: `--huh?` and
+`--Huh?` in each Part 1 set (measured on the 450 CSVs of the 1.4.0 export).
+
 Languages are the block's slots 0 - 4: English, French, Italian, German, Spanish. Slot 5 (Danish)
 is a copy of the English slot in the shipped games and is not written; `index.json` says so
 (`identical_to_slot`). A table that is not localized is written into every folder.

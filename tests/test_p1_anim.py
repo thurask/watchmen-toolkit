@@ -460,7 +460,7 @@ def test_contact_check_turns_each_body_with_its_game_pivot(tmp_path, monkeypatch
     for key in ("rsh", "medium"):
         np.savez(
             str(tmp_path / ("bind_%s_file_v1.npz" % key)),
-            names=np.array(names, dtype=object),
+            names=np.array(names),  # unicode: the toolkit loads binds without pickle
             Rb=np.tile(np.eye(3), (4, 1, 1)),
             tb=np.zeros((4, 3)),
         )

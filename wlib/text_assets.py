@@ -34,8 +34,11 @@ import csv
 import io
 import json
 import os
+import re
 import struct
 import sys
+
+from wutil import rel_path
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
@@ -516,12 +519,13 @@ def layout_place(lines, width, origin_x, mode, adv, spacing=0.0, scale_x=1.0):
     for ln in lines:
         lw = layout_string_width(ln, adv, sp, scale_x)
         x = origin_x
-        if mode == 1:
-            x = origin_x + width - lw
-        elif mode == 2:
-            x = (width - lw) * 0.5 + origin_x
-        elif mode == 3 and len(ln) > 1:
-            sp = (width - layout_string_width(ln, adv, 0.0, scale_x)) / (len(ln) - 1)
+        match mode:
+            case 1:  # right
+                x = origin_x + width - lw
+            case 2:  # centre
+                x = (width - lw) * 0.5 + origin_x
+            case 3 if len(ln) > 1:  # justify
+                sp = (width - layout_string_width(ln, adv, 0.0, scale_x)) / (len(ln) - 1)
         out.append((x, sp))
     return out
 
@@ -573,7 +577,7 @@ def parse_textres(data, order=None):
                 raise ValueError("textRes: row %d of %d runs past the end" % (i, n))
             s = data[p : p + 2 * ln].decode(enc, "replace")
             p += 2 * ln
-            pair.append(s[:-1] if s.endswith("\x00") else s)
+            pair.append(s.removesuffix("\x00"))
         rows.append((pair[0], pair[1]))
     if p != len(data):
         raise ValueError("textRes: %d bytes after the last row" % (len(data) - p))
@@ -736,15 +740,33 @@ def rows_json(name, rows, slot, order="<"):
     }
 
 
+#: First characters that make Excel / LibreOffice read a CSV cell as a formula
+#: (or, TAB / CR, that some importers strip before doing so).
+CSV_FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
+_PLAIN_NUMBER = re.compile(r"^[+-]?\d+(\.\d+)?$")
+
+
+def csv_cell(value):
+    """`value` as a CSV cell that a spreadsheet shows as text: a string that starts
+    with = + - @ TAB or CR gets a leading apostrophe (the spreadsheets' "this is
+    text" mark, not shown in the cell), unless it is a plain number such as -5 or
+    +1.25.  Other values are returned unchanged.  Only the .csv is changed: the
+    .json beside it keeps every string verbatim."""
+    if isinstance(value, str) and value.startswith(CSV_FORMULA_START):
+        if not _PLAIN_NUMBER.match(value):
+            return "'" + value
+    return value
+
+
 def rows_csv(rows):
     """index,key,text (rows that are empty left out); TextWriter writes it as UTF-8 with a
-    byte-order mark."""
+    byte-order mark.  Keys and texts go through `csv_cell` (no cell is a formula)."""
     buf = io.StringIO()
     w = csv.writer(buf, lineterminator="\n")
     w.writerow(["index", "key", "text"])
     for i, (k, v) in enumerate(rows):
         if k or v:
-            w.writerow([i, k, v])
+            w.writerow([i, csv_cell(k), csv_cell(v)])
     return buf.getvalue()
 
 
@@ -832,7 +854,7 @@ class TextWriter:
                 os.makedirs(os.path.dirname(raw), exist_ok=True)
                 with open(raw, "wb") as fh:
                     fh.write(blob)
-                facts = {"file": os.path.relpath(raw, self.root).replace(os.sep, "/")}
+                facts = {"file": rel_path(raw, self.root).replace(os.sep, "/")}
                 facts["bytes"] = len(blob)
                 if rows is not None:
                     with open(raw + ".json", "w", encoding="utf-8", newline="\n") as fh:
@@ -892,8 +914,14 @@ def load_text(extract_out):
     for name, a in index["assets"].items():
         order = "<" if a.get("byte_order") != "big" else ">"
         for code, facts in a["languages"].items():
-            with open(os.path.join(root, facts["file"]), "rb") as fh:
-                tables.setdefault(name, {})[code] = parse_textres(fh.read(), order)
+            fpath = os.path.join(root, facts["file"])
+            with open(fpath, "rb") as fh:
+                data = fh.read()
+            try:
+                tables.setdefault(name, {})[code] = parse_textres(data, order)
+            except ValueError as ex:
+                ex.add_note(f"text_assets: text asset {name} [{code}], {fpath}")
+                raise
     return index, tables
 
 
@@ -1065,7 +1093,7 @@ def _movies(db, tables, assets):
             rec["localized_audio"] = bool(loc) if loc is not None else None
             nxt = db.resolve(_prop(n, "m_econtinuelink"), rel)
             rec["continue_link"] = (
-                dict(brief(*nxt), movie=_prop(nxt[1], "movie") or None) if nxt else None
+                brief(*nxt) | {"movie": _prop(nxt[1], "movie") or None} if nxt else None
             )
             skip = _prop(n, "m_tskiplink")
             rec["skip_skips_link"] = bool(skip) if skip is not None else None
@@ -1087,7 +1115,7 @@ def _movies(db, tables, assets):
                         by_lang = tables[name]
                         first = by_lang[next(c for c in LANGUAGE_CODES if c in by_lang)]
                         lines = subtitle_table(first, rec["default_duration_s"] or 0.0).get("", [])
-                        for (a, b, i), (frm, shown) in zip(lines, shown_from(lines)):
+                        for (a, b, i), (frm, shown) in zip(lines, shown_from(lines), strict=True):
                             rec["lines"].append(
                                 {
                                     "index": i,
@@ -1347,7 +1375,7 @@ def build(extract_out, log=None):
         )
     languages = [
         (
-            dict(rec, engine_code=ENGINE_CODES[rec["slot"]])
+            rec | {"engine_code": ENGINE_CODES[rec["slot"]]}
             if isinstance(rec.get("slot"), int) and 0 <= rec["slot"] < len(ENGINE_CODES)
             else rec
         )

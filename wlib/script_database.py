@@ -100,7 +100,7 @@ def split_signature(sig):
     if "(" not in sig or not sig.endswith(")"):
         return sig, None
     name, inner = sig.split("(", 1)
-    inner = inner[:-1]
+    inner = inner.removesuffix(")")
     args = []
     depth = 0
     cur = ""
@@ -169,7 +169,12 @@ def parse(data, order=None):
 
 def load(path, order=None):
     with open(path, "rb") as fh:
-        return parse(fh.read(), order)
+        data = fh.read()
+    try:
+        return parse(data, order)
+    except Exception as ex:
+        ex.add_note(f"script_database: {path} ({len(data)} bytes)")
+        raise
 
 
 def build(props, messages, order="<"):
@@ -213,7 +218,7 @@ def lookup(db, key, section="properties"):
         bare = True
         for pre in ("key_", "0x"):
             if s.startswith(pre):
-                s, bare = s[len(pre) :], False
+                s, bare = s.removeprefix(pre), False
         named = kapow_props.name_hash(key.split(":", 1)[0])
         try:
             if len(s) != 8:

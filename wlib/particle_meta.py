@@ -31,6 +31,7 @@ if _HERE not in sys.path:
     sys.path.append(_HERE)
 
 import canonical_names  # noqa: E402
+import f32json  # noqa: E402
 import particle_asset  # noqa: E402
 
 FORMAT = "watchmen-particle-meta/1"
@@ -433,7 +434,8 @@ def write(src, out_dir, textures=None, log=print):
         path = os.path.join(out_dir, *row["json"].split("/"))
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8", newline="\n") as fh:
-            fh.write(json.dumps(docs[row["file"]], indent=1))  # as `extract` writes it
+            # as `extract` writes it (exact mode: a NaN or an infinity is null)
+            fh.write(f32json.dumps(docs[row["file"]], indent=1))
     with open(os.path.join(out_dir, "index.json"), "w", encoding="utf-8", newline="\n") as fh:
         json.dump(index, fh, indent=1)
     return index

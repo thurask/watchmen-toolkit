@@ -1,7 +1,8 @@
 # Kapow .fragment.header format (cracked)
 
 The extractor left fragments as "passthrough" (prop_count 0). Reversed the property-bag node tree
-from the binary. `wlib/kapow_fragment.py` parses it (losslessly).
+from the binary. `wlib/kapow_fragment.py` parses it losslessly: to the end of the stream, every
+stored value written exactly (see [Lossless](#lossless-and-float_values)).
 
 > **Corrected 2026-10-02.** The record framing described in the first two
 > sections below was partly wrong, and the parser built on it lost alignment
@@ -34,7 +35,7 @@ Each scene-graph node is a variable-length record. The fixed, reliable part is:
 
 ## What the parser recovers
 The TypeName + parentHash/selfHash + depth -> the full **node-type hierarchy**. Run:
-`watchmen fragment <file>.fragment` -> lossless JSON
+`watchmen fragment <file>.fragment` -> lossless JSON (`--json-floats rounded`: the 1.4.0 values)
 Saved dumps: `tree_Enemies.txt` (825 nodes, 56 CharacterGroups / 164 CharacterRoots) and
 `tree_Cameras.txt` (74 camera actions).
 
@@ -285,9 +286,39 @@ files disagreed with their own `nodes_full`). They are now built from the exact 
 - `transforms`: every finite `localPos`; `quat` and `yaw_deg` when a unit `localOrient`
   follows directly.
 - `instances_source`: `"exact"`, or `"sweep"` when the property stream does not parse to
-  its end (then `lossless` is false and the four sections are the old sweep; 0 files in six
-  sets). `unknown_keys`: `[{key, count, type_guess}]`, only when a key is in no table (0
+  its end (then `lossless` is false and the four sections are the old sweep, which is
+  approximate: its `pos` / `quat` stay rounded to 3 / 4 places in both float modes; 0 files in
+  six sets). `unknown_keys`: `[{key, count, type_guess}]`, only when a key is in no table (0
   files). `extract` prints a `WARNING: fragment …` line for either.
+
+### Lossless and `float_values`
+
+`lossless: true` means two things: the property stream was parsed to its last byte, and every
+stored value is in the JSON exactly. The game stores its decimals as IEEE float32; the JSON
+writes each as the shortest decimal (6 to 9 significant digits) that reads back as the same
+float32, bit for bit (`wlib/f32json.py`), so `1.2345e-05` stays `1.2345e-05` and `-8448.72`
+is the float32 the file holds. A NaN or infinity is `null` (JSON has no such numbers); in what
+`kapow_fragment.parse` and `decode_sequence.parse` return it stays the float it is, so the tables
+that compute with those values do not meet a `None` (`f32json.dumps` writes the `null`). A
+sequence quaternion key whose Euler angles are not all finite has `quat: null`.
+`float_values` says how the file was written: `"exact"` (the default since 1.5.0) or
+`"rounded"` — `--json-floats rounded` / `WATCHMEN_JSON_FLOATS=rounded` write the values of
+1.4.0, which rounded `number`, `vector` and `quaternion` values to 6 decimal places, the
+transform `pos` to 3 and `quat` to 4 (so a value like 1.2345e-05 came out as 1.2e-05, and
+1.4.0's `lossless` meant "parsed to the end" only). Derived numbers are rounded in both modes:
+`yaw_deg` to 0.1 degree. The same rule applies to `.sequence` keys (`t`, `value`, `handles`:
+1.4.0 rounded to 5 places; the `quat` derived from Euler angles stays rounded to 6) and to the
+raw float records of a property bag (`floats`; 1.4.0: 6 places, `null` from 1e9 up).
+
+Measured on the 263 fragments, 6 sequences and 1 scene of the PC Part 2 extract in the
+cloud test copy: 1,115,730 numbers, of which 145,391 change; on 140,007 of them the 1.4.0
+value was a different float32 than the stored one (most are transform `pos` / `quat`), the
+other 5,384 are the same float32 written with other digits; all 648,996 converted values read
+back as the stored float32, and no value is NaN or infinite. The tables built from the
+fragments change by rounding only (pass 9 extract of PC Part 2): `levelmeta` 21,926 of
+729,488 numbers (by at most 0.001, a derived distance rounded to 3 places), `animmeta` 157 of
+312,356 and `fxmeta` 3 of 3,403 (by at most 1e-6), `soundmeta` 1 of 81,900; `textmeta` is
+byte-identical; no string, key or list changes.
 
 A vector or quaternion guess for an unknown key is refused when a component is a marker, a
 known key hash, or not an ordinary float (zero, or magnitude between 1e-6 and 1e7); the

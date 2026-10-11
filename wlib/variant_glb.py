@@ -4,13 +4,14 @@
 #       [--bind BIND.npz] [--bank CLIPBANK.pkl]
 # Uses: engine-exact bind (bind_v14b/gimp...), bake_v4 math (conjugate convention,
 # absolute root), real IBMs + joint-space TRS (interpolation-safe), real-time rates.
-import os, sys, json, struct, pickle, zlib, hashlib
+import os, sys, json, struct, zlib
 import numpy as np
+from wutil import GlbPacker, glb_bytes, load_npz, order_name, platform_name, restricted_load
 
 _D = os.path.dirname(os.path.abspath(__file__))
 if _D not in sys.path:
     sys.path.append(_D)  # append, never insert(0): flat module names must not shadow the stdlib
-import watchmen_extract as we, export_female_anims as efa, rig_glb, extract_skeletons as es
+import watchmen_extract as we, export_female_anims as efa, rig_glb
 
 # 2026-07-24 AXIS: the Kapow engine is ALREADY Y-up, so no axis conversion is
 # needed for glTF.  This module used to carry a Z-up->Y-up rotation C (applied
@@ -67,6 +68,135 @@ def batch_m2q(M):
             qr[m] = qq
         q[r] = qr
     return q / np.linalg.norm(q, axis=1, keepdims=True)
+
+
+#: The character GLB's skeleton (--rig, $WATCHMEN_RIG):
+#:   "hierarchy" (default) -- joint node k is named after its bone and is a child of
+#:       the joint of the bone's parent (roots: children of `root`); its rest TRS and
+#:       every animation channel are LOCAL to that parent; the skinned mesh nodes are
+#:       scene roots.  Requires the bind's names and parents (else "flat").
+#:   "flat" -- the 1.4.0 layout: nodes `b<k>`, all children of `root`, each carrying
+#:       the joint's world transform, the mesh nodes under `root`.
+#: The skinning (IBMs, JOINTS_0, WEIGHTS_0) and every world pose are the same in both.
+RIG_MODES = ("hierarchy", "flat")
+DEFAULT_RIG = "hierarchy"
+#: node names a character GLB uses besides the joints; a joint never takes one
+FIXED_NODE_NAMES = (
+    "root",
+    "mesh",
+    "face_root",
+    "f_anchor",
+    "face_mesh",
+    "alternatives",
+    "ragdoll",
+)
+#: the forms of the other helper node names write_glb gives: the face joints
+#: 'f_<face bone>', the face proxies 'face_proxy_b<k>_<i>', the ragdoll shapes
+#: 'RB.<bone>.<i>' and frames 'RJ.<bone>'; a joint name of such a form is taken too
+#: (whether or not the file has a face rig or a ragdoll, so the joint names depend
+#: on the bind and the attachment / outfit names only)
+RESERVED_NODE_PREFIXES = ("f_", "face_proxy_", "RB.", "RJ.")
+
+
+def rig_mode(value=None):
+    """The rig mode in force: `value`, else $WATCHMEN_RIG, else DEFAULT_RIG."""
+    v = value or os.environ.get("WATCHMEN_RIG") or DEFAULT_RIG
+    if v not in RIG_MODES:
+        raise ValueError("rig mode %r (one of %s)" % (v, ", ".join(RIG_MODES)))
+    return v
+
+
+def joint_node_names(names, reserved=()):
+    """Node names for the joints of a hierarchical rig: the bone names with control
+    characters removed and surrounding blanks stripped; an empty name becomes
+    'b<k>'; a name that is already taken -- by an earlier joint, by one of
+    FIXED_NODE_NAMES, by a name in `reserved` (the attachment and outfit nodes), or
+    that has the form of a face or ragdoll helper node (RESERVED_NODE_PREFIXES) --
+    gets ' #<k>' appended (k = the joint's palette index).  So no joint shares a
+    name with another node write_glb writes (the attachment, outfit, face and
+    ragdoll nodes keep the names they are given), and the palette index stays
+    readable."""
+    taken = set(FIXED_NODE_NAMES) | {str(r) for r in reserved}
+    out = []
+    for k, n in enumerate(names):
+        nm = "".join(c for c in str(n) if c.isprintable()).strip() or "b%d" % k
+        if nm in taken or nm.startswith(RESERVED_NODE_PREFIXES):
+            nm = "%s #%d" % (nm, k)
+            i = 2
+            while nm in taken:  # pathological: '<name> #k' itself is a bone name
+                nm = "%s #%d.%d" % (nm.rsplit(" #", 1)[0], k, i)
+                i += 1
+        taken.add(nm)
+        out.append(nm)
+    return out
+
+
+def parent_table_ok(par, n=None):
+    """True when `par` is a forest over range(n): every entry -1 or another index,
+    no joint its own ancestor."""
+    par = [int(p) for p in par]
+    n = len(par) if n is None else n
+    if len(par) != n or any(p < -1 or p >= n or p == k for k, p in enumerate(par)):
+        return False
+    state = [0] * n  # 0 unseen, 1 on the current path, 2 done
+    for k in range(n):
+        path = []
+        j = k
+        while j >= 0 and state[j] == 0:
+            state[j] = 1
+            path.append(j)
+            j = par[j]
+        if j >= 0 and state[j] == 1:
+            return False  # came back to a joint of this path: a cycle
+        for x in path:
+            state[x] = 2
+    return True
+
+
+def glb_joint_names(bind_names, bind_par, reserved=(), rig=None):
+    """The joint node names write_glb gives a bind with names `bind_names` and
+    parents `bind_par`: joint_node_names() in the "hierarchy" rig, None when the
+    rig is (or falls back to) "flat" -- the 'b<k>' names."""
+    if rig_mode(rig) != "hierarchy" or bind_names is None or bind_par is None:
+        return None
+    if len(bind_names) != len(bind_par) or not parent_table_ok(bind_par):
+        return None
+    return joint_node_names(bind_names, reserved)
+
+
+def local_from_world(W, par):
+    """Rigid world transforms W (..., NB, 4, 4) -> transforms local to the parent
+    joint: R_p^T R_k and R_p^T (t_k - t_p) (the rigid inverse of the parent; the
+    joint matrices are rotations, so no general inverse is needed).  Roots
+    (par < 0) keep W.  Vectorised over the leading axes (frames)."""
+    W = np.asarray(W, np.float64)
+    L = W.copy()
+    par = np.asarray(par, int)
+    k = np.nonzero(par >= 0)[0]
+    if k.size:
+        p = par[k]
+        # index the joint axis on its own (mixing an index array with the scalar
+        # column index would move the joint axis to the front)
+        R = W[..., :3, :3]
+        t = W[..., :3, 3]
+        RpT = np.swapaxes(np.take(R, p, axis=-3), -1, -2)
+        Rl = L[..., :3, :3]
+        tl = L[..., :3, 3]
+        Rl[..., k, :, :] = RpT @ np.take(R, k, axis=-3)
+        d = np.take(t, k, axis=-2) - np.take(t, p, axis=-2)
+        tl[..., k, :] = np.einsum("...ij,...j->...i", RpT, d)
+        L[..., :3, :3] = Rl
+        L[..., :3, 3] = tl
+    return L
+
+
+def used_joints(SI, SW):
+    """JOINTS_0 with the index of every zero-weight influence set to 0 (glTF 2.0,
+    3.7.3.3: unused joint slots should be 0; the weight decides alone, so the
+    skinning is unchanged)."""
+    SI = np.array(SI, copy=True)
+    SI[np.asarray(SW) == 0] = 0
+    return np.ascontiguousarray(SI)
 
 
 #: per-vertex attributes (NORMAL / TANGENT / COLOR_0, winding, vertex-alpha
@@ -187,44 +317,23 @@ def buffer_vertex_attrs(mh, ms, order, vbo, nv, stride, platform=None):
 
 def load_parts(mesh_names, palette_names, naz=None):
     """Mesh parts of `mesh_names` read from the archive `naz` (None: `01_game.naz`,
-    else `game.naz`, in the current directory -- bake_v4.default_naz)."""
+    else `game.naz`, in the current directory -- bake_v4.default_naz).  The
+    pieces and their skin come from mesh_loader, as in char_lib.load_parts."""
     if naz is None:
         import bake_v4
 
         naz = bake_v4.default_naz()
-    NB = len(palette_names)
-    uslot = {n: i for i, n in enumerate(palette_names)}
-    # 2026-08-17: ported char_lib.load_parts' 2026-07-13 'BipNN '-prefix-
-    # insensitive slot fallback (exact matches always win).  Thug/Heavies
-    # models say 'RUpArmTwist' where the medium bind says 'Bip02 RUpArmTwist';
-    # a silently dropped MID-LIST name shifts the rotate-by-one palette and
-    # mis-skins everything after it.  char_lib had the fix; this path didn't.
-    import re
-
-    _canon = lambda n: re.sub(r"^Bip\d+\s+", "", n)
-    ucanon = {}
-    for i, n in enumerate(palette_names):
-        c = _canon(n)
-        if c not in uslot:
-            ucanon.setdefault(c, i)
-
-    def _slot(x):
-        if x in uslot:
-            return uslot[x]
-        if x in ucanon:
-            return ucanon[x]
-        c = _canon(x)
-        if c in uslot:
-            return uslot[c]
-        return ucanon.get(c)
+    import char_lib as _cl
+    import mesh_loader as ml
 
     found = {}
-    for st, hs in efa.grab_blocks(naz).items():
+    for st, hs in efa.iter_blocks(naz):
         if "h" not in hs:
             continue
         try:
             it = list(we.extract_block(hs["h"], hs.get("s")))
-        except:
+        except Exception as ex:  # one unreadable block is logged, the walk goes on
+            print("  ! block %s: %s" % (st.rsplit("/", 1)[-1], ex))
             continue
         for e, h, s in it:
             nm = e.name.rsplit("/", 1)[-1].replace(".model", "")
@@ -240,81 +349,39 @@ def load_parts(mesh_names, palette_names, naz=None):
         mh, ms, plat = cands[0]
         if ms is None:
             continue
-        # per-part skin-index remap (each part mesh has its OWN bone list).
-        # 2026-08-17: byte order threaded through like char_lib.load_parts --
-        # console (X360/PS3) models are big-endian; compare descriptor COUNTS
-        # (a BE model can throw a stray LE false positive).  This path was
-        # hardcoded LE.
-        # 2026-10-05: the header states the order (char_lib.model_order); the
-        # count rule tied on single-submesh console models and lost them.
-        import char_lib as _cl
-
+        # per-part skin-index remap (each part mesh has its OWN bone list); the
+        # header states the byte order (char_lib.model_order)
         order = _cl.model_order(mh, ms, nm)
-        be = order == ">"
-        plist = [x for _, x in es._ordered_names(mh, order)]
-        pf = [x for x in plist if _slot(x) is not None]
-        ppal = [pf[(k - 1) % len(pf)] for k in range(len(pf))]  # engine rotate-by-one
-        remap = np.array([_slot(n) for n in ppal], dtype=np.int64)
-        descs = we.find_descriptors(mh, order)
-        mats = we.extract_materials(mh)
-        # 2026-08-17: engine-exact submesh->material pairing (char_lib.py had
-        # the 2026-07-08g fix); positional mats[si] stays as the fallback.
-        smat = we.submesh_materials(mh, order)
-        off = 0
-        for si, (nv, stride, ib) in enumerate(descs):
-            hi = len(ms) - nv * stride - ib
-            c = off
-            vbo = None
-            while c <= min(off + 65536, hi):
-                # require a CLEAN index buffer too: a false-positive VB sits
-                # ~4 bytes before the real one, passes _vb_ok, but has a ~50%
-                # repeated-index IB (char_lib 2026-07-15d).
-                if (
-                    we._sane(struct.unpack_from(order + "f", ms, c)[0])
-                    and we._vb_ok(ms, c, nv, stride, ib, order)
-                    and we._ib_ok(ms, c, nv, stride, ib, order)
-                ):
-                    vbo = c
-                    break
-                c += 1
-            if vbo is None:
-                vbo = _cl.flat_buffer(ms, off, nv, stride, ib, order)
-            if vbo is None:
-                _cl.note_dropped(nm, si, nv, stride, ib, order, _cl.NO_BUFFER)
-                continue
-            v, _, uv = we._decode_sub(ms, vbo, nv, stride, be)
-            skidx, skw = rig_glb.decode_skin(ms, vbo, nv, stride, order)
-            ibo = vbo + nv * stride
-            T = []
-            for t in range(ib // 6):
-                x, y, z = struct.unpack_from(order + "3H", ms, ibo + t * 6)
-                if x < nv and y < nv and z < nv and len({x, y, z}) == 3:
-                    T.append((x, y, z))
-            off = ibo + ib
-            if not v or not T:
-                _cl.note_dropped(nm, si, nv, stride, ib, order, _cl.NO_TRIANGLES)
-                continue
-            SI = remap[np.clip(np.asarray(skidx, int), 0, len(remap) - 1)]
-            SI = np.clip(SI, 0, NB - 1)
-            mat = (
-                mats[smat[si][1]]
-                if si < len(smat) and smat[si][1] < len(mats)
-                else (mats[si] if si < len(mats) else "%s_sub%d" % (nm, si))
+        remap, lost = ml.palette_remap(mh, order, palette_names, nm)
+        _cl.note_palette_names(nm, [d for d in lost if d["where"] == ml.MID_LIST])
+        try:
+            subs, _rep = ml.load_submeshes(
+                mh, ms, nm, order=order, platform=plat, fallback_name="%s_sub%d"
             )
-            parts.append(
-                with_attrs(
-                    (
-                        np.array(v, float),
-                        SI.astype(np.uint16),
-                        np.asarray(skw, np.float32),
-                        np.array(T),
-                        np.array(uv if uv else [(0.0, 0.0)] * len(v), np.float32),
-                        mat,
-                    ),
-                    buffer_vertex_attrs(mh, ms, order, vbo, nv, stride, plat),
+        except (ValueError, KeyError, IndexError, struct.error) as ex:
+            ex.add_note(
+                "model %s in %s (%d header bytes, %d stream bytes, %s, platform %s)"
+                % (
+                    nm,
+                    naz,
+                    len(mh),
+                    len(ms),
+                    order_name(order),
+                    platform_name(plat, order),
                 )
             )
-            print("  loaded %-24s sub%d verts=%d tris=%d mat=%s" % (nm, si, len(v), len(T), mat))
+            raise
+        for sb in subs:
+            sk = _cl.skinned_part(nm, sb, remap, order, lost)
+            if sk is None:
+                continue
+            SI, SW = sk
+            mat = sb["material"]
+            parts.append(with_attrs((sb["V"], SI, SW, sb["T"], sb["UV"], mat), sb["attrs"]))
+            print(
+                "  loaded %-24s sub%d verts=%d tris=%d mat=%s"
+                % (nm, sb["index"], len(sb["V"]), len(sb["T"]), mat)
+            )
     return parts
 
 
@@ -398,6 +465,7 @@ def write_glb(
     outfit_parts=None,
     asset_extras=None,
     ragdoll=None,
+    rig=None,
 ):
     """meta: optional anim_meta.build() table -> per-animation `extras` (events,
     loop, pair partner + placement).  Bone names/parents and the coordinate
@@ -425,8 +493,9 @@ def write_glb(
     Without parts_record nothing is hidden.
     outfit_parts: [(node name, parts, shown)] -- the models that differ between the
     variant's outfits (parts_rule.outfits), one node `OUTFIT <k> <model>` per outfit
-    and model on skin 0: the shown outfit's nodes are children of the root, the
-    others hang under "alternatives".  Nodes of the same model share their vertex
+    and model on skin 0: the shown outfit's nodes are in the scene (scene roots in the
+    hierarchical rig, children of the root in the flat one), the others hang under
+    "alternatives".  Nodes of the same model share their vertex
     data (identical data is written once and the accessor shared), only the
     materials differ.  asset_extras: merged into asset.extras.watchmen.  A piece with restored
     eyelash UVs (watchmen_extract.LASH_RESTORE) adds reconstruction.eyelash_uvs there.
@@ -434,7 +503,17 @@ def write_glb(
     nodes under a node "ragdoll" that is in no scene (hidden like "alternatives"):
     `RB.<bone>.<i>` proxy meshes skinned rigidly to the bone's joint, `RJ.<child
     bone>` empties at the joint frames; parameters in the nodes' extras.  Appended
-    after everything else, so the rest of the file is the same with or without it."""
+    after everything else, so the rest of the file is the same with or without it.
+
+    rig: "hierarchy" / "flat" (None = rig_mode(): $WATCHMEN_RIG, default "hierarchy").
+    The hierarchy names joint node k after its bone (joint_node_names), parents it to
+    the joint of the bone's parent, writes rest and animation TRS local to that
+    parent, hangs the face rig on the body joints (f_anchor under the attach joint,
+    each face proxy under its joint, constant local transforms, no channels; no
+    face_root) and puts the skinned mesh nodes the scene shows at the scene root; a bind
+    without names and parents, or with a parent table that is not a tree, is
+    written flat.  "flat" is the 1.4.0 layout (see RIG_MODES).  The mode written,
+    and why a requested hierarchy was not, is in asset.extras.watchmen.rig."""
     import face_rule as _fr
 
     _engine = _fr.rule(face_rule) == "engine"
@@ -462,7 +541,7 @@ def write_glb(
     # the clip extras copy GLB-frame numbers out of `meta`: it has to be in the
     # frame this file is written in (a table without the marker is mirrored)
     meta = _am.to_frame(meta)
-    bt = np.load(bindnpz, allow_pickle=True)
+    bt = load_npz(bindnpz)
     Rb = bt["Rb"]
     tb = bt["tb"]
     NB = len(Rb)
@@ -479,11 +558,36 @@ def write_glb(
     B4[:, :3, :3] = Rb
     B4[:, :3, 3] = tb
     IBM = np.array([np.linalg.inv(B4[k]) for k in range(NB)])
+    # the skeleton layout (RIG_MODES): joint node names, parents, local TRS
+    _rigrec = {"mode": rig_mode(rig)}
+    _jnames = None
+    if _rigrec["mode"] == "hierarchy":
+        _reserved = [a for a, _p in attachments or []] + [a for a, _p in alt_parts or []]
+        _reserved += [a for a, _p, _s in outfit_parts or []]
+        _jnames = glb_joint_names(_bnames, _bpar, _reserved) if _skel else None
+        if _jnames is None:
+            _rigrec = {
+                "mode": "flat",
+                "reason": (
+                    "the bind has no bone names and parents"
+                    if not _skel
+                    else "the bind's parent table is not a tree"
+                ),
+            }
+    _hier = _jnames is not None
+    if _hier:
+        _skel = _am.skeleton_extras(_bnames, _bpar, rig="hierarchy", joint_nodes=_jnames)
     j = {
         "asset": {
             "version": "2.0",
             "generator": "watchmen_extract variant_glb",
-            "extras": {"watchmen": {"format": _am.FORMAT, "conventions": _am.conventions()}},
+            "extras": {
+                "watchmen": {
+                    "format": _am.FORMAT,
+                    "conventions": _am.conventions(),
+                    "rig": _rigrec,
+                }
+            },
         },
         "scene": 0,
         "scenes": [{"nodes": []}],
@@ -499,48 +603,16 @@ def write_glb(
         "textures": [],
         "samplers": [{"magFilter": 9729, "minFilter": 9987, "wrapS": 10497, "wrapT": 10497}],
     }
-    BIN = bytearray()
-
     # outfit nodes of the same model: identical data is written once and the
-    # ACCESSOR is shared (a buffer view shared by two accessors would need a
-    # byteStride; a shared accessor needs nothing)
-    _share = {"on": False, "view": {}, "acc": {}}
+    # ACCESSOR is shared (_pk.share; a buffer view shared by two accessors would
+    # need a byteStride; a shared accessor needs nothing)
+    _pk = GlbPacker(j["bufferViews"], j["accessors"])
+    BIN = _pk.bin
 
-    def _used_joints(SI, SW):
-        """JOINTS_0 with the index of every zero-weight influence set to 0 (glTF
-        2.0, 3.7.3.3: unused joint slots should be 0; the weight decides alone,
-        so the skinning is unchanged)."""
-        SI = np.array(SI, copy=True)
-        SI[np.asarray(SW) == 0] = 0
-        return np.ascontiguousarray(SI)
+    _used_joints = used_joints
 
-    def av(x, target=None):
-        if _share["on"]:
-            _k = (hashlib.sha1(bytes(x)).digest(), target)
-            if _k in _share["view"]:
-                return _share["view"][_k]
-        while len(BIN) % 4:
-            BIN.append(0)
-        ofs = len(BIN)
-        BIN.extend(x)
-        j["bufferViews"].append({"buffer": 0, "byteOffset": ofs, "byteLength": len(x)})
-        if target is not None:
-            j["bufferViews"][-1]["target"] = target
-        if _share["on"]:
-            _share["view"][_k] = len(j["bufferViews"]) - 1
-        return len(j["bufferViews"]) - 1
-
-    def ac(bv, ct, c, t, mn=None, mx=None):
-        if _share["on"] and (bv, ct, c, t) in _share["acc"]:
-            return _share["acc"][(bv, ct, c, t)]
-        A = {"bufferView": bv, "componentType": ct, "count": c, "type": t}
-        if mn is not None:
-            A["min"] = mn
-            A["max"] = mx
-        j["accessors"].append(A)
-        if _share["on"]:
-            _share["acc"][(bv, ct, c, t)] = len(j["accessors"]) - 1
-        return len(j["accessors"]) - 1
+    av = _pk.view  # (data, target=None) -> bufferView index
+    ac = _pk.accessor  # (bv, ct, count, type, mn=None, mx=None)
 
     _texdone = {}
     _va = vertex_attrs_enabled()
@@ -724,20 +796,27 @@ def write_glb(
         q = batch_m2q(np.ascontiguousarray(L[:3, :3])[None])[0]
         return {"rotation": [float(x) for x in q], "translation": [float(x) for x in L[:3, 3]]}
 
-    # Joint nodes carry the BIND pose, not identity.  They are flat children of
-    # an identity `root`, so node-local == node-global and the bind world matrix
-    # B4[k] goes straight in.  Previously these were identity while the IBMs
-    # were real, so any viewer showing the scene before an animation is picked
-    # (Blender's rest pose, default glTF viewer state, thumbnailers) rendered
-    # the mesh in bind-LOCAL space -- measured 0.72 m mean vertex displacement
-    # and a mesh collapsed to ~1/5 of its animated size.
+    # Joint nodes carry the BIND pose, not identity (identity joints with real
+    # IBMs render the mesh in bind-LOCAL space in every viewer that shows the
+    # scene before an animation is picked: measured 0.72 m mean vertex
+    # displacement).  Flat rig: children of an identity `root`, so node-local ==
+    # node-global and B4[k] goes straight in.  Hierarchy: B4[k] relative to the
+    # parent joint (local_from_world); the product down the chain gives B4[k]
+    # back, so the IBMs are the same in both.
     bnode = [len(j["nodes"]) + k for k in range(NB)]
+    B4n = local_from_world(B4, _bpar) if _hier else B4
     for k in range(NB):
-        nd = {"name": "b%d" % k}
-        nd.update(_node_trs(B4[k]))
+        nd = {"name": _jnames[k] if _hier else "b%d" % k}
+        nd.update(_node_trs(B4n[k]))
         if _skel:
             nd["extras"] = {"bone": _bnames[k], "parent": _bpar[k]}
+            if _hier:
+                nd["extras"]["index"] = k
         j["nodes"].append(nd)
+    if _hier:
+        for k in range(NB):
+            if _bpar[k] >= 0:
+                j["nodes"][bnode[_bpar[k]]].setdefault("children", []).append(bnode[k])
     ibmacc = ac(
         av(np.array([m.T.reshape(16) for m in IBM], np.float32).tobytes()), 5126, NB, "MAT4"
     )
@@ -907,7 +986,7 @@ def write_glb(
     _extra += [(a, p, True, False) for a, p in alt_parts or []]
     _extra += [(a, p, not sh, True) for a, p, sh in outfit_parts or []]
     for aname, aparts, _hide, _shared in _extra:
-        _share["on"] = _shared
+        _pk.share = _shared
         # each attachment = its OWN mesh node sharing skin 0 (verts already in
         # body bind space, weighted to the attach bone slot) -> imports as a
         # separate object, individually hideable.
@@ -957,14 +1036,14 @@ def write_glb(
             _hidden.add(len(j["nodes"]))
         attnodes.append(len(j["nodes"]))
         j["nodes"].append({"name": aname, "mesh": mi_, "skin": 0})
-    _share["on"] = False
+    _pk.share = False
     facenodes = []
     if face is not None:
         # SECOND SKIN: face rig parented under the body's Head joint -- rides
         # every body animation via hierarchy; face poses = local channels on
         # the face joints only.  face = dict(bind, parts, anims, attach_idx,
         # M (3,3), t (3)) with M,t mapping face-model space -> body bind space.
-        fb = np.load(face["bind"], allow_pickle=True)
+        fb = load_npz(face["bind"])
         fRb, ftb = fb["Rb"], fb["tb"]
         NF = len(fRb)
         B4f = np.tile(np.eye(4), (NF, 1, 1))
@@ -979,22 +1058,37 @@ def write_glb(
             q = batch_m2q(L[:3, :3][None])[0]
             return {"rotation": [float(x) for x in q], "translation": [float(x) for x in L[:3, 3]]}
 
-        frn = len(j["nodes"])
-        j["nodes"].append({"name": "face_root"})
+        # Flat rig (1.4.0): `face_root` is a scene root; f_anchor and the proxies
+        # under it carry WORLD channels, A4[Head]·M4 and A4[bs]·Mk, on every body
+        # clip.  Hierarchy: no face_root; f_anchor is a child of the attach
+        # joint (Head) and each proxy a child of its body joint bs, with the
+        # CONSTANT local transforms inv(B4[Head])·M4 and inv(B4[bs])·Mk -- their
+        # world transform is the same product on every key, and between keys
+        # they follow the joint they ride instead of being interpolated in
+        # world space on their own (which let the face drift off the head
+        # mid-key).  No channels are written for them.
+        frn = None
+        if not _hier:
+            frn = len(j["nodes"])
+            j["nodes"].append({"name": "face_root"})
         anchor = len(j["nodes"])
         nd = {"name": "f_anchor"}
-        nd.update(_trs(M4))
+        nd.update(_trs(np.linalg.inv(B4[ai]) @ M4 if _hier else M4))
         j["nodes"].append(nd)
+        if _hier:
+            j["nodes"][bnode[ai]].setdefault("children", []).append(anchor)
         proxynodes = []
         _palign = face.get("proxy_align") or None  # per-proxy 4x4 (giraffe fix)
         for pi, bs in enumerate(face.get("proxy_slots", [])):
             _Mk = _palign[pi] if _palign is not None else M4
-            Lp = _Mk
+            Lp = np.linalg.inv(B4[bs]) @ _Mk if _hier else _Mk
             nd = {"name": "face_proxy_b%d_%d" % (bs, pi)}
             nd.update(_trs(Lp))
             pn = len(j["nodes"])
             j["nodes"].append(nd)
             proxynodes.append(pn)
+            if _hier:
+                j["nodes"][bnode[bs]].setdefault("children", []).append(pn)
         for k in range(NF):
             L = B4f[k]  # LOCAL under f_anchor
             nd = {"name": "f_%s" % str(fb["names"][k])}
@@ -1002,7 +1096,8 @@ def write_glb(
             facenodes.append(len(j["nodes"]))
             j["nodes"].append(nd)
         j["nodes"][anchor]["children"] = facenodes[:]
-        j["nodes"][frn]["children"] = [anchor] + proxynodes
+        if frn is not None:
+            j["nodes"][frn]["children"] = [anchor] + proxynodes
         _fj_ibms = (
             [np.linalg.inv(B4f[k]) for k in range(NF)]
             + [np.eye(4) for _ in proxynodes]
@@ -1118,14 +1213,29 @@ def write_glb(
             {"joints": facenodes + proxynodes + [anchor], "inverseBindMatrices": fibm}
         )
     root = len(j["nodes"])
-    rootkids = bnode + [mnode] + [a for a in attnodes if a not in _hidden]
-    j["nodes"].append({"name": "root", "children": rootkids})
+    _shown = [a for a in attnodes if a not in _hidden]
+    if _hier:
+        # skinned meshes at the scene root (glTF ignores a skinned mesh node's
+        # transform; the validator flags one with a parent): the joints alone
+        # hang under `root`
+        j["nodes"].append(
+            {"name": "root", "children": [bnode[k] for k in range(NB) if _bpar[k] < 0]}
+        )
+        j["scenes"][0]["nodes"] = [root, mnode] + _shown
+    else:
+        j["nodes"].append({"name": "root", "children": bnode + [mnode] + _shown})
+        j["scenes"][0]["nodes"] = [root]
     j["skins"][0]["skeleton"] = root
-    j["scenes"][0]["nodes"] = [root]
     if face is not None:
-        j["scenes"][0]["nodes"].append(frn)
-        j["nodes"][frn].setdefault("children", []).append(fmnode)
-        j["skins"][1]["skeleton"] = frn
+        if _hier:
+            # the face joints hang under body joints: the body root is their
+            # common root
+            j["scenes"][0]["nodes"].append(fmnode)
+            j["skins"][1]["skeleton"] = root
+        else:
+            j["scenes"][0]["nodes"].append(frn)
+            j["nodes"][frn].setdefault("children", []).append(fmnode)
+            j["skins"][1]["skeleton"] = frn
         if _engine:
             _fm = (meta or {}).get("face") or {}
             _sx = {
@@ -1136,17 +1246,19 @@ def write_glb(
                     for n, r in (_fm.get("classes") or {}).items()
                     if r.get("pose_family") == face.get("family")
                 ),
-                "anchor_node": "face_root",
+                "anchor_node": "f_anchor" if _hier else "face_root",
                 "rule": "engine",
                 "track_choice": _fr.TRACK_CHOICE,
                 "idle_cycle_baked": bool(_idle),
             }
+            if _hier:
+                _sx["anchor_parent"] = _jnames[face["attach_idx"]]
             if face.get("game_head"):
                 _sx["game_head"] = face["game_head"]
             j["skins"][1]["extras"] = {"watchmen": {"face": _sx}}
     _facemask = None
     if face is not None:
-        _fb0 = np.load(face["bind"], allow_pickle=True)
+        _fb0 = load_npz(face["bind"])
         _fn = [str(x) for x in _fb0["names"]]
         _fp = _fb0["par"]
 
@@ -1162,7 +1274,7 @@ def write_glb(
         _fhead = _fn.index("Head")
     _faceride = None
     if face is not None and face.get("anims"):
-        _fb = np.load(face["bind"], allow_pickle=True)
+        _fb = load_npz(face["bind"])
         _NF = len(_fb["Rb"])
         _B4f = np.tile(np.eye(4), (_NF, 1, 1))
         _B4f[:, :3, :3] = _fb["Rb"]
@@ -1319,7 +1431,11 @@ def write_glb(
             ],
             axis=2,
         )  # (F,NB,4,4)
-        W = np.einsum("fkab,kbc->fkac", A4, B4)
+        W = np.einsum("fkab,kbc->fkac", A4, B4)  # (F,NB,4,4) joint world
+        if _hier:
+            # local to the parent joint, from this entry's own palette (a masked
+            # overlay's bones are posed relative to whatever drives their parents)
+            W = local_from_world(W, _bpar)
         Q = batch_m2q(W[:, :, :3, :3].reshape(-1, 3, 3)).reshape(F, NB, 4)
         # sign continuity along time per bone
         for f in range(1, F):
@@ -1342,20 +1458,29 @@ def write_glb(
             # children with LOCAL channels -> expressions follow the head, and
             # a FACE action layered/posed on top keeps riding).
             _ai, _pslots, _palign, _fneut, _fpose, _fblink, _fs = _faceride
-            FH = A4[:, _ai]  # (F,4,4)
-            La = np.einsum("fab,bc->fac", FH, _M4Ci)
-            Qf = batch_m2q(La[:, :3, :3])
-            for f in range(1, F):
-                if (Qf[f] * Qf[f - 1]).sum() < 0:
-                    Qf[f] *= -1
-            vo = ac(av(np.ascontiguousarray(Qf.astype(np.float32)).tobytes()), 5126, F, "VEC4")
-            to = ac(
-                av(np.ascontiguousarray(La[:, :3, 3].astype(np.float32)).tobytes()), 5126, F, "VEC3"
-            )
-            sm.append({"input": ta, "output": vo, "interpolation": "LINEAR"})
-            chn.append({"sampler": len(sm) - 1, "target": {"node": anchor, "path": "rotation"}})
-            sm.append({"input": ta, "output": to, "interpolation": "LINEAR"})
-            chn.append({"sampler": len(sm) - 1, "target": {"node": anchor, "path": "translation"}})
+            # hierarchy rig: the anchor and the proxies ride their body joints
+            # with constant local transforms -- no channels of their own
+            _pslots = () if _hier else _pslots
+            if not _hier:
+                FH = A4[:, _ai]  # (F,4,4)
+                La = np.einsum("fab,bc->fac", FH, _M4Ci)
+                Qf = batch_m2q(La[:, :3, :3])
+                for f in range(1, F):
+                    if (Qf[f] * Qf[f - 1]).sum() < 0:
+                        Qf[f] *= -1
+                vo = ac(av(np.ascontiguousarray(Qf.astype(np.float32)).tobytes()), 5126, F, "VEC4")
+                to = ac(
+                    av(np.ascontiguousarray(La[:, :3, 3].astype(np.float32)).tobytes()),
+                    5126,
+                    F,
+                    "VEC3",
+                )
+                sm.append({"input": ta, "output": vo, "interpolation": "LINEAR"})
+                chn.append({"sampler": len(sm) - 1, "target": {"node": anchor, "path": "rotation"}})
+                sm.append({"input": ta, "output": to, "interpolation": "LINEAR"})
+                chn.append(
+                    {"sampler": len(sm) - 1, "target": {"node": anchor, "path": "translation"}}
+                )
             # ENGINE RULE: the face track of the state(s) that play this clip
             _eng = _engine and _fpose and _fs is not None
             if _eng:
@@ -1466,7 +1591,7 @@ def write_glb(
                 )
         j["animations"].append(_anim(animname, sm, chn, F, fps, _finfo))
     if face is not None:
-        fb = np.load(face["bind"], allow_pickle=True)
+        fb = load_npz(face["bind"])
         fRb, ftb = fb["Rb"], fb["tb"]
         NF = len(fRb)
         B4f = np.tile(np.eye(4), (NF, 1, 1))
@@ -1548,8 +1673,14 @@ def write_glb(
     _pieces += [p for _a, p, _s in outfit_parts or []]
     if any(we.lash_is_restored(pt[4]) for _pl in _pieces for pt in _pl or ()):
         _w = j["asset"].setdefault("extras", {}).setdefault("watchmen", {})
-        _w["reconstruction"] = dict(_w.get("reconstruction") or {}, **we.lash_reconstruction_note())
+        _w["reconstruction"] = (_w.get("reconstruction") or {}) | we.lash_reconstruction_note()
     if ragdoll and (ragdoll.get("shapes") or ragdoll.get("joints")):
+        import ragdoll_rig as _rr
+
+        # the joint node names in the helpers' extras are this file's
+        ragdoll = _rr.relabel_joint_nodes(
+            ragdoll, _jnames if _hier else ["b%d" % k for k in range(NB)]
+        )
         # helper nodes only: appended last, nothing above refers to them
         _rk = []
         _rmat = None
@@ -1628,26 +1759,13 @@ def write_glb(
         del j["samplers"]
     _frame.finish_gltf(j, BIN)
     j["buffers"].append({"byteLength": len(BIN)})
-    jb = json.dumps(j, separators=(",", ":")).encode()
-    while len(jb) % 4:
-        jb += b" "
-    bb = bytes(BIN)
-    while len(bb) % 4:
-        bb += b"\x00"
+    _glb = glb_bytes(j, BIN)
     _tmp = str(out) + ".tmp"
     with open(_tmp, "wb") as fh:
-        fh.write(
-            b"glTF"
-            + struct.pack("<II", 2, 12 + 8 + len(jb) + 8 + len(bb))
-            + struct.pack("<I", len(jb))
-            + b"JSON"
-            + jb
-            + struct.pack("<I", len(bb))
-            + b"BIN\x00"
-            + bb
-        )
+        fh.write(_glb)
     os.replace(_tmp, out)
-    print("wrote %s  (%d anims, %.1f MB)" % (out, len(manifest), (12 + len(jb) + len(bb)) / 1e6))
+    # 12-byte header + the two chunks' data (their 8-byte headers not counted, as before)
+    print("wrote %s  (%d anims, %.1f MB)" % (out, len(manifest), (len(_glb) - 16) / 1e6))
 
 
 # Skeleton asset name -> the bind npz built for it.  Populated from a binds
@@ -1709,7 +1827,11 @@ def no_bake_note(bakedir, prefix):
 def variant_from_fragment(fragjson, variant):
     import kapow_json
 
-    d = kapow_json.load_fragment(fragjson)  # the binary .fragment beside it wins
+    try:
+        d = kapow_json.load_fragment(fragjson)  # the binary .fragment beside it wins
+    except (OSError, ValueError, KeyError, IndexError) as ex:
+        ex.add_note("fragment %s (variant %s)" % (fragjson, variant))
+        raise
     inst = [i for i in d["instances"] if i.get("name") == variant and i.get("model_ref")]
     if not inst:
         raise SystemExit(
@@ -1781,7 +1903,7 @@ def build(
     print(
         "variant %s: skeleton=%s meshes=%s bind=%s clips=%s" % (variant, skel, meshes, bind, prefix)
     )
-    bt = np.load(bind, allow_pickle=True)
+    bt = load_npz(bind)
     pal_names = [str(x) for x in bt["names"]]
     parts = load_parts(meshes, pal_names, naz=naz)
     manifest = []
@@ -1822,7 +1944,11 @@ def build(
                 # bake_v4.fps_for(): (keys-1)/duration.
                 import bake_v4
 
-                dur = struct.unpack_from(bake_v4._detect_clip_order(h) + "f", h, 4)[0]
+                try:
+                    dur = struct.unpack_from(bake_v4._detect_clip_order(h) + "f", h, 4)[0]
+                except (struct.error, ValueError) as ex:
+                    ex.add_note("clip %s: header of %d bytes in the bank" % (nm, len(h)))
+                    raise
                 if dur > 0 and len(A) > 1:
                     fps = (len(A) - 1) / dur
                     timed = True
@@ -1855,7 +1981,12 @@ if __name__ == "__main__":
     ap.add_argument("frag")
     ap.add_argument("variant")
     ap.add_argument("out")
-    ap.add_argument("--bank", default=None, help="a pickled {clip name: header bytes or path}")
+    ap.add_argument(
+        "--bank",
+        default=None,
+        help="a pickled {clip name: header bytes or path} (plain data only: a pickle that"
+        " names a class or function is refused)",
+    )
     ap.add_argument("--jiggle", action="store_true")
     from jiggle_d6 import MODELS as _jiggle_models
 
@@ -1865,7 +1996,7 @@ if __name__ == "__main__":
     bank = None
     if a.bank:
         with open(a.bank, "rb") as _fh:
-            bank = pickle.load(_fh)
+            bank = restricted_load(_fh)
     build(
         a.frag,
         a.variant,

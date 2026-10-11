@@ -4,6 +4,7 @@
 # twist alignment (engine pass 0x5958f5) is applied; bake(twist_align=False) leaves it out.
 # usage: python3 bake_v4.py CLIP OUT.npy [upsample] --bind BIND.npz
 import sys, struct, numpy as np, watchmen_extract as we, export_female_anims as efa
+from wutil import load_npz, order_name, qmats_xyzw
 
 # 2026-07-24: this module used to read --bind/--conj out of sys.argv AT IMPORT
 # TIME, which forced every caller (and watchmenlib, at import) to rewrite the
@@ -33,7 +34,7 @@ def _load_bind(path=None):
         BIND = path
     if not BIND:
         raise ValueError("no bind loaded: call bake(clip, bind='.../bind_<skel>_file_v1.npz')")
-    bt = np.load(BIND, allow_pickle=True)
+    bt = load_npz(BIND)
     Rb = bt["Rb"]
     tb = bt["tb"]
     tloc = bt["tloc"]
@@ -43,20 +44,9 @@ def _load_bind(path=None):
 
 
 def Rstd(q):
-    q = np.asarray(q, np.float64)
-    q = q / np.maximum(np.linalg.norm(q, axis=-1, keepdims=True), 1e-12)
-    x, y, z, w = q[..., 0], q[..., 1], q[..., 2], q[..., 3]
-    M = np.empty(q.shape[:-1] + (3, 3))
-    M[..., 0, 0] = 1 - 2 * (y * y + z * z)
-    M[..., 0, 1] = 2 * (x * y - z * w)
-    M[..., 0, 2] = 2 * (x * z + y * w)
-    M[..., 1, 0] = 2 * (x * y + z * w)
-    M[..., 1, 1] = 1 - 2 * (x * x + z * z)
-    M[..., 1, 2] = 2 * (y * z - x * w)
-    M[..., 2, 0] = 2 * (x * z - y * w)
-    M[..., 2, 1] = 2 * (y * z + x * w)
-    M[..., 2, 2] = 1 - 2 * (x * x + y * y)
-    return M
+    """(..., 3, 3) matrices of v -> q v q* for (x, y, z, w) quaternions, each
+    normalised (wutil.qmats_xyzw)."""
+    return qmats_xyzw(q)
 
 
 def twist_pairs(names, par):
@@ -181,48 +171,61 @@ def walk(h, order=None, types=None):
         p += 1
         if types is not None and t in (0, 1, 2, 3):
             types[name] = t
-        if t == 1:  # const pos (float3 hdr) + quat keys int16/10000
-            kc = struct.unpack_from(order + "H", h, p)[0]
-            p += 2
-            cp = np.frombuffer(h[p : p + 12], f4).astype(np.float64)
-            p += 12
-            q = np.frombuffer(h[p : p + kc * 8], i2).reshape(kc, 4) / 10000.0
-            p += kc * 8
-            out[name] = (q.copy(), cp[None, :] if np.linalg.norm(cp) > 1e-6 else None)
-        elif t == 2:  # pos keys int16/1000 + quat keys int16/10000
-            kc = struct.unpack_from(order + "H", h, p)[0]
-            p += 2
-            raw = np.frombuffer(h[p : p + kc * 14], i2).reshape(kc, 7).astype(np.float64)
-            p += kc * 14
-            out[name] = (raw[:, 3:7] / 10000.0, raw[:, :3] / 1000.0)
-        elif t == 0:  # const quat (float4) + pos keys 3xint16/1000
-            kc = struct.unpack_from(order + "H", h, p)[0]
-            p += 2
-            b4 = np.array(struct.unpack_from(order + "4f", h, p))
-            p += 16
-            pk = np.frombuffer(h[p : p + kc * 6], i2).reshape(kc, 3) / 1000.0
-            p += kc * 6
-            out[name] = (b4[None, :].copy(), pk.copy())
-        elif t == 3:  # const pos (float3) + const quat (float4)
-            pos = np.frombuffer(h[p : p + 12], f4).astype(np.float64)
-            p += 16
-            q = np.array(struct.unpack_from(order + "4f", h, p))
-            p += 16
-            out[name] = (
-                q[None, :].copy(),
-                pos[None, :].copy() if np.linalg.norm(pos) > 1e-6 else None,
-            )
-        else:
-            break
+        match t:
+            case 1:  # const pos (float3 hdr) + quat keys int16/10000
+                kc = struct.unpack_from(order + "H", h, p)[0]
+                p += 2
+                cp = np.frombuffer(h[p : p + 12], f4).astype(np.float64)
+                p += 12
+                q = np.frombuffer(h[p : p + kc * 8], i2).reshape(kc, 4) / 10000.0
+                p += kc * 8
+                out[name] = (q.copy(), cp[None, :] if np.linalg.norm(cp) > 1e-6 else None)
+            case 2:  # pos keys int16/1000 + quat keys int16/10000
+                kc = struct.unpack_from(order + "H", h, p)[0]
+                p += 2
+                raw = np.frombuffer(h[p : p + kc * 14], i2).reshape(kc, 7).astype(np.float64)
+                p += kc * 14
+                out[name] = (raw[:, 3:7] / 10000.0, raw[:, :3] / 1000.0)
+            case 0:  # const quat (float4) + pos keys 3xint16/1000
+                kc = struct.unpack_from(order + "H", h, p)[0]
+                p += 2
+                b4 = np.array(struct.unpack_from(order + "4f", h, p))
+                p += 16
+                pk = np.frombuffer(h[p : p + kc * 6], i2).reshape(kc, 3) / 1000.0
+                p += kc * 6
+                out[name] = (b4[None, :].copy(), pk.copy())
+            case 3:  # const pos (float3) + const quat (float4)
+                pos = np.frombuffer(h[p : p + 12], f4).astype(np.float64)
+                p += 16
+                q = np.array(struct.unpack_from(order + "4f", h, p))
+                p += 16
+                out[name] = (
+                    q[None, :].copy(),
+                    pos[None, :].copy() if np.linalg.norm(pos) > 1e-6 else None,
+                )
+            case _:
+                break
     return out
 
 
-def default_naz():
-    """The archive `bake` and `char` read when none is named: `01_game.naz` in the
-    current directory when it exists, else `game.naz` there."""
-    import os
+def resample_keys(x, n):
+    """Keys `x` (K, C) of a track spread over the clip's span, at `n` evenly spaced
+    times: linear interpolation of the track's own keys at np.linspace(0, K - 1, n),
+    the same component-wise lerp the bake uses between keys.  1.4.0 took the key
+    at the floor of that position instead, a step function (a 2-key track in a
+    30-key clip held key 0 for 29 frames)."""
+    x = np.asarray(x, np.float64)
+    if len(x) == n:
+        return x
+    s = np.linspace(0, len(x) - 1, n)
+    j0 = np.floor(s).astype(int)
+    j1 = np.minimum(j0 + 1, len(x) - 1)
+    b = (s - j0)[:, None]
+    return (1 - b) * x[j0] + b * x[j1]
 
-    return "01_game.naz" if os.path.exists("01_game.naz") else "game.naz"
+
+# 01_game.naz, else game.naz (kept importable as bake_v4.default_naz)
+from wutil import default_naz  # noqa: E402
 
 
 def archive_clip(clipname, naz, marks=None):
@@ -231,11 +234,10 @@ def archive_clip(clipname, naz, marks=None):
     the archive ends with it (path separators as '/'), and the walk then reads every block
     instead of stopping at the clip."""
     clip = None
-    for st, hs in efa.grab_blocks(naz).items():
-        if "h" not in hs:
-            continue
+    # headers only: a clip is all header (its stream half is never read)
+    for st, hs in efa.iter_blocks(naz, streams=False):
         try:
-            it = list(we.extract_block(hs["h"], hs.get("s")))
+            it = list(we.extract_block(hs["h"], None))
         except Exception:
             continue
         for e, h, s in it:
@@ -324,9 +326,13 @@ def bake(
     if clip is None:
         raise KeyError("clip %r not found (not in the bank and not in the naz)" % clipname)
     _ord = _detect_clip_order(clip)
-    hdr = np.frombuffer(clip[:8], np.dtype(_ord + "f4"))
-    ttype = {}
-    tr = walk(clip, _ord, ttype)
+    try:
+        hdr = np.frombuffer(clip[:8], np.dtype(_ord + "f4"))
+        ttype = {}
+        tr = walk(clip, _ord, ttype)
+    except Exception as ex:
+        ex.add_note(f"bake_v4: clip {clipname!r} ({len(clip)} bytes, {order_name(_ord)})")
+        raise
     if not tr:
         raise ValueError("no animation tracks decoded from clip %r" % clipname)
     # 2026-08-17: frame count from ALL key tracks, not quats only -- a type-0
@@ -340,12 +346,15 @@ def bake(
     i1 = np.minimum(i0 + 1, nf - 1)
     a = t - i0
 
-    def series(x):
+    resampled = []  # tracks whose key count is neither 1 nor nf
+
+    def series(x, track=None):
         x = np.asarray(x, np.float64)
         if len(x) == 1:
             return np.tile(x, (F, 1))
         if len(x) != nf:
-            x = x[np.linspace(0, len(x) - 1, nf).astype(int)]
+            x = resample_keys(x, nf)
+            resampled.append(track)
         return (1 - a)[:, None] * x[i0] + a[:, None] * x[i1]
 
     bindloc = np.array([Rb[k] if par[k] < 0 else Rb[par[k]].T @ Rb[k] for k in range(NS)])
@@ -399,15 +408,25 @@ def bake(
             for i in range(1, len(q)):
                 if (q[i] * q[i - 1]).sum() < 0:
                     q[i] = -q[i]
-            qs = series(q)
+            qs = series(q, bn)
             qs /= np.maximum(np.linalg.norm(qs, axis=-1, keepdims=True), 1e-12)
             if CONJ:
                 qs = qs * np.array([-1, -1, -1, 1.0])
             L[:, k] = Rstd(qs)
             if pos is not None:
-                POS[k] = series(pos)
+                POS[k] = series(pos, bn + " (position)")
         else:
             L[:, k] = bindloc[k]
+    if resampled:
+        # the clip header rule keyRate == (keyCount - 1) / duration holds per clip;
+        # a track with another key count is taken to span the same time.  No shipped
+        # clip has one: every track of the 7,071 clips of the six sets has 1 key or
+        # the clip's count (measured, 1.5.0)
+        print(
+            "WARNING: clip %s: %d track(s) with a key count other than 1 or %d, resampled"
+            " linearly over the clip: %s" % (clipname, len(resampled), nf, ", ".join(resampled)),
+            file=sys.stderr,
+        )
 
     def depth(k):
         d = 0

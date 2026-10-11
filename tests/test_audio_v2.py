@@ -84,8 +84,11 @@ def pc_stream(ntracks, groups=3, per_chunk=3, plen=3000, ends=None):
 
 
 def ogg_pages(data):
-    """[(granule, header type, [packets])] of an Ogg file."""
+    """[(granule, header type, [packets completed on the page])] of an Ogg file
+    (a packet continued from an earlier page -- 1.5.0 splits one larger than a
+    page -- is listed on the page where it ends)."""
     out, o = [], 0
+    cur = b""
     while o < len(data):
         assert data[o : o + 4] == b"OggS"
         htype = data[o + 5]
@@ -93,7 +96,7 @@ def ogg_pages(data):
         nseg = data[o + 26]
         lac = data[o + 27 : o + 27 + nseg]
         body = data[o + 27 + nseg : o + 27 + nseg + sum(lac)]
-        pk, cur, p = [], b"", 0
+        pk, p = [], 0
         for n in lac:
             cur += body[p : p + n]
             p += n

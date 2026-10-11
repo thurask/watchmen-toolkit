@@ -3,7 +3,7 @@
 Every test here pins one fix from that release and was verified to FAIL on the
 1.1.0 baseline (b4b869c). No game files, no network, no refactoring seams: each
 test drives the real code path with synthetic data built from the layouts the
-modules document, monkeypatching only the archive readers (grab_blocks /
+modules document, monkeypatching only the archive readers (iter_blocks /
 extract_block) and the optional rig module where a naz would otherwise be
 required.
 
@@ -43,12 +43,7 @@ import variant_glb as vg
 import watchmen_extract as we
 from conftest import build_clip_header, build_model_header, synthetic_nodes
 
-try:  # pulls in kapow_fragment, which needs the bundled data tables
-    import watchmenlib as wl
-except Exception as _ex:  # pragma: no cover - depends on the checkout
-    wl, _WL_ERR = None, _ex
-else:
-    _WL_ERR = None
+import watchmenlib as wl  # a broken facade (missing table, bad import) is an error
 
 REPO = Path(__file__).resolve().parent.parent
 WLIB = REPO / "wlib"
@@ -202,7 +197,6 @@ def test_console_model_yields_a_skinned_glb(tmp_path, rig_stub):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skipif(wl is None, reason="watchmenlib unavailable: %s" % (_WL_ERR,))
 def test_facade_decode_skin_forwards_order():
     """wl.decode_skin(stream, vbo, nv, stride, order) must reach rig_glb intact.
 
@@ -217,7 +211,6 @@ def test_facade_decode_skin_forwards_order():
     assert np.allclose(sw[:, 0], 1.0)
 
 
-@pytest.mark.skipif(wl is None, reason="watchmenlib unavailable: %s" % (_WL_ERR,))
 def test_facade_decode_skin_passes_order_through_verbatim(monkeypatch):
     """The wrapper passes `order` on unchanged -- and defaults to PC ('<')."""
     seen = []
@@ -263,7 +256,10 @@ class _Entry:
 
 def _run_load_parts(monkeypatch, order, joints):
     hdr, stream = skinned_model(order, joints, names=MESH_NODES)
-    monkeypatch.setattr(vg.efa, "grab_blocks", lambda naz: {"blk": {"h": b"H", "s": b"S"}})
+    # load_parts walks the archive one block at a time (iter_blocks, 1.5.0)
+    monkeypatch.setattr(
+        vg.efa, "iter_blocks", lambda naz, streams=True: iter([("blk", {"h": b"H", "s": b"S"})])
+    )
     monkeypatch.setattr(
         we, "extract_block", lambda h, s: iter([(_Entry("/x/Body.model"), hdr, stream)])
     )

@@ -296,7 +296,10 @@ byte with `& 0xDF`, it does not upper-case):
 record of the nine staged blocks has an unnamed type. `terrainColoringAsset`: no record in any
 Part 2 block and none in the three staged Part 1 **main** blocks; Part 1 data has five
 `.terraincoloringasset` records (final audit of the full Part 1 extracts on the user's PC; not
-re-counted here). Neither type has a decoder: both are written raw.
+re-counted here). Both types are decoded since 1.4.0 (`wlib/font_asset.py` → `<name>.font.json` +
+the atlas `<name>.font.png`; `wlib/terrain_asset.py` → `<name>.terrainColoringAsset.json` + the map
+PNG; FORMATS_MISC.md "`.font`" and "`.terraincoloringasset`"); the raw bytes stay under
+`extracted/` beside the JSON.
 
 `ModelEffects(ModelRes)` and `TextureEffects(Texture)` are script classes on
 top of a native asset class. They have no reader of their own: the base
@@ -738,9 +741,18 @@ the descriptor type (`1` = 2D, `2` = cube → `WrappedCreateCubeTexture`).
   not RGB): diffuse layers routinely carry meaningful alpha — e.g. graffiti/decal
   textures store a flat colour in RGB and the actual decal shape in the alpha, and
   DXT5/DXT3/A8R8G8B8 (and DXT1's 1-bit punch-through) all encode it. Dropping alpha
-  turns a decal into a solid colour blob.
+  turns a decal into a solid colour blob. DXT3 (enum 6) stores an explicit 4-bit
+  alpha per texel, DXT5 an interpolated one: each needs its own decoder. Up to
+  1.4.0 the extractor decoded a DXT3 layer as DXT5 (wrong alpha); since 1.5.0
+  it is decoded as DXT3. No shipped texture of the six game sets uses DXT3
+  (measured: no `*_DXT3.png` layer in the six 1.4.0 exports; the 34 Xbox 360
+  `*_DXT3A.png` layers are enum 8, a one-channel format with its own decoder).
 - **ATI2 / BC5** → decode the two BC4 channels to X and Y, reconstruct
-  `Z = √(1 − X² − Y²)` for a viewable tangent-space normal map.
+  `Z = √(1 − X² − Y²)` for a viewable tangent-space normal map. The six
+  interpolated BC4 values of a block are rounded to the nearest integer, as the
+  Direct3D reference decoder does; up to 1.4.0 they were truncated, 1 lower on
+  22 % of the PC and 25 % of the Xbox 360 channel values of Part 2's normal
+  maps (measured, 909 layer decodes each; never more than 1).
   *Corrected 2026-10-03:* on PC (format enum 9) the **first** 8-byte block of
   each 16-byte block is **Y** and the **second** is **X**
   (`watchmen_extract.ati2_xy`). Up to toolkit 1.3.0 the extractor wrote the
@@ -1317,6 +1329,18 @@ waits for. Track names and track states are in the level's `MusicSetup` fragment
 the granule position stored with its last packet (the decoder shortens the last block to it,
 0x8d29c0). `--flat-music` writes all packets in file order into one file, as 1.3.0 did, ending
 at the computed block position.
+
+Paging *(1.5.0)*: the identification header alone on the first page, the comment and setup
+headers on the next, then the audio packets packed into pages of about 4 KB (at most 255
+lacing values; a packet that does not fit starts the next page, only one larger than a page
+is continued across pages); each page's granule position is that of the last packet that ends
+on it (−1 when none does), the last page carries the end position and the EOS flag. 1.4.0
+wrote one page per audio packet (27 + 1 bytes of page header per packet of about 100 bytes).
+Measured on the 53 track files of PC Part 2's 13 streams: ffmpeg decodes the same samples
+(sha1 of the PCM) with the same duration (ffprobe), and the files are 11.6 % smaller in all. The block flags that give the granule positions are read
+from the setup header (`_vorbis_blockflags`); a setup header that does not follow the Vorbis I
+layout raises ValueError (also under `python -O`), and the file then gets 1,024 samples per
+packet as before.
 
 Part 2 PC: 13 streams, 10 with more than one track (53 track files in all).
 Up to 1.3.0 the extractor wrote the chunks of all tracks into one file.

@@ -12,8 +12,8 @@ v1.1.0): each node record carries its own parent field, read verbatim by
 parse_model_nodes.parse(); node 0 is the file's unnamed root (the GamePivot
 slot) and every parent is an index into the file's own node list.  Out-of-range
 or self-referencing parents publish as -1 (root); there is no biped-name
-guessing anywhere in this path.  (_explicit_parent_names below still implements
-the older engine-ID name mapping for export_female_anims.)
+guessing anywhere in this path.  (The older engine-ID parent-name mapping,
+_explicit_parent_names, went with export_female_anims' exporter in 1.5.0.)
 """
 
 import sys, os, json, struct, argparse
@@ -64,24 +64,6 @@ def _ordered_names(header, order=None):
     return [(lp, nm) for lp, nm in occ if "/" not in nm and nm != "ModelRes"]
 
 
-def _explicit_parent_names(header):
-    order = "<" if len(_ordered_names(header, "<")) >= len(_ordered_names(header, ">")) else ">"
-    recs = _ordered_names(header, order)
-    names = [nm for _, nm in recs]
-    rest = [nm for nm in names if nm != "GamePivot"]
-    engine_ids = ["GamePivot"] + rest  # id 0 = GamePivot (root)
-    out = {}
-    for lp, nm in recs:
-        nlen = struct.unpack_from(order + "I", header, lp)[0]
-        if lp + 4 + nlen + 8 > len(header):
-            continue
-        p = struct.unpack_from(order + "i", header, lp + 4 + nlen + 4)[0]
-        if 0 <= p < len(engine_ids):
-            pnm = engine_ids[p]
-            out[nm] = None if pnm == nm else pnm  # GamePivot(p=0)->GamePivot==self->root
-    return out
-
-
 def _r6(v):
     return [round(float(x), 6) for x in v]
 
@@ -94,18 +76,19 @@ def _volume_json(v, scene):
         "pos": _r6(v["pos"]),  # centre in the bone's frame
         "quat_xyzw": _r6(v["quat"]),  # file order, NOT reordered
     }
-    if v["type"] == 5:
-        out["size"] = _r6(v["size"])
-    elif v["type"] == 6:
-        out["radius"] = round(float(v["radius"]), 6)
-    elif v["type"] == 7:
-        out["diameter"] = round(float(v["diameter"]), 6)
-        out["height"] = round(float(v["height"]), 6)
-    else:
-        out["mode"] = int(v["mode"])
-        out["verts"] = [_r6(p) for p in v["verts"]]
-        out["indices"] = [int(i) for i in v["indices"]]
-        out["cooked_blob_bytes"] = len(v["blob"])
+    match v["type"]:
+        case 5:  # box
+            out["size"] = _r6(v["size"])
+        case 6:  # sphere
+            out["radius"] = round(float(v["radius"]), 6)
+        case 7:  # capsule
+            out["diameter"] = round(float(v["diameter"]), 6)
+            out["height"] = round(float(v["height"]), 6)
+        case _:  # concave (2) / convex (4) mesh
+            out["mode"] = int(v["mode"])
+            out["verts"] = [_r6(p) for p in v["verts"]]
+            out["indices"] = [int(i) for i in v["indices"]]
+            out["cooked_blob_bytes"] = len(v["blob"])
     return out
 
 
@@ -150,7 +133,13 @@ def skeleton_from_header(header, family):
     slot) and every `parent` is the file's own node index.  Byte order is
     auto-detected, so console (X360/PS3) headers work too.
     """
-    names, pos, quat, parent = pmn.parse(header)
+    try:
+        names, pos, quat, parent = pmn.parse(header)
+    except Exception as ex:
+        ex.add_note(
+            f"extract_skeletons: skeleton header of family {family!r} ({len(header)} bytes)"
+        )
+        raise
     vols = collision_volumes(header, names)
     bones = []
     for i, nm in enumerate(names):
@@ -206,19 +195,17 @@ def _tree_stats(sk):
 
 
 def collect(naz):
-    entries = list(we.naz_entries(naz))
-    blocks = {}
-    for e in entries:
-        low = e.name.lower()
-        if low.endswith(".block_h_z") or low.endswith(".block_s_z"):
-            stem = e.name[: -len("_h_z")] if low.endswith("_h_z") else e.name[: -len("_s_z")]
-            blocks.setdefault(stem, {})["h" if low.endswith("_h_z") else "s"] = we.naz_read(naz, e)
+    """{family: skeleton} of the `*Skeleton.model` headers of an archive, the
+    first of a family in (case-sensitive) block order.  Reads the header half
+    of one block at a time (a skeleton is all header); 1.4.0 held every block
+    of the archive, both halves, until it was done."""
+    plan = we.block_plan(naz)
     out = {}
-    for stem, hs in sorted(blocks.items()):
-        if "h" not in hs:
+    for stem in sorted(plan):
+        if "h" not in plan[stem]:
             continue
         try:
-            it = list(we.extract_block(hs["h"], hs.get("s")))
+            it = list(we.extract_block(we.naz_read(naz, plan[stem]["h"]), None))
         except Exception:
             continue
         for e, header, stream in it:

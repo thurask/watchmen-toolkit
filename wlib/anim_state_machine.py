@@ -70,7 +70,7 @@ Interval test m_iintervaltype: 0=INTERVAL [min,max[  1=LESS_THAN (x < max)
 2=GREATER_THAN_OR_EQUAL (x >= min)
 """
 
-import math, os, random, struct
+import itertools, math, os, random, struct
 
 # ---------------------------------------------------------------- tree
 
@@ -115,7 +115,7 @@ class Instance:
         import kapow_props
 
         stem = os.path.basename(self.path or self.asset or "").replace("\\", "/")
-        stem = stem[:-5] if stem.endswith(".json") else stem
+        stem = stem.removesuffix(".json")
         name = h.get("name") or os.path.splitext(stem)[0]
         return "%08x" % kapow_props.name_hash(name)
 
@@ -193,7 +193,7 @@ def tree_from_json(j):
         # nothing to build, and it must not take the whole class tree down.
         return [], {}
     pre = j["instances"][0]
-    cls = {k[4:]: _base_cls(v[0]) for k, v in pre.items() if k.startswith("str_")}
+    cls = {k.removeprefix("str_"): _base_cls(v[0]) for k, v in pre.items() if k.startswith("str_")}
     nodes = {}
     for nf in j["nodes_full"]:
         d = {k: v for k, t, v in nf["props"]}
@@ -263,8 +263,15 @@ def load_tree(path, resolve_fragments=True, _seen=None, hosts=HOSTS_GROUPS, _hos
 
     Every node gets `.inst`, the Instance (file, header, host) it was loaded with.
     """
-    j = _load_fragment_json(path)
-    roots, nodes = tree_from_json(j)
+    try:
+        j = _load_fragment_json(path)
+        roots, nodes = tree_from_json(j)
+    except (OSError, ValueError, KeyError, IndexError, TypeError, struct.error) as ex:
+        where = "fragment %s" % (path,)
+        if _host is not None:
+            where += " (spliced under %s %r, node id %s)" % (_host.cls, _host.name, _host.id)
+        ex.add_note(where)
+        raise
     ctx = _host.inst.ctx if _host is not None and _host.inst is not None else None
     inst = Instance(None, path, j.get("header"), _host, ctx)
     if ctx is None:
@@ -657,12 +664,13 @@ CRIT_PLAY_DONE, CRIT_FORCE_ANIM, CRIT_ANY_OF, CRIT_ALL_OF = 9, 10, 11, 12
 def interval_met(x, itype, lo, hi):
     """MathLib.InsideInterval 0x77aa25: INTERVAL 0 = [min, max[ ; LESS_THAN 1 =
     x < MAX (min is not read); GREATER_THAN_OR_EQUAL 2 = x >= min; else False."""
-    if itype == 0:
-        return lo <= x < hi
-    if itype == 1:
-        return x < hi
-    if itype == 2:
-        return x >= lo
+    match itype:
+        case 0:
+            return lo <= x < hi
+        case 1:
+            return x < hi
+        case 2:
+            return x >= lo
     return False
 
 
@@ -1578,7 +1586,7 @@ class Interpreter:
             # an uncontrolled blend plays its FIRST child alone (lowest siblingOrder;
             # command_evaluate_blends 0x59e905, see _slot_pos_weights): `slots` is in
             # sibling order, so the rate is that slot's (the first with a duration)
-            first = [(d, slot_speed(s)) for d, s in zip(durs, slots) if d > 0.0]
+            first = [(d, slot_speed(s)) for d, s in zip(durs, slots, strict=True) if d > 0.0]
             d, sp = first[0] if first else (pg.duration, 1.0)
             rate = sp / d if d > 0 else 0.0
         return self.env.speed * lw * rate
@@ -1742,7 +1750,7 @@ class Interpreter:
         elif pos >= pts[-1][0]:
             w[pts[-1][1]] = 1.0
         else:
-            for (p0, i0), (p1, i1) in zip(pts, pts[1:]):
+            for (p0, i0), (p1, i1) in itertools.pairwise(pts):
                 if p0 <= pos <= p1:
                     u = (pos - p0) / (p1 - p0) if p1 > p0 else 0.0
                     w[i0], w[i1] = 1.0 - u, u
@@ -1756,7 +1764,7 @@ class Interpreter:
             for jn in range(i + 1, len(pages)):
                 share[i] *= 1.0 - blends[jn]
             share[i] *= blends[i]
-        for pg, sh in zip(pages, share):
+        for pg, sh in zip(pages, share, strict=True):
             if sh <= 1e-6:
                 continue
             byblend = {}
@@ -1817,7 +1825,7 @@ def main():
 
         def walk(n, d=0):
             if n.cls in (CLS_CLASS, CLS_GROUP, CLS_STATE):
-                print("  " * d + f"{n.cls[9:] or n.cls} {n.name}")
+                print("  " * d + f"{n.cls.removeprefix('Animation') or n.cls} {n.name}")
             for t in _trans_nodes(n):
                 print("  " * (d + 1) + f"-> trans {t.name}")
             for c in n.children:

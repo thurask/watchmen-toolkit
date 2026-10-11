@@ -38,6 +38,7 @@ properties of sheet.json.  The engine reads those strings without regard to
 letter case; resolve(export_dir, string) gives the file one names.
 """
 
+import functools
 import json
 import os
 import re
@@ -53,7 +54,6 @@ RUN_FORMAT = "watchmen-export-names/1"
 STORED_KEY = "stored_name"
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_TABLE = None
 #: the Run of the `extract` in progress (None outside one): references resolve
 #: to the spelling its assets were written under
 CURRENT = None
@@ -90,18 +90,14 @@ def fold(text):
     return "".join(chr(ord(c) + 32) if "A" <= c <= "Z" else c for c in str(text))
 
 
+@functools.cache
 def table():
     """{folded path: spelling of its last component} from canonical_names.json."""
-    global _TABLE
-    if _TABLE is None:
-        with open(os.path.join(_HERE, "canonical_names.json"), encoding="utf-8") as fh:
-            doc = json.load(fh)
-        if doc.get("format") != FORMAT:
-            raise ValueError(
-                "canonical_names.json: format %r, not %r" % (doc.get("format"), FORMAT)
-            )
-        _TABLE = dict(doc["names"])
-    return _TABLE
+    with open(os.path.join(_HERE, "canonical_names.json"), encoding="utf-8") as fh:
+        doc = json.load(fh)
+    if doc.get("format") != FORMAT:
+        raise ValueError("canonical_names.json: format %r, not %r" % (doc.get("format"), FORMAT))
+    return dict(doc["names"])
 
 
 def _parts(path):
@@ -567,7 +563,7 @@ def respell_after(doc, index, field, prefix):
                 continue
             if REF_STORED_KEY in v and not isinstance(known, dict):
                 continue  # a "stored" value of its own: the record keeps its strings
-            new = prefix + index.spell(text[len(prefix) :])
+            new = prefix + index.spell(text.removeprefix(prefix))
             if new != text:
                 v[field] = new
                 if not isinstance(known, dict):

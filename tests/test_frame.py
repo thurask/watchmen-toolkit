@@ -343,7 +343,7 @@ QUAD_V = [(0, 0, 0), (2, 0, 0), (2, 1, 0), (0, 1, 0)]
 QUAD_FILE_TRIS = ((0, 2, 1), (0, 3, 2))
 
 
-def _static(path, normals=True, tris=QUAD_FILE_TRIS, **kw):
+def _static(path, normals=True, tris=QUAD_FILE_TRIS, tex=None, **kw):
     n = np.tile(np.array([0, 0, 1.0], np.float32), (4, 1))
     # tangent +X, stored bitangent +Y: s = +1, so the engine-number w is -1
     tg = we.gltf_tangents(n, np.tile([1.0, 0, 0], (4, 1)), np.tile([0, 1.0, 0], (4, 1)))
@@ -359,7 +359,7 @@ def _static(path, normals=True, tris=QUAD_FILE_TRIS, **kw):
         list(tris),
         [(0, 4, 0, 2, 56)],
         ["m"],
-        {},
+        tex or {},
         {"bone_count": 0, "bones": []},
         None,
         None,
@@ -378,7 +378,13 @@ def _prim(g, k=0):
 def test_model_glb_true_frame_is_the_reflection_with_outward_faces(tmp_path, monkeypatch):
     for m in ("mirrored", "true"):
         (tmp_path / m).mkdir()
-    gm, gt = both(monkeypatch, lambda m: _static(tmp_path / m / "quad.glb"))
+    import test_followup
+
+    tex = test_followup._nmap(tmp_path)  # a normal-mapped material: TANGENT is written
+    gm, gt = both(
+        monkeypatch,
+        lambda m: _static(tmp_path / m / "quad.glb", tex=tex, engine_materials=True),
+    )
     (pm, am_, im), (pt, at, it) = _prim(gm), _prim(gt)
     assert np.array_equal(at("POSITION"), am_("POSITION") * [-1, 1, 1])
     assert np.array_equal(am_("POSITION"), np.array(QUAD_V, float))  # mirrored = engine numbers
@@ -807,6 +813,8 @@ def tfs_current():
     return {
         "format": am.FORMAT,
         "revision": am.REVISION,
+        "float_values": "exact",
+        "skeleton_rig": "hierarchy",
         "face_format": face_rule.FACE_FORMAT,
         "combat_format": combat_meta.COMBAT_FORMAT,
         "fx_format": fx_meta.FORMAT,

@@ -45,6 +45,7 @@ if _HERE not in sys.path:
 import anim_state_machine as asm  # noqa: E402
 import engine_enums as ee  # noqa: E402
 import kapow_props  # noqa: E402
+from wutil import order_name  # noqa: E402
 
 FORMAT = "watchmen-sound-meta/1"
 
@@ -273,6 +274,9 @@ class SoundDB:
                         roots, nodes = self._reparse(hit[0], rel, roots, nodes)
                 except (OSError, ValueError, KeyError, struct.error) as ex:
                     self.log("  sound_meta: %s: %s" % (rel, ex))
+                except Exception as ex:  # not a damaged file: let it through, saying where
+                    ex.add_note("sound_meta: fragment %s (%s)" % (rel, hit[0]))
+                    raise
             for n in nodes.values():
                 self._home[id(n)] = rel
             self._trees[rel] = (roots, nodes)
@@ -541,18 +545,18 @@ class SoundDB:
         m = n.p("_iselectionmethod", 1)
         me = self._leaf(n)
         if m == 3 or not kids:
-            t = dict(mode="self", **me)
+            t = {"mode": "self"} | me
         elif m == 4:
             parts = [self.play_tree(k) for k in kids]
             if me["wave"]:
-                parts.append(dict(mode="self", **me))
+                parts.append({"mode": "self"} | me)
             t = {"mode": "all_of", "node": n.id, "parts": parts}
         else:
             t = {
                 "mode": "one_of",
                 "node": n.id,
                 "rule": SELECTION.get(m, m),
-                "options": [dict(mode="self", **me)] + [self.play_tree(k) for k in kids],
+                "options": [{"mode": "self"} | me] + [self.play_tree(k) for k in kids],
             }
         return t
 
@@ -654,10 +658,11 @@ def cue_change(value, cue_names):
     None), the next cue point of any name; else ("named_cue", the cue of `cue_names`
     whose hash it is, or "unresolved")."""
     v = (value or 0) & 0xFFFFFFFF
-    if v == 0:
-        return "at_once", None
-    if v == 1:
-        return "next_cue", None
+    match v:
+        case 0:
+            return "at_once", None
+        case 1:
+            return "next_cue", None
     for nm in cue_names or ():
         if cue_hash(nm) == v:
             return "named_cue", nm
@@ -788,10 +793,18 @@ def music_setups_from_bytes(data, name="x.fragment", order=None):
         return []
     import kapow_json as kj
 
-    j = kj.to_json(name.lower(), data, order=order)
-    if not j:
-        return []
-    return music_setups(asm.tree_from_json(j)[1], name.replace("\\", "/").lstrip("/"))
+    try:
+        j = kj.to_json(name.lower(), data, order=order)
+        if not j:
+            return []
+        nodes = asm.tree_from_json(j)[1]
+    except (ValueError, KeyError, IndexError, struct.error) as ex:
+        ex.add_note(
+            "music fragment %s: %d bytes, %s"
+            % (name, len(data), order_name(order, "byte order detected from the data"))
+        )
+        raise
+    return music_setups(nodes, name.replace("\\", "/").lstrip("/"))
 
 
 def track_labels(setups):
@@ -923,7 +936,7 @@ def _body_classes(db):
     rows = {}
     for r in face_rule.charvisual_table(db.out):
         rel = r["fragment"].replace("\\", "/")
-        rel = rel[len("extracted/") :] if rel.startswith("extracted/") else rel
+        rel = rel.removeprefix("extracted/")
         rows[rel.lower()] = r
     return ids, rows
 
@@ -1436,7 +1449,11 @@ def _build(extract_out, anim, log):
     log = log or (lambda *a: None)
     if isinstance(anim, str):
         with open(anim, encoding="utf-8") as fh:
-            anim = json.load(fh)
+            try:
+                anim = json.load(fh)
+            except ValueError as ex:
+                ex.add_note("animation table %s (anim_meta.json)" % anim)
+                raise
     db = SoundDB(extract_out, log)
     frags = db.sound_fragments()
     groups = _speak_groups(db, frags)

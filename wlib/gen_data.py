@@ -75,6 +75,7 @@ if _HERE not in sys.path:
     sys.path.append(_HERE)  # append, never insert(0): flat module names must not shadow the stdlib
 
 from kapow_props import kapow_hash, name_hash
+from wutil import restricted_load
 
 _REEXPORTED = (kapow_hash,)  # gen_data.kapow_hash stays importable for older callers
 
@@ -82,10 +83,7 @@ _REEXPORTED = (kapow_hash,)  # gen_data.kapow_hash stays importable for older ca
 # ---- PE helpers -------------------------------------------------------------
 
 
-def _read_bytes(path):
-    """The file's bytes; the handle is closed before returning."""
-    with open(path, "rb") as fh:
-        return fh.read()
+from wutil import read_bytes as _read_bytes  # one copy, in wlib/wutil.py
 
 
 def pe_sections(d):
@@ -156,7 +154,7 @@ def naz_source_strings(src):
     import watchmen_extract as we
 
     out = set()
-    for _stem, b in efa.grab_blocks(src).items():
+    for _stem, b in efa.iter_blocks(src):
         if "h" not in b:
             continue
         for e, h, st in we.extract_block(b["h"], b.get("s")):
@@ -343,7 +341,7 @@ def _key_names():
     out = {}
     try:
         with open(os.path.join(_HERE, "kapow_fragment_keys.pkl"), "rb") as fh:
-            kd = pickle.load(fh)
+            kd = restricted_load(fh)
     except (OSError, pickle.UnpicklingError, EOFError, ValueError):
         return out
     for tab in ("nameable", "stdkeys", "promoted", "keytable"):  # keytable wins
@@ -640,7 +638,7 @@ def derive_prop_names(reg):
 # ---- fragment-keys transparency (pkl <-> readable json) ---------------------
 def keys_export(pkl_path=None):
     with open(pkl_path or os.path.join(_HERE, "kapow_fragment_keys.pkl"), "rb") as fh:
-        kd = pickle.load(fh)
+        kd = restricted_load(fh)
     return {
         "keytable": {"%08x" % h: list(v) for h, v in sorted(kd["keytable"].items())},
         "stdkeys": {"%08x" % h: v for h, v in sorted(kd["stdkeys"].items())},
@@ -690,7 +688,7 @@ def check(game_root):
     rc = 0
 
     with open(os.path.join(_HERE, "prop_hash_dict.pkl"), "rb") as fh:
-        shipped = pickle.load(fh)
+        shipped = restricted_load(fh)
     fresh = build_prop_dict(exe, [naz] if os.path.exists(naz) else [])
     cov = sum(1 for h in shipped if h in fresh)
     agree = sum(1 for h in shipped if fresh.get(h, "").upper() == shipped[h].upper())
@@ -746,70 +744,71 @@ def main(argv):
     if cmd in ("strings", "regdump", "keys-import") and not args:
         print("error: %s needs a path argument (see `gendata -h`)" % cmd, file=sys.stderr)
         return 2
-    if cmd == "strings":
-        d = build_prop_dict(args[0], args[1:])
-        out = out or "prop_hash_dict.pkl"
-        with open(out, "wb") as _f:
-            pickle.dump(d, _f, protocol=PROP_DICT_PICKLE_PROTOCOL)
-        print("wrote %s (%d names)" % (out, len(d)))
-    elif cmd == "respell":
-        # the shipped dictionary with the registered spellings applied: the step
-        # that needs no game files, and gives the same bytes on every run
-        src = args[0] if args else os.path.join(_HERE, "prop_hash_dict.pkl")
-        with open(src, "rb") as _f:
-            d = pickle.load(_f)
-        ch = apply_registered_spellings(d)
-        out = out or "prop_hash_dict.pkl"
-        with open(out, "wb") as _f:
-            pickle.dump(d, _f, protocol=PROP_DICT_PICKLE_PROTOCOL)
-        for _h, _old, _new in ch["respelled"]:
-            print("  %08x %s -> %s" % (_h, _old, _new))
-        for _h, _new in ch["added"]:
-            print("  %08x + %s" % (_h, _new))
-        print(
-            "wrote %s (%d names; %d respelled, %d added)"
-            % (out, len(d), len(ch["respelled"]), len(ch["added"]))
-        )
-    elif cmd == "regdump":
-        r = build_reg_dump(args[0])
-        out = out or "reg_dump.json"
-        with open(out, "w", encoding="utf-8", newline="\n") as _f:
-            json.dump(r, _f, indent=1)
-        print(
-            "wrote %s (%d classes, %d props, %d commands)"
-            % (
-                out,
-                len(r),
-                sum(len(c["props"]) for c in r),
-                sum(len(c["commands"]) for c in r),
+    match cmd:
+        case "strings":
+            d = build_prop_dict(args[0], args[1:])
+            out = out or "prop_hash_dict.pkl"
+            with open(out, "wb") as _f:
+                pickle.dump(d, _f, protocol=PROP_DICT_PICKLE_PROTOCOL)
+            print("wrote %s (%d names)" % (out, len(d)))
+        case "respell":
+            # the shipped dictionary with the registered spellings applied: the step
+            # that needs no game files, and gives the same bytes on every run
+            src = args[0] if args else os.path.join(_HERE, "prop_hash_dict.pkl")
+            with open(src, "rb") as _f:
+                d = restricted_load(_f)
+            ch = apply_registered_spellings(d)
+            out = out or "prop_hash_dict.pkl"
+            with open(out, "wb") as _f:
+                pickle.dump(d, _f, protocol=PROP_DICT_PICKLE_PROTOCOL)
+            for _h, _old, _new in ch["respelled"]:
+                print("  %08x %s -> %s" % (_h, _old, _new))
+            for _h, _new in ch["added"]:
+                print("  %08x + %s" % (_h, _new))
+            print(
+                "wrote %s (%d names; %d respelled, %d added)"
+                % (out, len(d), len(ch["respelled"]), len(ch["added"]))
             )
-        )
-    elif cmd == "propnames":
-        src = args[0] if args else os.path.join(_HERE, "reg_dump.json")
-        with open(src) as _f:
-            p = derive_prop_names(json.load(_f))
-        out = out or "prop_names_from_reg.json"
-        with open(out, "w", encoding="utf-8", newline="\n") as _f:
-            json.dump(p, _f, indent=1)
-        print("wrote %s (%d hashes)" % (out, len(p)))
-    elif cmd == "keys-export":
-        j = keys_export(args[0] if args else None)
-        out = out or "kapow_fragment_keys.json"
-        with open(out, "w", encoding="utf-8", newline="\n") as _f:
-            json.dump(j, _f, indent=1)
-        print("wrote %s" % out)
-    elif cmd == "keys-import":
-        with open(args[0]) as _f:
-            kd = keys_import(json.load(_f))
-        out = out or "kapow_fragment_keys.pkl"
-        with open(out, "wb") as _f:
-            pickle.dump(kd, _f)
-        print("wrote %s" % out)
-    elif cmd == "check":
-        return check(args[0] if args else ".")
-    else:
-        print(__doc__)
-        return 1
+        case "regdump":
+            r = build_reg_dump(args[0])
+            out = out or "reg_dump.json"
+            with open(out, "w", encoding="utf-8", newline="\n") as _f:
+                json.dump(r, _f, indent=1)
+            print(
+                "wrote %s (%d classes, %d props, %d commands)"
+                % (
+                    out,
+                    len(r),
+                    sum(len(c["props"]) for c in r),
+                    sum(len(c["commands"]) for c in r),
+                )
+            )
+        case "propnames":
+            src = args[0] if args else os.path.join(_HERE, "reg_dump.json")
+            with open(src) as _f:
+                p = derive_prop_names(json.load(_f))
+            out = out or "prop_names_from_reg.json"
+            with open(out, "w", encoding="utf-8", newline="\n") as _f:
+                json.dump(p, _f, indent=1)
+            print("wrote %s (%d hashes)" % (out, len(p)))
+        case "keys-export":
+            j = keys_export(args[0] if args else None)
+            out = out or "kapow_fragment_keys.json"
+            with open(out, "w", encoding="utf-8", newline="\n") as _f:
+                json.dump(j, _f, indent=1)
+            print("wrote %s" % out)
+        case "keys-import":
+            with open(args[0]) as _f:
+                kd = keys_import(json.load(_f))
+            out = out or "kapow_fragment_keys.pkl"
+            with open(out, "wb") as _f:
+                pickle.dump(kd, _f)
+            print("wrote %s" % out)
+        case "check":
+            return check(args[0] if args else ".")
+        case _:
+            print(__doc__)
+            return 1
     return 0
 
 

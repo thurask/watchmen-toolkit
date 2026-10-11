@@ -24,6 +24,7 @@ a viewer that ignores KHR_materials_specular."""
 import io
 import math
 import os
+from itertools import pairwise
 
 MODES = ("engine", "legacy")
 #: materials written when neither the caller nor $WATCHMEN_MATERIALS says otherwise
@@ -175,7 +176,7 @@ def gradient(text):
         ti = int(float(t) * 1000.0)
         if ti < keys[0][0] or len(keys) == 1:
             return list(keys[0][1])
-        for (p0, c0), (p1, c1) in zip(keys, keys[1:]):
+        for (p0, c0), (p1, c1) in pairwise(keys):
             if ti < p1:
                 f = (ti - p0) / float(p1 - p0) if p1 > p0 else 0.0
                 return [a + f * (b - a) for a, b in zip(c0, c1)]
@@ -558,14 +559,16 @@ def grade_adjustment(platform, value):
 def _grade_value(kind, v):
     import struct
 
-    if kind == "vector":
-        return [round(float(x), 6) for x in v] if isinstance(v, (list, tuple)) else None
-    if kind == "truth":
-        return bool(v)
-    if kind == "integer":
-        return int(v)
-    if kind == "text":
-        return v if isinstance(v, str) else None
+    match kind:
+        case "vector":
+            return [round(float(x), 6) for x in v] if isinstance(v, (list, tuple)) else None
+        case "truth":
+            return bool(v)
+        case "integer":
+            return int(v)
+        case "text":
+            return v if isinstance(v, str) else None
+    # "number"
     if isinstance(v, bool):
         return float(v)
     if isinstance(v, int):  # an undecoded 4-byte value: the bits of a float

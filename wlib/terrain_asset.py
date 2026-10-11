@@ -71,6 +71,7 @@ two descriptors right after the bag.
 import os
 import struct
 import sys
+from itertools import batched
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
@@ -138,10 +139,7 @@ def _named(d, name, alias):
     return d[name] if name in d else d[alias]
 
 
-def _read_bytes(path):
-    """The file's bytes; the handle is closed before returning."""
-    with open(path, "rb") as fh:
-        return fh.read()
+from wutil import GlbPacker, glb_bytes, read_bytes as _read_bytes  # one copy, in wlib/wutil.py
 
 
 class TerrainError(ValueError):
@@ -218,7 +216,7 @@ class _Rd:
         self.p += n
         if not raw.endswith(b"\0"):
             raise TerrainError("string at %d is not terminated" % (self.p - n))
-        return raw[:-1].decode("latin1")
+        return raw.removesuffix(b"\0").decode("latin1")
 
     def ident(self):
         """u64 id: raw bytes as hex (as the JSON always had it) and the value, which
@@ -488,7 +486,8 @@ def stream_layout(doc, stream):
                     raise TerrainError("stream: %d ranges but %d layer ids at %d" % (k, k2, p))
                 ids = u32s(k)
                 e[key] = [
-                    {"layer": ids[i], "first": rng[2 * i], "end": rng[2 * i + 1]} for i in range(k)
+                    {"layer": ids[i], "first": first, "end": end}
+                    for i, (first, end) in enumerate(batched(rng, 2))
                 ]
             m = (c["quads_x"] + 1) * (c["quads_z"] + 1)
             need(2 * m)
@@ -592,7 +591,8 @@ def decode_stream(doc, stream):
         m = e["map_bytes"]
         e["grass"] = np.frombuffer(stream, np.uint8, m, e["grass_offset"]).reshape(shape)
         e["detail"] = np.frombuffer(stream, np.uint8, m, e["detail_offset"]).reshape(shape)
-    for d, e in zip(doc["decals"], lay["decals"]):
+    # stream_layout gives one vertex buffer per decal record of the header
+    for _d, e in zip(doc["decals"], lay["decals"], strict=True):
         e["vertices"] = decode_vertices(stream, e["offset"], e["count"], bo, ps3)
     return lay
 
@@ -859,8 +859,6 @@ def build_glb(doc, lay):
     node name and `extras`).  Written in the frame of the toolkit's model exports
     (frame.finish_gltf: x negated and file winding by default).  None without numpy
     or without triangles."""
-    import json
-
     import frame as _frame
 
     np = _np()
@@ -876,32 +874,15 @@ def build_glb(doc, lay):
                 per_layer.setdefault(r["layer"], []).append((e, tri))
     if not per_layer:
         return None
-    binbuf = bytearray()
     views, accessors, meshes, nodes, materials = [], [], [], [], []
-
-    def view(raw, target):
-        while len(binbuf) % 4:
-            binbuf.append(0)
-        views.append(
-            {"buffer": 0, "byteOffset": len(binbuf), "byteLength": len(raw), "target": target}
-        )
-        binbuf.extend(raw)
-        return len(views) - 1
+    _pk = GlbPacker(views, accessors)
+    binbuf = _pk.bin
 
     def acc(arr, typ, comp, target=34962, normalized=False, bounds=False):
-        a = {
-            "bufferView": view(arr.tobytes(), target),
-            "componentType": comp,
-            "count": int(len(arr)),
-            "type": typ,
-        }
-        if normalized:
-            a["normalized"] = True
-        if bounds:
-            a["min"] = [float(x) for x in arr.min(axis=0)]
-            a["max"] = [float(x) for x in arr.max(axis=0)]
-        accessors.append(a)
-        return len(accessors) - 1
+        bv = _pk.view(arr.tobytes(), target)
+        mn = [float(x) for x in arr.min(axis=0)] if bounds else None
+        mx = [float(x) for x in arr.max(axis=0)] if bounds else None
+        return _pk.accessor(bv, comp, int(len(arr)), typ, mn, mx, normalized=normalized)
 
     for layer in sorted(per_layer):
         P, N, UV, C, I = [], [], [], [], []
@@ -945,8 +926,7 @@ def build_glb(doc, lay):
         meshes.append({"name": "layer_%d_%s" % (layer, name), "primitives": [prim]})
         nodes.append({"name": "layer_%d_%s" % (layer, name), "mesh": len(meshes) - 1})
     nodes.append({"name": "terrain", "children": list(range(len(nodes)))})
-    while len(binbuf) % 4:
-        binbuf.append(0)
+    _pk.align()
     gltf = {
         "asset": {"version": "2.0", "generator": "watchmen-kapow-toolkit terrain_asset"},
         "scene": 0,
@@ -964,13 +944,7 @@ def build_glb(doc, lay):
         },
     }
     _frame.finish_gltf(gltf, binbuf)
-    js = json.dumps(gltf, separators=(",", ":")).encode("utf-8")
-    js += b" " * (-len(js) % 4)
-    out = bytearray(b"glTF" + struct.pack("<II", 2, 0))
-    out += struct.pack("<I4s", len(js), b"JSON") + js
-    out += struct.pack("<I4s", len(binbuf), b"BIN\0") + bytes(binbuf)
-    struct.pack_into("<I", out, 8, len(out))
-    return bytes(out)
+    return glb_bytes(gltf, binbuf)
 
 
 def write_outputs(doc, base, glb=True):

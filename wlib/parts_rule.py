@@ -156,14 +156,14 @@ def outfit_record(rec, common, nodes, sheets_by_member=None):
     rec = dict(rec)
     rec["common_models"] = list(common)
     rec["members"] = [
-        dict(
-            m,
-            nodes=[n for n, k, _m, _s in nodes if k == m["index"]],
-            sheets={
+        m
+        | {
+            "nodes": [n for n, k, _m, _s in nodes if k == m["index"]],
+            "sheets": {
                 mdl: {os.path.basename(t).rsplit(".", 1)[0]: sh for t, sh in sorted(tt.items())}
                 for mdl, tt in sorted((sbm.get(m["index"]) or {}).items())
             },
-        )
+        }
         for m in rec["members"]
     ]
     rec["shown_nodes"] = [n for n, _k, _m, s in nodes if s]
@@ -177,7 +177,7 @@ def record(member_list, models, shown, alternatives, show=1):
     exported = set(models)
     mem = []
     for m in member_list:
-        d = dict(m, shown=(m["index"] == show))
+        d = m | {"shown": m["index"] == show}
         missing = [x for x in m["models"] if x not in exported]
         if missing:
             d["not_exported"] = missing
@@ -218,7 +218,7 @@ def weapon_record(names, sets, colls, always=()):
                 by_model.setdefault(os.path.basename(b), []).append(coll)
     nodes = []
     for n in names:
-        model = n[4:] if n.startswith("WPN_") else n
+        model = n.removeprefix("WPN_")
         cl = sorted(by_model.get(model, []))
         types = sorted({t for t in (weapon_type_of(c) for c in cl) if t})
         nodes.append(

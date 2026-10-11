@@ -557,6 +557,6 @@ def test_bind_is_unaffected_by_volume_data(tmp_path):
         dst = tmp_path / ("b%d.npz" % flag)
         with contextlib.redirect_stdout(io.StringIO()):
             bbf.build(str(src), None, str(dst))
-        outs.append(np.load(dst, allow_pickle=True))
+        outs.append(np.load(dst))  # a bind loads without pickle
     for key in ("Rb", "tb", "tloc", "par", "mask", "names"):
         assert np.array_equal(outs[0][key], outs[1][key]), key

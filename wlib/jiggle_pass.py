@@ -7,6 +7,7 @@ Usage as module: apply_jiggle(P, fps, bind_npz_path, bones=None) -> P modified c
 """
 
 import numpy as np, os
+from wutil import load_npz
 
 _PDIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -68,7 +69,7 @@ def apply_jiggle(P, fps, bindpath, bones=None, gain=None, model=None, loop=False
         from jiggle_d6 import apply_jiggle as _d6
 
         return _d6(P, fps, bindpath, bones=bones, gain=gain, model=model, loop=loop)
-    bt = np.load(bindpath, allow_pickle=True)
+    bt = load_npz(bindpath)
     Rb = bt["Rb"].astype(np.float64)
     tb = bt["tb"].astype(np.float64)
     names = [str(n) for n in bt["names"]]

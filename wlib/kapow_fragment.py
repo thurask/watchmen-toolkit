@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 """kapow_fragment — LOSSLESS .fragment parser (engine-verified, 2026-07-07).
+Lossless = parsed to the end of the stream and every stored value written
+exactly: float32 values as the shortest decimal that reads back as the same
+float32 (f32json; $WATCHMEN_JSON_FLOATS=rounded writes the 1.4.0 values,
+rounded to 6 places, and the JSON's `float_values` says which).
 Format (from executable decomp FUN_005473ee/FUN_00545e1b + TOD_tools):
   file = [header: u32 version, u8 singleton, u8 smartSelectable, u32 nameLen,
           name[nameLen] (NUL included), u8 reapplyable, u8 typed, u32 chunkCount
@@ -19,34 +23,42 @@ Format (from executable decomp FUN_005473ee/FUN_00545e1b + TOD_tools):
   key names/types: game database.bin registry (3693) + TOD_tools builtins +
   exe strings; unknown keys are size-inferred with boundary/lookahead resync
   and reported with '?' type suffix.
-Validation (2026-10): all 906 extracted fragments parse to EOF (9 of them are
+Validation (2026-10): all 906 extracted fragments parse to EOF (lossless) (9 of them are
 17-byte header-only files = empty); 22 unknown-key occurrences remain corpus-wide
 (was 580,286 before the name-hash fold fix, built-in property typing and
 type-record handling); all 12777 resource-path strings present in the output.
 """
 
-import struct, pickle, sys, re, math
+import struct, sys, re, math
 import os as _os
 
 _D = _os.path.dirname(_os.path.abspath(__file__))
 if _D not in sys.path:
     sys.path.append(_D)  # append, never insert(0): flat module names must not shadow the stdlib
+from wutil import restricted_load as _restricted_load  # noqa: E402
+
 _KP = _os.path.join(_D, "kapow_fragment_keys.pkl")
 try:
     with open(_KP, "rb") as _fh:
-        _KD = pickle.load(_fh)
-except OSError as _ex:
+        # plain data only: a table that names a class or function is refused
+        _KD = _restricted_load(_fh)
+    h2t = _KD["keytable"]
+    std = _KD["stdkeys"]
+except Exception as _ex:  # missing, truncated, not a pickle, not plain data, wrong layout
     # ImportError, NOT SystemExit (2026-08-17): a library module must not exit
     # the host process at import time -- SystemExit is a BaseException, so it
     # blew through every `except Exception` guard (pytest collection died with
     # zero tests run, and `import watchmenlib` killed interactive hosts).
     raise ImportError(
-        "watchmen: missing data table %s (%s)\n"
+        "watchmen: %s data table %s (%s: %s)\n"
         "  reinstall the package, or rebuild it with `watchmen gendata keys-import KEYS.json`"
-        % (_KP, _ex)
+        % (
+            "missing" if isinstance(_ex, OSError) else "unreadable",
+            _KP,
+            type(_ex).__name__,
+            _ex,
+        )
     ) from _ex
-h2t = _KD["keytable"]
-std = _KD["stdkeys"]
 STDTYPES = {
     "runScript": "truth",
     "open": "truth",
@@ -119,10 +131,26 @@ TYPERE = re.compile(r"^[A-Za-z_0-9 ]+\([A-Za-z_0-9 ]*\)$")
 FRAGMENT_HOST_NATIVES = ("FragmentNode", "LoadBlock", "SceneNode", "StreamBlockNode")
 
 
-def _read_bytes(path):
-    """The file's bytes; the handle is closed before returning."""
-    with open(path, "rb") as fh:
-        return fh.read()
+from wutil import read_bytes as _read_bytes  # one copy, in wlib/wutil.py
+
+
+def _f32_writer(nd):
+    """x -> the value of a stored float32: f32json.value (exact, the default: the
+    shortest round trip; a NaN or an infinity stays a float, written as null by
+    f32json.dumps) or round(x, nd) under $WATCHMEN_JSON_FLOATS=rounded (the 1.4.0
+    output)."""
+    import f32json
+
+    if f32json.mode() == "exact":
+        return f32json.value
+    return lambda x: round(x, nd)
+
+
+def float_values():
+    """'exact' or 'rounded': how this parse writes float32 values (f32json.mode)."""
+    import f32json
+
+    return f32json.mode()
 
 
 def parse_header(d, bo="<"):
@@ -239,6 +267,8 @@ def parse(d, collect_unknown=None, order=None):
         d = dc
     u = lambda o: struct.unpack_from(bo + "I", d, o)[0]
     f = lambda o: struct.unpack_from(bo + "f", d, o)[0]
+    # float32 values: written exactly (f32json, default) or rounded to 6 places (1.4.0)
+    _num = _f32_writer(6)
     # locate schema start: first valid [FFFFFFFF][hash][wc][TypeName(...)] record in the head
     p = None
     schema = []
@@ -321,65 +351,69 @@ def parse(d, collect_unknown=None, order=None):
     memo = {}
 
     def rdval(typ, p):
-        if typ == "raw4":
-            x = u(p)
-            fl = f(p)
-            v = (
-                round(fl, 6)
-                if (fl == fl and 1e-12 < abs(fl) < 1e12)
-                else (x if x < 0x80000000 else x - 0x100000000)
-            )
-            return v, p + 4
-        if typ == "number":
-            return round(f(p), 6), p + 4
-        if typ in ("integer", "int", "color", "netparticipant"):
-            # netparticipant: one slot, default 0xFFFFFFFF (0x500343); in no shipped file
-            return u(p), p + 4
-        if typ == "biginteger":  # 8 bytes (datatype.cpp FUN_004facb7; pivotSheet_Id)
-            return u(p) | (u(p + 4) << 32), p + 8
-        if typ == "truth":
-            return bool(u(p)), p + 4
-        if typ == "vector":
-            return [round(f(p + i * 4), 6) for i in range(3)], p + 12
-        if typ == "quaternion":
-            return [round(f(p + i * 4), 6) for i in range(4)], p + 16
-        if typ == "string":
-            wc = u(p)
-            if wc > 4000 or p + 4 + wc * 4 > len(d):
-                raise ValueError("wc %d" % wc)
-            return d[p + 4 : p + 4 + wc * 4].split(b"\x00")[0].decode("latin1"), p + 4 + wc * 4
-        if typ in ("Entity", "entity"):
-            tag = u(p)
-            if tag == 3:
-                return {"ref": "%08x" % u(p + 4)}, p + 8
-            if tag == 5:
-                n = u(p + 4)
-                if n > 64:
-                    raise ValueError("etag5 n %d" % n)
-                return {"xref": [("%08x" % u(p + 8 + i * 4)) for i in range(n)]}, p + 8 + n * 4
-            if tag == 4:
-                a = u(p + 4)
-                n = u(p + 8)
-                if n > 64:
-                    raise ValueError("etag4 n %d" % n)
-                return {
-                    "xref4": [("%08x" % u(p + 12 + i * 4)) for i in range(n)],
-                    "a": a,
-                }, p + 12 + n * 4
-            if tag in (0, 1, 2):
-                return {"etag": tag}, p + 4
-            raise ValueError("etag %d" % tag)
-        if typ.startswith("list("):
-            sub = typ[5:-1]
-            cnt = u(p)
-            q = p + 4
-            if cnt > 50000:
-                raise ValueError("cnt %d" % cnt)
-            out = []
-            for i in range(cnt):
-                v, q = rdval(sub, q)
-                out.append(v)
-            return out, q
+        match typ:
+            case "raw4":
+                x = u(p)
+                fl = f(p)
+                v = (
+                    _num(fl)
+                    if (fl == fl and 1e-12 < abs(fl) < 1e12)
+                    else (x if x < 0x80000000 else x - 0x100000000)
+                )
+                return v, p + 4
+            case "number":
+                return _num(f(p)), p + 4
+            case "integer" | "int" | "color" | "netparticipant":
+                # netparticipant: one slot, default 0xFFFFFFFF (0x500343); in no shipped file
+                return u(p), p + 4
+            case "biginteger":  # 8 bytes (datatype.cpp FUN_004facb7; pivotSheet_Id)
+                return u(p) | (u(p + 4) << 32), p + 8
+            case "truth":
+                return bool(u(p)), p + 4
+            case "vector":
+                return [_num(f(p + i * 4)) for i in range(3)], p + 12
+            case "quaternion":
+                return [_num(f(p + i * 4)) for i in range(4)], p + 16
+            case "string":
+                wc = u(p)
+                if wc > 4000 or p + 4 + wc * 4 > len(d):
+                    raise ValueError("wc %d" % wc)
+                text = d[p + 4 : p + 4 + wc * 4].split(b"\x00")[0].decode("latin1")
+                return text, p + 4 + wc * 4
+            case "Entity" | "entity":
+                tag = u(p)
+                match tag:
+                    case 3:
+                        return {"ref": "%08x" % u(p + 4)}, p + 8
+                    case 5:
+                        n = u(p + 4)
+                        if n > 64:
+                            raise ValueError("etag5 n %d" % n)
+                        xref = [("%08x" % u(p + 8 + i * 4)) for i in range(n)]
+                        return {"xref": xref}, p + 8 + n * 4
+                    case 4:
+                        a = u(p + 4)
+                        n = u(p + 8)
+                        if n > 64:
+                            raise ValueError("etag4 n %d" % n)
+                        return {
+                            "xref4": [("%08x" % u(p + 12 + i * 4)) for i in range(n)],
+                            "a": a,
+                        }, p + 12 + n * 4
+                    case 0 | 1 | 2:
+                        return {"etag": tag}, p + 4
+                raise ValueError("etag %d" % tag)
+            case _ if typ.startswith("list("):
+                sub = typ[5:-1]
+                cnt = u(p)
+                q = p + 4
+                if cnt > 50000:
+                    raise ValueError("cnt %d" % cnt)
+                out = []
+                for i in range(cnt):
+                    v, q = rdval(sub, q)
+                    out.append(v)
+                return out, q
         raise ValueError("type %r" % typ)
 
     def guess(typ, p):
@@ -610,6 +644,9 @@ def sections(d, r):
     if dc is not None:
         d = dc
     f = lambda o: struct.unpack_from(bo + "f", d, o)[0]
+    # pos / quat as stored (f32json; 1.4.0: 3 and 4 places); yaw_deg is derived and
+    # stays rounded to 0.1 degree in both modes
+    _pos, _quat = _f32_writer(3), _f32_writer(4)
     kname = NAMES[NAME_KEY][0]
     kpos = NAMES[POS_KEY][0]
     krot = NAMES[ROT_KEY][0]
@@ -634,7 +671,8 @@ def sections(d, r):
         add(entry(None), "str_" + h, t)
     typed = dict(r["schema"][r["schema_lead"] :])
     owner = None
-    for rec, offs in zip(r["inst"], r["at"]):
+    # parse() appends to `inst` and `at` together: one offset list per instance record
+    for rec, offs in zip(r["inst"], r["at"], strict=True):
         props = rec["props"]
         for nm, typ, v in props:
             if nm == kname and typ == "string":
@@ -645,7 +683,7 @@ def sections(d, r):
         if rec.get("created") and rec["node"] in typed:
             add(e, "str_" + rec["node"], typed[rec["node"]])
         for i, (nm, typ, v) in enumerate(props):
-            base = typ[:-1] if typ.endswith("?") else typ
+            base = typ.removesuffix("?")
             if base == "string":
                 if nm != kname:
                     add(e, nm, v)
@@ -662,11 +700,11 @@ def sections(d, r):
                 x, y, z = f(o), f(o + 4), f(o + 8)
                 if not all(c == c and abs(c) != float("inf") for c in (x, y, z)):
                     continue
-                t = {"name": owner, "pos": [round(x, 3), round(y, 3), round(z, 3)]}
+                t = {"name": owner, "pos": [_pos(x), _pos(y), _pos(z)]}
                 if i + 1 < len(props) and props[i + 1][0] == krot and offs[i + 1] == o + 16:
                     qq = [f(o + 16 + 4 * k) for k in range(4)]
                     if 0.98 < sum(c * c for c in qq) < 1.02:
-                        t["quat"] = [round(c, 4) for c in qq]
+                        t["quat"] = [_quat(c) for c in qq]
                         t["yaw_deg"] = round(math.degrees(2 * math.atan2(qq[1], qq[3])), 1)
                 tr.append(t)
                 e.setdefault("_transforms", []).append({k: w for k, w in t.items() if k != "name"})

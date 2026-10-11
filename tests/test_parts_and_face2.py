@@ -239,14 +239,23 @@ def test_alternatives_are_kept_outside_the_scene(tmp_path, rig):
     )
 
 
-def test_a_weapon_named_as_shown_stays_in_the_scene(tmp_path, rig):
+@pytest.mark.parametrize("rig_mode", ["hierarchy", "flat"])
+def test_a_weapon_named_as_shown_stays_in_the_scene(tmp_path, rig, monkeypatch, rig_mode):
+    """The shown weapon is a scene root (hierarchy: skinned meshes at the scene
+    root) or a child of `root` (flat, the 1.4.0 layout); the other one is hidden."""
+    monkeypatch.setenv("WATCHMEN_RIG", rig_mode)
     wpn = [("WPN_Whip", [_part(rig, 3.0, "whip")]), ("WPN_Bat", [_part(rig, 4.0, "bat")])]
     rec = {"mode": "game", "alternatives": [], "weapons": {"shown": ["WPN_Whip"]}}
     j = _write(tmp_path, rig, "w.glb", attachments=wpn, parts_record=rec).j
     names = [n["name"] for n in j["nodes"]]
     root = j["nodes"][names.index("root")]
     kids = [names[c] for c in root["children"]]
-    assert "WPN_Whip" in kids and "WPN_Bat" not in kids
+    tops = [names[c] for c in j["scenes"][0]["nodes"]]
+    if rig_mode == "flat":
+        assert "WPN_Whip" in kids and "mesh" in kids and tops == ["root"]
+    else:
+        assert tops == ["root", "mesh", "WPN_Whip"] and "WPN_Whip" not in kids
+    assert "WPN_Bat" not in kids + tops
     assert [names[c] for c in j["nodes"][names.index("alternatives")]["children"]] == ["WPN_Bat"]
 
 
@@ -270,7 +279,7 @@ def test_without_a_parts_record_nothing_is_hidden_and_the_file_is_the_old_one(tm
     j = parse_glb(a).j
     names = [n["name"] for n in j["nodes"]]
     assert "alternatives" not in names and "name" not in j["scenes"][0]
-    assert "WPN_Bat" in [names[c] for c in j["nodes"][names.index("root")]["children"]]
+    assert "WPN_Bat" in [names[c] for c in j["scenes"][0]["nodes"]]  # shown, at the scene root
     assert "parts" not in ((j["asset"].get("extras") or {}).get("watchmen") or {})
 
 

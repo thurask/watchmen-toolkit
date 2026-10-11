@@ -21,13 +21,19 @@ set decodes and what it does not:
 
 What it extracts / builds:
 
-- **Textures** → PNG (DXT1/3/5, ATI2, L8, 32bpp, DXT3A on Xbox 360; console
+- **Textures** → PNG (DXT1/3/5, ATI2, L8, 32bpp, DXT3A on Xbox 360 — no
+  shipped texture uses DXT3, measured on the six sets; console
   textures are untiled / unswizzled; every layer and cube face PC has is
   written on console too, most but not all pixel-identical to PC, see
   "Platform support"), with a `sheet.json` beside each texture that holds its
   material switches (two-sided, render type, alpha threshold, normal-map power)
-- **Models** → OBJ + textured, bind-pose **GLB** (`extract --glb`), rigged
-  when the model is skinned. Models are decoded from their header on PC,
+- **Models** → OBJ + textured, bind-pose **GLB** (`extract --glb`): the
+  geometry, and for a skinned model its skin weights and its skeleton — one
+  joint per node of the model's own header, named and parented as the header
+  says, standing at the header's rest pose (no animation; animated characters
+  come from `characters`). Textures are embedded at the size of the extracted
+  PNG; `--glb-texture-size N` shrinks them to at most N × N (1.4.0 always
+  shrank them to 512). Models are decoded from their header on PC,
   Xbox 360 and PS3, in both parts; the full-detail LOD is written by default
   (`--model-lod N|all`). Header-decoded models carry normals, tangents and
   vertex colours in the GLB (see "Vertex attributes in the GLB exports")
@@ -39,9 +45,12 @@ What it extracts / builds:
   (see [`docs/SOUND_META.md`](docs/SOUND_META.md))
 - **Ragdoll rigs** → hidden helper nodes in each character GLB and a
   `.ragdoll.json` (see [`docs/RAGDOLL_RIG.md`](docs/RAGDOLL_RIG.md))
-- **All misc formats** → lossless JSON (`.fragment`, `.scene`, `.pb`,
+- **All misc formats** → JSON (`.fragment`, `.scene`, `.pb`,
   `.sequence`, `.font`, `.particle`, `.terrain`, `.terraincoloringasset`,
-  `.grass`, `.detailmesh`), with the font atlas, the terrain colouring map
+  `.grass`, `.detailmesh`); a fragment's JSON is *lossless* — parsed to its
+  end and every stored value written exactly: a float32 as the shortest
+  decimal that reads back as the same float32 (`--json-floats rounded`
+  writes the rounded values of 1.4.0); with the font atlas, the terrain colouring map
   and a terrain height / layer map as PNG and, with `--glb`, the terrain
   surface as GLB
   — the Kapow name hash is known (CRC over the name's bytes `& 0xDF`), so
@@ -85,8 +94,19 @@ What it extracts / builds:
 pip install .
 ```
 
-Dependencies: `numpy`, `Pillow` (that's all). Optional external tool:
-[vgmstream-cli](https://vgmstream.org) for console audio → WAV.
+This installs the command as `watchmen` and, under a name no other tool
+uses, `watchmen-kapow` (the same program); `python3 watchmen.py` runs it from
+a checkout. Requires Python 3.13 or later: pip refuses an older one, and
+`watchmen.py` checks the version before anything else and stops with exit
+code 2 and one `error:` line. Dependencies: `numpy` ≥ 2.1 and `Pillow` ≥ 11
+(that's all), the first releases that support Python 3.13. The test suite
+ran (measured, 2026-10-11) on Python 3.13.15 with numpy 2.1.0 and Pillow
+11.0.0 (the declared minimums) and with numpy 2.5.3 / Pillow 12.3.0, and on
+Python 3.14.6 with numpy 2.5.4 / Pillow 12.3.0, all on Linux. The two
+Blender scripts in `tools/` run on Blender's own Python and need only the
+3.10 of Blender 3.6.
+Optional external tool: [vgmstream-cli](https://vgmstream.org) for console
+audio → WAV.
 
 ## Quick start
 
@@ -103,6 +123,7 @@ watchmen characters OUT CHARS game.naz --jiggle-model pinned --face-rule legacy 
 watchmen characters OUT CHARS game.naz --parts all   # every outfit and weapon at once, as 1.3.0
 watchmen characters OUT CHARS game.naz --materials legacy --no-ragdoll   # previous materials, no ragdoll helpers
 watchmen characters OUT CHARS game.naz --frame mirrored   # the engine's left-handed numbers (a mirror image), as 1.3.0
+watchmen characters OUT CHARS game.naz --rig flat   # joint nodes b0..bN under one root, as 1.4.0
 watchmen soundmeta OUT OUT/sound_meta.json   # what the game plays, when, for how long
 watchmen ragdoll OUT/extracted/.../Medium_Skeleton.model   # one model's ragdoll rig as JSON
 watchmen grademeta OUT OUT/grade_meta.json   # the levels' post-process settings
@@ -121,12 +142,14 @@ watchmen hash SomePropertyName           # Kapow property-key hash
 watchmen --version
 ```
 
-`watchmen --help` lists all commands; `watchmen extract --help` shows extractor
-options (`--glb`, `--vgmstream-cli`, `--keep-xma`, ...). `extract` and `all`
-exit with the extractor's code (2 for an archive that is not there; `all` then
-stops). A command that reads an extract output (`characters`, `faces`,
-`charlibs`, `animmeta`, `fxmeta`, `soundmeta`, `grademeta`) stops with exit code 2
-when the folder has no `extracted/`. New in 1.3.0:
+`watchmen --help` lists all commands; `watchmen CMD --help` prints the usage
+line, the description and the options of one command (`watchmen extract
+--help`: the extractor's options, `--glb`, `--vgmstream-cli`, `--keep-xma`,
+...). `extract` and `all` exit with the extractor's code (2 for an archive
+that is not there; `all` then stops). A command that reads an extract output
+(`characters`, `faces`, `charlibs`, `animmeta`, `fxmeta`, `soundmeta`,
+`grademeta`) stops with exit code 2 when the folder has no `extracted/`. See
+"Command line" below for every exit code. New in 1.3.0:
 
 - `--model-lod N|all` — which level of detail of each model to write.
   Default 0, the full-detail mesh; before 1.3.0 all LODs were merged into one
@@ -144,6 +167,67 @@ when the folder has no `extracted/`. New in 1.3.0:
 
 `watchmen hash` now folds the name the way the engine does; names containing
 digits or punctuation hash differently from 1.2.0.
+
+### Memory
+
+`extract` reads the archive's directory first and each block when it
+processes it: the two halves of one block (and the four stream-only room
+files of Part 1's Prison, cached) are in memory at a time, the standalone
+music streams are read again for their post-block pass, and the models wait
+for the texture pass in a temporary file in the output folder (removed at the
+end) instead of in memory. A zlib blob that would inflate past 256 MiB is
+refused (`$WATCHMEN_MAX_INFLATE`, bytes; the largest blob of the six game
+sets inflates to 16 MiB). Each block is parsed and inflated once — its
+assets kept from the check pass for the write pass — when they take at most
+64 MiB (`BLOCK_CACHE_BYTES`; a larger block is parsed again rather than
+held), and with `--no-files` the archive is read once: the first pass plans
+the blocks from the directory. With `files/` the first pass reads every entry
+to write it and the block pass reads the block halves again. Parsing every
+block of PC Part 2 takes 7.3 s and 0.27 GB (1.4.0, which held the archive:
+5.9 s and 1.0 GB); `extract --no-files --limit 150` 13.6 s and 0.38 GB
+(measured on Linux). `bake`, `char`, `binds` and the other commands
+that look an asset up in the archive read it block by block too, the clip
+and skeleton lookups the header halves only. Measured on PC Part 2 (a
+533 MB archive of its 32 block, helper and music entries): `extract --glb`
+peaks at 1.23 GB where 1.4.0 took 1.74 GB (the block pass stays under
+0.3 GB; the peak is the GLB of a character body model with its full-size
+textures); `watchmen bake CLIP` at
+0.29 GB in 1.8 s where 1.4.0 read the whole 937 MB archive (1.0 GB, 4.6 s).
+
+### Command line
+
+- **Options.** Every option of the table above is checked against the
+  command: one that belongs to other commands is refused with `error: --X
+  applies to: ...`, a value that is not one of its choices with `error: --X
+  takes one of: ...`, and, since 1.5.0, an option no command knows with
+  `error: unknown option --X for CMD` (exit code 2 in every case; before,
+  such an option was taken as a file name). `extract` and `all` pass every
+  other option on to the extractor, which checks them itself; `gendata` and
+  `scriptdb --find` read their own options. When an option is given twice
+  the last one counts. The output folder of `extract` and `all` is their
+  second argument; `-o OUT` / `--out OUT`, the extractor's own spelling that
+  `extract -h` lists, is taken as that argument (an output folder given both
+  ways is an error).
+- **Exit codes.** 0 done; 1 an unknown command, or a failure the command
+  reports itself (`ragdoll` on a model without joints, `scriptdb` on a file it
+  does not consume exactly, `navmeta` / `particlemeta` when a file fails); 2
+  bad arguments or options, a missing or unreadable input, a missing or
+  unreadable data table, a Python older than 3.13; 3 `fragment` wrote its
+  JSON but the parse did not reach the end of the file (`lossless` false;
+  the `warn` key says where); 130 interrupted.
+- **Errors.** An `OSError`, `ValueError`, `struct.error` or `ImportError`
+  (a disk that is full, a file that is not what its name says, a truncated
+  asset, a data table that is missing) ends the run with one `error: ...`
+  line on stderr. When the error comes from reading an archive or a file, an
+  indented line under it names what was being read (the archive entry, the
+  offset, the asset, the byte order or platform). With `WATCHMEN_DEBUG` set
+  (to anything but `0`) the traceback is printed first, so the output also
+  says where in the code it happened; the notes then end the traceback and
+  are not repeated under the `error:` line.
+- **The archive** a command reads when none is named is `01_game.naz` in
+  the current directory, else `game.naz` there: `bake`, `char`,
+  `characters`, `charlibs` (for a bind that is missing; 1.4.0 used
+  `game.naz` only) and the library functions that take a `naz` argument.
 
 New in 1.4.0:
 
@@ -298,8 +382,65 @@ New in 1.4.0:
   Rorschach's mask among them; there is no switch back, because the old pick
   depended on the order the file system listed folders in.
 
+New in 1.5.0:
+
+- **The GLBs carry a real skeleton** (`--rig hierarchy|flat` on `extract`,
+  `all`, `characters`, `char`, `charlibs` and `faces`; also `WATCHMEN_RIG`).
+  `hierarchy`, the default, writes one joint node per bone, named after the
+  bone and parented as the skeleton says, with the rest pose and every
+  animation channel local to the parent joint, the face rig riding the
+  head joint, and the skinned meshes as scene roots (see "Skeleton"). `flat` writes the 1.4.0 layout: joint nodes
+  `b0`…`bN`, all children of one `root`, each carrying the joint's world
+  transform (from `extract --glb`: joints without a transform and identity
+  inverse binds). The skinning and the pose on every key are the same in
+  both.
+- **`extract --glb` embeds every texture at the size of its PNG**;
+  `--glb-texture-size N` shrinks them to at most N × N (512 gives the 1.4.0
+  files, which were always shrunk to 512 without saying so).
+- **Exact numbers in the decoded JSON** (`--json-floats exact|rounded` on
+  `extract`, `all` and `fragment`; also `WATCHMEN_JSON_FLOATS`). `exact`, the
+  default, writes every float32 of a fragment, sequence or property bag as
+  the shortest decimal that reads back as the same float32 (`1.2345e-05`
+  where 1.4.0 wrote `1.2e-05`); NaN and infinities become `null`. `rounded`
+  writes the 1.4.0 values (6 places, 5 for sequence keys, 3 / 4 for the
+  transform `pos` / `quat`). Derived numbers (`yaw_deg`, a sequence key's
+  `quat`) are rounded in both; fragment JSON says which with
+  `float_values`. The tables built from fragments (`levelmeta`, `animmeta`,
+  `fxmeta`, `soundmeta`) follow `WATCHMEN_JSON_FLOATS` as well.
+- **Sounds decode as the game decodes them**: MS-ADPCM with the C rounding
+  of Microsoft's decoder (the game hands its sounds to XAudio2), the
+  header's coefficient table, the stored data length and a final partial
+  block; bit-identical to ffmpeg on all 3,146 ADPCM sounds of PC Part 2.
+  Music `.ogg` files hold about 4 KB of packets per page (11 % smaller, the
+  same decoded audio).
+- **`extract --quiet` keeps the warnings**: every `!` and `WARNING:` line goes
+  to stderr; the progress log is what `--quiet` drops.
+- **`extract` holds one block at a time** instead of the whole archive (see
+  "Memory").
+- **One character mesh loader, on the model header** (`wlib/mesh_loader.py`):
+  `characters`, `char`, `charlibs`, `faces` and the weapon attachments read
+  each mesh piece where the model header puts it, a triangle strip as a
+  strip; the 1.4.0 byte search is the fallback of a model whose header does
+  not apply, with a `note:` line per piece. A skin influence outside the
+  model's palette is dropped (and logged), never moved onto another bone; a
+  palette name without a bind slot, a vertex left without weight and a
+  triangle naming a missing vertex are logged and stated in the GLB. On the
+  six game sets the meshes and skins are 1.4.0's, bit for bit (measured).
+- **Files from elsewhere are read as data**: every `.npz` without pickle
+  (one holding Python objects is refused with the command that rebuilds
+  it), the pickle tables as plain data, and a text CSV cell that would be a
+  formula starts with `'` (see "Untrusted input" under "Notes").
+- **MTL and light layers**: a material without a `specSize` layer gets its
+  one roughness as a plain `Ns` instead of a 4 × 4 `roughnessEngine.png`
+  (see "Materials"), and a light layer's `emissiveFactor` is its sheet's
+  opacity only in the sky pass (see "Texture sheets and blend types").
+- **A stricter, documented command line**: an unknown option is an error,
+  `watchmen CMD -h` lists the command's options, the exit codes are listed,
+  `WATCHMEN_DEBUG=1` prints the traceback of an error, and the command is
+  also installed as `watchmen-kapow` (see "Command line").
+
 The changes that affect output are listed under "Behaviour changes" in
-[`CHANGELOG.md`](CHANGELOG.md), each with what brings the 1.3.0 result back
+[`CHANGELOG.md`](CHANGELOG.md), each with what brings the previous result back
 and what does not.
 
 Without installing: `python3 watchmen.py <command> ...` from this directory
@@ -315,7 +456,8 @@ side of the picture.
 
 Since 1.4.0 the default output is **true-handed**: x = −engine x, +Y up and
 "facing +Z" as before. Text reads the right way round, a character facing
-+Z has its left hand at +X, and the bone names `L` / `R` say what they are.
++Z has its left hand at +X, and the bone names `L` / `R` say what they are
+(since 1.5.0 the joint nodes carry these names, see "Skeleton").
 Nothing has to be mirrored and no node carries a negative scale: the data
 itself is reflected — positions, normals, tangents (with their sign),
 inverse bind matrices, joint and animation transforms, triangle winding.
@@ -347,6 +489,71 @@ toolkit writes without the frame conversion: the engine's numbers, as 1.3.0
 placed them. Everything else in 1.4.0 (materials, attributes, parts) is the
 same in both frames. Do not mix the two frames in one
 scene; a resumed `characters` run rewrites files it finds in the other one.
+
+## Skeleton
+
+Since 1.5.0 every rigged GLB carries the character's skeleton as glTF expects
+it (`--rig hierarchy`, the default):
+
+- one joint node per bone, named after the bone (`Pelvis`, `L Hand`,
+  `Bip01 Head`); an empty name becomes `b<k>`, and a name that another node
+  of the file already has (`root`, `mesh`, `face_mesh`, an attachment) or
+  that has the form of a face or ragdoll helper's name (`f_…`,
+  `face_proxy_…`, `RB.…`, `RJ.…`) gets ` #<k>` added, k being the joint's
+  palette index. Each joint node's `extras` holds `bone` (the bone's
+  own name), `parent` and `index` (palette indices);
+- each joint is a child of its parent's joint (the bind's parent table; for
+  `extract --glb` the model header's), a root bone a child of `root`
+  (`Armature` in a model GLB), and its rest transform and every animation key
+  are local to that parent: the product down the chain is the joint's
+  transform the 1.4.0 files wrote directly. The inverse bind matrices are the
+  same as before. The skinned mesh nodes the scene shows are scene roots;
+- the face rig of a character with one rides the skeleton: `f_anchor` (the
+  parent of the face joints `f_<bone>`) is a child of the body's `Head`
+  joint and each face proxy a child of its body joint, with constant local
+  transforms and no channels, so the face follows the head between keys as
+  well as on them. Blender imports body and face as one armature. (A 1.4.0
+  or `--rig flat` file has the face rig under its own scene root
+  `face_root`, driven by world-space channels: between keys a viewer
+  interpolates those by another rule than a hierarchy's head, and the face
+  slid off the head by up to 4.3 cm on Dominatrix_1, measured.)
+- `asset.extras.watchmen.rig` says which layout the file has (`mode`, and the
+  `reason` when a hierarchy was asked for but could not be written: a bind
+  without names and parents, a parent table that is not a tree, a model whose
+  header does not cover the joints its skin uses). `skins[0].extras.watchmen`
+  adds `joint_nodes`, the node names in palette order, and the ragdoll extras
+  and `.ragdoll.json` name the same nodes (`joint_index` gives the palette
+  index);
+- channels are dense: every joint has a rotation and a translation key per
+  frame in every clip (a bone without a channel would keep the pose of the
+  previous action in Blender). The `GRIP` overlays key their hand bones only,
+  now relative to the forearm, so they layer over a body clip.
+
+Measured on three Part 2 characters (Rorschach, Dominatrix_1, Heavy; 705
+clips): every key of every joint gives the 1.4.0 world transform to 5.6e-7 m
+and 3.3e-5°, the skinned vertices agree to 1.3e-7 m, every mesh accessor and
+inverse bind matrix is byte-identical, and the files validate with 0 errors.
+Between two keys a viewer interpolates the local transforms, as the engine's
+clip sampler does with its local tracks (lerp / nlerp, 0x591975, read from
+code; that the in-between poses match the game's more closely is inferred);
+a 1.4.0 file interpolated the world transforms instead. The two differ
+by 3 cm (median over the clips; at most 23 cm, a fast swing at a low key
+rate) at the midpoint between keys, measured on the same three characters.
+Blender 3.6 imports the skeleton with every bone parented as `extras.parent`
+says, and a clip plays the same mesh as the flat file on the keys (1.7e-5 m,
+measured on the Heavy's run cycle in a file pruned by the level importer). `--rig flat` writes the 1.4.0 layout: on Linux the
+1.4.0 and the `--rig flat` character GLB of the Heavy have the same binary
+chunk, and their JSON differs only by `asset.extras.watchmen.rig` (measured).
+
+The glTF validator flags a skinned mesh node with a parent
+(`NODE_SKINNED_MESH_NON_ROOT`, a warning; glTF ignores the transform of a
+skinned mesh's node). The shown meshes are scene roots and get no warning;
+the hidden ones keep it: the other outfits and the weapons under
+`alternatives` and the ragdoll proxies under `ragdoll` are in no scene, and
+grouping them under those two nodes is what keeps them out of view (130
+warnings on the Heavy, 44 on Rorschach, 34 on Dominatrix_1, all on such
+nodes). A model GLB from `extract --glb` and a GLB pruned by
+`tools/blender_import_level.py` validate with no warning.
 
 ## Animation metadata
 
@@ -432,7 +639,11 @@ into a 257 MB file, both without an error; every prop instance sits within
 
 `extract` writes `OUT/text/<en|fr|it|de|es>/`: each text table raw, decoded
 (`.json`) and as `.csv` (UTF-8 with a byte-order mark, so that Excel shows
-the accents). `watchmen textmeta` joins the in-game subtitle table
+the accents). A CSV cell that starts with `=`, `+`, `-`, `@`, a tab or a
+carriage return gets a leading `'`, so that a spreadsheet shows it as text
+instead of evaluating it as a formula (a plain number such as `-5` is left
+alone); the `.json` keeps every string verbatim. Measured on the six game
+sets: 6 cells, the two strings `--huh?` / `--Huh?` of each Part 1 set. `watchmen textmeta` joins the in-game subtitle table
 to the audio: a playing sound finds its subtitle by the file name of its
 wave. `watchmen text game.naz OUT` adds the folder to an extract made by an
 older version. [`docs/TEXT_ASSETS.md`](docs/TEXT_ASSETS.md).
@@ -524,8 +735,9 @@ the executable), `wlib/engine_enums.py` (the engine's enum tables),
 PhysX D6 joint's soft swing limit), `wlib/exact_math.py` (the solver's
 trigonometry, nearest rotation and sums in plain float arithmetic: the same
 bits on every platform),
-`wlib/kapow_fragment.py` (lossless `.fragment` parser, 906/906 files
-round-trip).
+`wlib/kapow_fragment.py` (lossless `.fragment` parser: 906/906 files parse
+to their end, every stored value written exactly — float32 values as the
+shortest decimal that reads back as the same float32).
 
 ## Jiggle bones (breasts, belly, hair)
 
@@ -727,9 +939,12 @@ fixed time, `frame_ms`.
   blended):
   `standard` is glTF `BLEND`; `subtract` (Rorschach's ink blots) is written
   as black ink with alpha, exact over white; `add` as an emissive layer, an
-  approximation (where the blend reads the source alpha, SRCALPHA / ONE,
-  the sheet's opacity is its `emissiveFactor`: the sun rays of three sky
-  models at 0.6); `manual` (explicit Direct3D factors) as one of these when
+  approximation (where the sky pass draws it with a blend that reads the
+  source alpha, SRCALPHA / ONE, the sheet's opacity is its `emissiveFactor`:
+  the sun rays of three sky models at 0.6, as `SkyBoxPS` multiplies the
+  opacity into the alpha; in every other render type the factor is 1, since
+  what the standard pass does with the opacity is not read from the code);
+  `manual` (explicit Direct3D factors) as one of these when
   it equals one, otherwise untouched. `extras.watchmen` on the material
   holds the engine's state (`blend`, `src`, `dst`, `op`). OBJ/MTL has no
   blend equation and links the raw layer.
@@ -791,23 +1006,28 @@ The MTL follows the same rules where the format allows: `d <opacity>` after
 `map_d` for a standard, fall-off or sky-box sheet with `opacity` below 0.99; a glow
 layer as `Ke <colour × selfIlluminance>` + `map_Ke` where the first sheet's
 `selfIlluminance` is above 0, and only named in a comment where it is 0 (the
-comment says how many other sheets of the texture light it). Two things an
-OBJ importer does differently from the GLB (measured in Blender 5.2.2, one
-material each): `Ns 0` with `Ks 0 0 0` imports as roughness 1.0 with
-specular 0 (Blender's rule is roughness = 1 − sqrt(Ns / 1000)); and
-`map_Ns roughnessEngine.png` is linked into Roughness with the image tagged
-**sRGB**, so the stored value is decoded before use (88 / 255 = 0.345 would
-arrive as about 0.098; inferred from the colour-space tag, not measured by a
-render). Set the image to Non-Color after import, or use the GLB, whose
-roughness texture is read as data. On that material (`Bottle_02` of
-`Bottle_01.model`) the PNG value (0.345) and the GLB's `roughnessFactor`
-(0.2869) also differ before any colour-space effect, and this holds for
-every material with a highlight: `roughnessEngine.png` is the roughness of
-the sheet's exponent alone, (2 / (n + 2))^0.25 with n = `specularSize`
-142.1, which is 0.343; the GLB material widens the exponent by the
-display-space factor of its diffuse texture first (`materials.py`; 2.062
-for a mean diffuse of 0.235), (2 / (2.062 n + 2))^0.25 = 0.2869 (read from
-code, measured on that material).
+comment says how many other sheets of the texture light it). The roughness
+of a material with a `specSize` layer varies over the surface and is linked
+as `map_Ns roughnessEngine.png`; a material without one has a single
+roughness r and gets a plain `Ns` = 1000 (1 − r)², which Blender's importer
+turns back into r (its rule is roughness = 1 − sqrt(Ns / 1000); `Ns 0` is
+roughness 1; measured in Blender 5.2.2 for seven values from `Ns 0` to the
+smallest roughness the toolkit writes, 0.045, within 5 × 10⁻⁸). Two things an OBJ importer does differently from the GLB
+(measured in Blender 5.2.2, one material each): `Ns 0` with `Ks 0 0 0`
+imports as roughness 1.0 with specular 0; and `map_Ns roughnessEngine.png`
+is linked into Roughness with the image tagged **sRGB**, so the stored value
+is decoded before use (88 / 255 = 0.345 would arrive as about 0.098;
+inferred from the colour-space tag, not measured by a render). Set the image
+to Non-Color after import, or use the GLB, whose roughness texture is read
+as data. The MTL's roughness and the GLB's `roughnessFactor` also differ
+before any colour-space effect, for every material with a highlight: the MTL
+has the roughness of the sheet's exponent alone, (2 / (n + 2))^0.25, while
+the GLB material widens the exponent by the display-space factor of its
+diffuse texture first (`materials.py`). On `Bottle_02` of `Bottle_01.model`
+(no `specSize` layer, n = `specularSize` 142.1) the MTL's is 0.343, written
+as `Ns 431.340336` (1.4.0: a 4 × 4 `roughnessEngine.png` of 88 / 255), and
+the GLB's (2 / (2.062 n + 2))^0.25 = 0.2869 with a factor of 2.062 for a
+mean diffuse of 0.235 (read from code, measured on that material).
 
 Material numbers differ a little between the platforms of a part, because
 they are computed from the texture layers and the Xbox 360 archives hold
@@ -869,6 +1089,11 @@ of 80 rigs on both sets). A GLB without a rig says so in
 points, the game's track states) and `audio/sound_info.json` (on console
 too: each record says where its length comes from, `duration_source`).
 Console sounds stay `.xma` / `.mp3` unless `--vgmstream-cli` is given.
+PC sounds stored as MS-ADPCM are decoded as Windows decodes them for the game
+(XAudio2 gets them as `WAVE_FORMAT_ADPCM`): C integer rounding, the header's
+coefficient table and data length, bit-identical to ffmpeg (see
+[`docs/FORMATS_MISC.md`](docs/FORMATS_MISC.md), "The `sound` asset"); music
+`.ogg` files hold about 4 KB of packets per page.
 `watchmen soundmeta` (and `characters`, as `sound_meta.json`) writes what
 the game plays: per animation state the sound, speech and footstep events
 with the definition, its variation rule, waves and durations; the footstep
@@ -911,7 +1136,9 @@ math by about 1° in the median. Blender's glTF importer ignores TANGENT and
 builds its own from the UVs; three.js uses it.
 
 `extract --glb` writes a GLB for every header-decoded model (rigged if the
-model is skinned, static otherwise) and takes its material switches from the
+model is skinned, static otherwise; TANGENT only on a primitive whose material
+has a normal map, and JOINTS_0 is 0 in a slot whose weight is 0) and takes
+its material switches from the
 texture's `sheet.json`: `twoSided` → `doubleSided`; `renderType` 1
 ("Standard with blending") with an alpha-carrying diffuse layer, or vertex
 alpha that varies → `alphaMode: BLEND`; otherwise a diffuse layer with alpha
@@ -1008,7 +1235,12 @@ otherwise:
   summary).
 - **A character GLB without a ragdoll rig, without vertex attributes or
   with a mesh piece no loader could decode** has one log line each and the
-  reason under `asset.extras.watchmen.not_decoded`.
+  reason under `asset.extras.watchmen.not_decoded` (`ragdoll`,
+  `vertex_attributes`, `pieces`); a model node without a slot in the bind
+  that moves a weighted palette index is listed under `palette_names`. The
+  only such node on the six sets is `Interact` (the binds spell it
+  `interact`), which comes after every node with a slot and moves no index:
+  a `note:` line, once per model and GLB, and nothing in the GLB.
 - **Fragment keys named by inference:** none. The seven Part 1 keys are
   entries of the Part 1 `database.bin` (see `docs/SCRIPT_DATABASE.md`), so
   no fragment JSON carries `inferred_names`; the marker stays in the code
@@ -1100,9 +1332,17 @@ pytest
 
 The suite runs with **no game files**: it covers the archive-entry path
 sanitizer, the Kapow property hash, the little/big-endian skeleton decoder
-against synthetic ModelRes headers, glTF structural conformance of the GLB
-writer (chunk padding, accessor alignment, accessor min/max, no empty arrays),
-clip-timing arithmetic, and output determinism. It is the executable form of
+against synthetic ModelRes headers, the structure of the GLBs it writes
+(chunk padding, accessor alignment, accessor min/max, no empty arrays; its own
+reader, not a glTF library), clip-timing arithmetic, and output determinism.
+The Khronos glTF validator is an opt-in part of the suite:
+`tests/test_gltf_validator.py` writes a GLB of every writer (character GLBs
+with the hierarchical and the flat rig, the mirrored frame, a face rig and
+outfit nodes; `extract --glb` of a skinned and a static model; the navigation
+mesh; a terrain surface) and requires 0 errors and no warning outside a short
+list it explains. It runs when `WATCHMEN_GLTF_VALIDATOR` names a folder in
+which `npm install gltf-validator` was run (or the package's own folder) and
+`node` is on the PATH; otherwise its two tests are deselected, not skipped. It is the executable form of
 the correctness claims below — if you change a decoder, this is what tells you
 whether you changed its output.
 
@@ -1132,9 +1372,29 @@ and `pivot` byte for byte with an older source tree and are skipped when it is
 not there: one in `test_jiggle_solver` needs a 1.3.0 tree (`$WATCHMEN_TK130`,
 or `../tk130` next to the checkout), one in `test_jiggle_default` a
 development snapshot that was never released (`$WATCHMEN_TK140`, `../tk140`).
+`test_rig_hierarchy` pins the 1.5.0 skeleton, the full-size textures of
+`extract --glb` and the DXT / BC4 / BC5 pixel decoders. `test_v150_hardening`
+pins the loading of `.npz` files without pickle, the plain-data pickle
+tables, the CSV cells and the output path names; `test_v150_cli` the option
+table, the help of every command, the exit codes, `WATCHMEN_DEBUG`, the
+default archive and the version; `test_v150_coverage` the character export's
+orchestration, face attach and synthetic hair, the RSX unswizzle, the legacy
+and console texture carves; `test_v150_e2e` runs `extract --glb --quiet` on a
+synthetic archive with every kind of asset; `test_v150_face_ride` the face
+rig riding the skeleton (on keys and between them, against the world-driven
+flat layout) and the joint names that would clash with its nodes. Six more
+`test_v150_*` files pin the character mesh loader (the header path, strips,
+the scan fallback and its log line, the palette and skin rules, the half
+floats on all 65,536 codes, the numpy vertex decoder against the per-vertex
+loop), the block-at-a-time extract and archive walks, the
+inflate ceiling and `--quiet`, the clip resampling by time, the exact JSON
+floats in both modes (NaN and infinities included), MS-ADPCM against ffmpeg's output (a 4.4 KB fixture
+in `tests/data/`, no ffmpeg needed), the Vorbis setup reader and the Ogg
+paging, and the faster header scans against frozen copies of their 1.4.0
+code.
 `test_p8_canonical_names` pins the naming (`--names`), and the ten
 `test_s2_*` files pin the restored eyelash UVs, the movie strings, a light
-layer's opacity, the platform-independent jiggle bake and tables, the
+layer's opacity in the sky pass, the platform-independent jiggle bake and tables, the
 unbound path objects and the closed file handles; `test_s4_review_fixes`
 pins the name scan of a clip, the bake and GLB rules of a resumed export, the
 clip families of `char`, the stored transform and the host-offset mark of a
@@ -1145,19 +1405,27 @@ waypoint links, PVS-root visibility, triangle strips, the TextBox line
 breaker, the cube map per culling area and the others listed in the
 changelog); `test_s6_findings` pins the layer fields of a state, the
 partner's waypoint constants, the Underboss movement rules and the field
-names of the terrain, font, pivot-book and model headers. A checkout on its own
-therefore reports 1,772 passed, 2 skipped (1,774 tests); the comparison
+names of the terrain, font, pivot-book and model headers. The four
+`test_v150_modern_*` files pin the length checks of paired lists, the notes
+an error carries (where it was reading), the values of the code written for
+Python 3.13, the version check of `watchmen.py` and the Python 3.10 syntax
+of the Blender scripts. `test_v150_mtl_glow` pins the MTL's plain `Ns`
+against Blender's rule, the light-layer opacity of the sky pass alone and the
+one first-sheet reader. A checkout on its own therefore reports 2,187
+passed, 2 skipped, 2 deselected (2,189 tests and the two opt-in validator
+tests; measured on Python 3.13.15); the comparison
 with 1.3.0 values still runs there on frozen numbers. `test_s8_review_fixes`
 pins the clip timing (no walk / run multiplier), the options record of a
 resumed export, the bake identity, the exit codes of `extract` / `all`, the
 error on a folder that is not an extract output and the GLB name in the
 `wrote` line. `conftest.py` fails a test that leaves a `WATCHMEN_*`
 variable changed, so the result does not depend on the order the tests
-run in. The suite writes about 55 MB below the temp folder (`$TMPDIR`); on
+run in. The suite writes about 65 MB below the temp folder (`$TMPDIR`); on
 a full temp disk tests fail with `No space left on device` and pytest can
 stop with an internal error.
 
-Round-tripping the real corpus (the "906/906 fragments" figure) needs a game
+Parsing the real corpus losslessly (the "906/906 fragments" figure: every
+fragment parsed to its end, every stored value written exactly) needs a game
 archive and is not part of the offline suite.
 
 ## Documentation
@@ -1190,7 +1458,11 @@ Format specifications and the complete reverse-engineering record live in
 
 `wlib/` ships ten data tables. `watchmen gendata` can regenerate the first
 two from a game install and `gendata check GAME_ROOT` compares the shipped
-copies with a fresh regeneration:
+copies with a fresh regeneration. The two `.pkl` tables are read as plain
+data (dicts, tuples, strings, numbers): a pickle that names a class or a
+function -- the way a pickle runs code -- is refused, and a table that is
+missing, truncated or refused stops the import with the recovery command
+(`gendata keys-import`):
 
 - `prop_hash_dict.pkl` — name-hash → name dictionary, a string harvest over
   the exe and every naz block payload + identifier tokenization (`gendata
@@ -1314,7 +1586,7 @@ the game files.
   ones (PC Part 2, PS3 Part 1; PC Part 2, PC Part 1, Xbox 360 Part 2).
 - The test suite without `test_s8_review_fixes.py` ran on Windows-native
   Python (Python 3.13.13, numpy 2.4.6) in both frames (measured); the
-  full 1,774-test suite has not run on Windows.
+  full test suite has not run on Windows.
 - What has not run on Windows: the commands the export batch
   does not call (`all`, `char`, `bake`, `charlibs`, `text`, `ragdoll`,
   `savemeta`, `scriptdb`, `fragment`, `hash`, `gendata`, and stand-alone
@@ -1332,6 +1604,21 @@ the game files.
   writes the numbers unchanged).
 - Console block payloads are big-endian; byte order is auto-detected per
   archive — there is no flag to pass.
+- Untrusted input. An archive entry name cannot leave the output folder
+  (`..`, drive letters and `:` are removed), a Windows device name (`CON`,
+  `NUL.txt`) gets a leading `_`, and since 1.5.0 the trailing dots and spaces
+  of a name, which Windows drops (`Foo. ` would open `Foo`), become `_` on
+  every system (no name of the six game sets has one: measured on their
+  343 archive and 67,584 block entries). On Windows a path of 240 characters
+  or more is opened in the extended-length form `\\?\C:\...`, past the
+  260-character limit (the longest path of the 1.4.0 six-set export is 206
+  characters). A zlib blob may inflate to 256 MiB at most (see "Memory").
+  Every `.npz` file (binds, bakes, caches) is read without pickle: one that
+  holds Python objects is refused with `error: <file> holds Python objects;
+  rebuild it with watchmen binds NAZ OUT_DIR` (the 19,587 `.npz` files of the
+  1.4.0 six-set export load, measured). The pickle tables and a
+  `variant_glb.py --bank` file are read as plain data (see "Shipped data
+  tables"); the text CSV cells cannot be formulas (see the text section).
 - This toolkit reads only data you extracted from your own copy of the game;
   it ships no game assets.
 

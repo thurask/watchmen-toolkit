@@ -55,6 +55,7 @@ Usage: from jiggle_d6 import apply_jiggle;  apply_jiggle(P, fps, bind_npz)
 
 import numpy as np, os, math
 import exact_math as _em
+from wutil import default_naz, load_npz
 
 _FRAG_CANDIDATES = ("extracted/TNT/Production/Fragments/GameEssentials.fragment.json",)
 
@@ -79,7 +80,7 @@ def load_world_props(extract_root=None):
             continue
         for c in _FRAG_CANDIDATES:
             p = os.path.join(r, c)
-            if not (os.path.exists(p) or os.path.exists(p[:-5])):
+            if not (os.path.exists(p) or os.path.exists(p.removesuffix(".json"))):
                 continue
             try:
                 import kapow_json
@@ -145,16 +146,7 @@ def solver_soften(k, zeta, dts=1.0 / 120.0):
     return k / den, d / den
 
 
-def _q2m(q):
-    x, y, z, w = q
-    return np.array(
-        [
-            [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
-            [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
-            [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
-        ]
-    )
-
+from wutil import qmat_xyzw as _q2m  # v -> q v q*, (x, y, z, w), not normalised
 
 _SKEL_ASSETS = {
     "female": "Female_Skeleton.model",
@@ -163,7 +155,7 @@ _SKEL_ASSETS = {
 }
 
 
-def joint_frames(bindpath, naz="game.naz"):
+def joint_frames(bindpath, naz=None):
     """LEGACY input of the rejected mode='aniso' only.  The "type-7 joint
     records" read here are the node's collision CAPSULES (skeleton_records
     module docstring), not D6 joint frames; the real jiggle joint frame is the
@@ -176,6 +168,8 @@ def joint_frames(bindpath, naz="game.naz"):
     Matching: per jiggle bone, the parent-node joint whose model-space twist
     axis best aligns with the bone's bind offset direction.  Cached npz next
     to the bind.  Returns {bone: (y_axis, z_axis)} or {} if unavailable."""
+    if naz is None:
+        naz = default_naz()  # 01_game.naz, else game.naz
     import re
 
     m = re.search(r"bind_(\w+?)_file", os.path.basename(bindpath))
@@ -185,16 +179,25 @@ def joint_frames(bindpath, naz="game.naz"):
         return {}
     cache = os.path.join(os.path.dirname(bindpath), "jointframes_v2_%s.npz" % key)
     if os.path.exists(cache):
-        z = np.load(cache, allow_pickle=True)
-        return {str(n): (y, zz) for n, y, zz in zip(z["names"], z["yaxes"], z["zaxes"])}
+        z = load_npz(cache, hint="delete it (it is written again)")
+        # one row per bone, written together below: a cache whose arrays differ in
+        # length is damaged, not a shorter table
+        try:
+            return {
+                str(n): (y, zz) for n, y, zz in zip(z["names"], z["yaxes"], z["zaxes"], strict=True)
+            }
+        except ValueError as ex:
+            ex.add_note(
+                "jiggle joint-frame cache %s: its arrays differ in length; "
+                "delete it (it is written again)" % cache
+            )
+            raise
     try:
         import watchmenlib as W, parse_model_nodes as PMN, struct
 
         hdr = None
-        for bk, b in W.grab_blocks(naz).items():
-            if "h" not in b:
-                continue
-            for e, h, st in W.extract_block(b["h"], b.get("s")):
+        for bk, b in W.iter_blocks(naz, streams=False):  # a skeleton header
+            for e, h, st in W.extract_block(b["h"]):
                 if (e.name or "").endswith(asset):
                     hdr = h
                     break
@@ -202,7 +205,7 @@ def joint_frames(bindpath, naz="game.naz"):
                 break
         if hdr is None:
             return {}
-        bt = np.load(bindpath, allow_pickle=True)
+        bt = load_npz(bindpath)
         Rb = bt["Rb"].astype(np.float64)
         tb = bt["tb"].astype(np.float64)
         names = [str(n) for n in bt["names"]]
@@ -262,7 +265,7 @@ def _apply_jiggle_pinned(
     extract_root=None,
     frames=None,
     free_damp=0.05,
-    naz="game.naz",
+    naz=None,
 ):
     """P: (F,nbones,3,4) world palettes; fps: clip rate; bindpath: bind npz.
     mode: 'engine'   -- file k,zeta + solver_soften (capture-exact k,d; default)
@@ -283,7 +286,9 @@ def _apply_jiggle_pinned(
     run/dance (statics match exactly; a x2 visual double-cover matches
     dynamics but doubles statics -> rejected).  Needs raw-capture window
     validation; see ENGINE_CONSTANTS.md handoff."""
-    bt = np.load(bindpath, allow_pickle=True)
+    if naz is None:
+        naz = default_naz()  # 01_game.naz, else game.naz
+    bt = load_npz(bindpath)
     Rb = bt["Rb"].astype(np.float64)
     tb = bt["tb"].astype(np.float64)
     names = [str(n) for n in bt["names"]]
@@ -592,7 +597,7 @@ def _apply_jiggle_pivot(P, fps, bindpath, bones, gain, mode, props, extract_root
         anchor is already at the current parent pose -> one frame of latency
         (order of 0x6563a0; capture: twist-axis deviation = 1.05 x one-frame
         parent rotation, R2 0.93)."""
-    bt = np.load(bindpath, allow_pickle=True)
+    bt = load_npz(bindpath)
     Rb = bt["Rb"].astype(np.float64)
     tb = bt["tb"].astype(np.float64)
     names = [str(n) for n in bt["names"]]
@@ -1101,7 +1106,7 @@ def _apply_jiggle_solver(
     warmup = n replaces the automatic stop by exactly n laps before the recorded one
     (and treats the clip as a loop); warmup = 0 forces the non-looping start.
     stats: optional dict, filled per bone with what was done (laps, seam, steps)."""
-    bt = np.load(bindpath, allow_pickle=True)
+    bt = load_npz(bindpath)
     Rb = bt["Rb"].astype(np.float64)
     tb = bt["tb"].astype(np.float64)
     names = [str(n) for n in bt["names"]]
@@ -1353,7 +1358,7 @@ def apply_jiggle(
     extract_root=None,
     frames=None,
     free_damp=0.05,
-    naz="game.naz",
+    naz=None,
     model=None,
     latency=None,
     warmup=None,
@@ -1381,6 +1386,8 @@ def apply_jiggle(
             0 forces the non-looping start).
     stats: solver only, optional dict that receives per-bone bake details.
     gain scales the deviation (default 1)."""
+    if naz is None:
+        naz = default_naz()  # 01_game.naz, else game.naz
     model, mode = resolve_model(model, mode)
     if mode == "capture" and model == "pinned":
         raise ValueError("mode='capture' constants belong to model='pivot'")

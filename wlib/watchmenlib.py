@@ -47,10 +47,7 @@ import variant_glb as _vg  # character-variant GLB builder
 #     binds = wl.ensure_binds('game.naz', 'OUT/binds')   # {'female': path, ...}
 
 
-def _read_bytes(path):
-    """The file's bytes; the handle is closed before returning."""
-    with open(path, "rb") as fh:
-        return fh.read()
+from wutil import default_naz, read_bytes as _read_bytes  # one copy, in wlib/wutil.py
 
 
 def bind_from_skeleton_header(header_bytes_or_path, template_npz=None, out_npz="bind_file.npz"):
@@ -91,7 +88,7 @@ _SKEL_ASSETS = {  # skeleton source per bind (block asset name endswith)
 }
 
 
-def ensure_binds(naz="game.naz", outdir=None, required=None, extract_dir=None):
+def ensure_binds(naz=None, outdir=None, required=None, extract_dir=None):
     """FILE-ONLY bind bootstrap: build engine-exact binds straight from the naz
     (or a loose Part 1 directory) for whatever skeletons are present, and return
     ``{key: npz_path}`` for the binds that now exist on disk.
@@ -107,6 +104,8 @@ def ensure_binds(naz="game.naz", outdir=None, required=None, extract_dir=None):
     the source are **warned, not fatal**.  Pass ``required=[keys]`` to force a
     hard error when specific skeletons are absent (e.g. a Part 2 caller that
     truly needs 'female')."""
+    if naz is None:
+        naz = default_naz()  # 01_game.naz, else game.naz
     import build_bind_file as _bbf, tempfile, sys as _sys, glob as _glob
 
     if not outdir:
@@ -135,11 +134,11 @@ def ensure_binds(naz="game.naz", outdir=None, required=None, extract_dir=None):
                 have[k] = missing.pop(k)
     no_archive = bool(missing and extract_dir and not os.path.exists(str(naz)))
     if missing and not no_archive:
-        blocks = grab_blocks(naz)
-        for bk, b in blocks.items():
-            if "h" not in b or not missing:
-                continue
-            for e, h, st in extract_block(b["h"], b.get("s")):
+        # skeleton headers only, one block at a time, until every one is found
+        for bk, b in iter_blocks(naz, streams=False):
+            if not missing:
+                break
+            for e, h, st in extract_block(b["h"]):
                 for k in list(missing):
                     if (e.name or "").endswith(_SKEL_ASSETS[k]):
                         fd, pth = tempfile.mkstemp(suffix=".header")
@@ -166,16 +165,29 @@ def ensure_binds(naz="game.naz", outdir=None, required=None, extract_dir=None):
     return have
 
 
-def grab_blocks(naz="game.naz"):
+def grab_blocks(naz=None):
+    """Every block of the archive in memory: {stem: {"h", "s"}} (iter_blocks
+    reads one at a time)."""
+    if naz is None:
+        naz = default_naz()  # 01_game.naz, else game.naz
     return _efa.grab_blocks(naz)
 
 
-def block_order(naz="game.naz"):
+def iter_blocks(naz=None, streams=True):
+    """(stem, {"h": header, "s": stream}) one block at a time
+    (watchmen_extract.iter_blocks; streams=False reads the headers only)."""
+    if naz is None:
+        naz = default_naz()  # 01_game.naz, else game.naz
+    return _efa.iter_blocks(naz, streams)
+
+
+def block_order(naz=None):
     """'<' little-endian (PC) / '>' big-endian (X360/PS3), auto-detected from the
     first real block header. Used to gate the PC-only rig pipeline off consoles."""
-    for _stem, _hs in grab_blocks(naz).items():
-        if "h" in _hs:
-            return _we.detect_block_order(_hs["h"])
+    if naz is None:
+        naz = default_naz()  # 01_game.naz, else game.naz
+    for _stem, _hs in iter_blocks(naz, streams=False):
+        return _we.detect_block_order(_hs["h"])
     return "<"
 
 

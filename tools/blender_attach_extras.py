@@ -65,21 +65,32 @@ def clip_extras(path, key="watchmen"):
     return out
 
 
-def attach(path, key="watchmen", actions=None):
+def attach(path, key="watchmen", actions=None, suffixes=None):
     """Set action[key] on every action named like an animation of the GLB `path`.
     Returns (attached, [animation names without an action]).  `actions`: a mapping
-    name -> action (default: bpy.data.actions)."""
+    name -> action (default: bpy.data.actions).
+
+    Blender's importer names an action after its clip, or `<clip>_<armature object>`
+    (one action per armature; checked: Blender 3.6.0, io_scene_gltf2 3.6.27): a
+    character with a face rig gives `<clip>_root` (one armature, the face bones under
+    `Head`) and, written with `--rig flat`, also `<clip>_face_root`.
+    `suffixes`: the object names to try after the clip name (default, with bpy: the
+    armature objects in the file); every action found gets the record."""
     if actions is None:
         import bpy
 
         actions = bpy.data.actions
+        if suffixes is None:
+            suffixes = [o.name for o in bpy.data.objects if o.type == "ARMATURE"]
     done, missing = 0, []
     for name, ex in sorted(clip_extras(path, key).items()):
-        act = actions.get(name)
-        if act is None:
+        acts = [actions.get(name)] + [actions.get("%s_%s" % (name, s)) for s in suffixes or ()]
+        acts = [a for a in acts if a is not None]
+        if not acts:
             missing.append(name)
             continue
-        act[key] = ex
+        for act in acts:
+            act[key] = ex
         done += 1
     return done, missing
 

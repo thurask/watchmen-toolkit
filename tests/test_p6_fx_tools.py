@@ -567,6 +567,12 @@ def test_blender_attach_extras_reads_the_clip_metadata_and_drops_nulls(tmp_path)
     assert (done, missing) == (1, []) and actions["RSH_run"]["watchmen"]["loop"] is True
     assert "watchmen" not in actions["unrelated"]
     assert bae.attach(str(f), actions={}) == (0, ["RSH_run"])
+    # Blender 3.6 with two armatures (body + face rig): one action per armature,
+    # named <clip>_<armature object>; every one gets the record
+    per_arm = {"RSH_run_root": Action(), "RSH_run_face_root": Action(), "RSH_run_x": Action()}
+    assert bae.attach(str(f), actions=per_arm, suffixes=["root", "face_root"]) == (1, [])
+    assert per_arm["RSH_run_root"]["watchmen"] == per_arm["RSH_run_face_root"]["watchmen"]
+    assert "watchmen" not in per_arm["RSH_run_x"]
     assert bae.main(["x", str(f)]) == 0  # outside Blender it only reads
     (tmp_path / "bad.glb").write_bytes(b"nope")
     with pytest.raises(ValueError, match="not a GLB"):

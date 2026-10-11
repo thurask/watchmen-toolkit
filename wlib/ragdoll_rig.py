@@ -22,6 +22,8 @@ R(conj(q)) -- the same conjugate the skeleton rest pose needs.
 """
 
 import math, os, pickle, struct, sys
+from itertools import batched
+from wutil import order_name, restricted_load
 
 import numpy as np
 
@@ -134,10 +136,7 @@ _PROP_NAMES = (
 _names_cache = {}
 
 
-def _read_bytes(path):
-    """The file's bytes; the handle is closed before returning."""
-    with open(path, "rb") as fh:
-        return fh.read()
+from wutil import read_bytes as _read_bytes  # one copy, in wlib/wutil.py
 
 
 def property_names():
@@ -146,11 +145,11 @@ def property_names():
     if not _names_cache:
         try:
             with open(os.path.join(_HERE, "kapow_fragment_keys.pkl"), "rb") as fh:
-                kd = pickle.load(fh)
+                kd = restricted_load(fh)  # plain data only, no code
             for tab in ("nameable", "promoted"):
                 for h, v in kd.get(tab, {}).items():
                     _names_cache[h] = v if isinstance(v, str) else v[0]
-        except (OSError, pickle.UnpicklingError, KeyError):
+        except (OSError, pickle.UnpicklingError, EOFError, ValueError, KeyError, AttributeError):
             pass
         for nm in _PROP_NAMES:
             _names_cache[kapow_props.name_hash(nm)] = nm
@@ -203,38 +202,39 @@ def shape_record(v):
         "local_pos": _r(v["pos"]),
         "local_quat_xyzw": _r(v["quat"]),
     }
-    if v["type"] == 7:
-        d, h = float(v["diameter"]), float(v["height"])
-        s["file"] = {"diameter": _r(d), "height_total": _r(h)}
-        cyl = h - d
-        s["physx"] = {
-            "radius": _r(d * 0.5 + SKIN_WIDTH),
-            "height": _r(cyl if cyl > 0 else MIN_CAPSULE_HEIGHT),
-            "axis": "local +Y",
-        }
-        s["contact"] = dict(s["physx"], radius=_r(d * 0.5))
-    elif v["type"] == 6:
-        rad = float(v["radius"])
-        s["file"] = {"radius": _r(rad)}
-        s["physx"] = {"radius": _r(max(rad, MIN_EXTENT) + SKIN_WIDTH)}
-        s["contact"] = {"radius": _r(max(rad, MIN_EXTENT))}
-    elif v["type"] == 5:
-        s["file"] = {"size_full": _r(v["size"])}
-        s["physx"] = {
-            "half_extents": _r(
-                [max(abs(float(x)) * 0.5, MIN_EXTENT) + SKIN_WIDTH for x in v["size"]]
-            )
-        }
-        s["contact"] = {
-            "half_extents": _r([max(abs(float(x)) * 0.5, MIN_EXTENT) for x in v["size"]])
-        }
-    else:
-        s["file"] = {
-            "mode": int(v["mode"]),
-            "vertices": [_r(p) for p in np.asarray(v["verts"], float).reshape(-1, 3)],
-            "indices": [int(i) for i in v["indices"]],
-            "cooked_blob_bytes": len(v["blob"]),
-        }
+    match v["type"]:
+        case 7:  # capsule
+            d, h = float(v["diameter"]), float(v["height"])
+            s["file"] = {"diameter": _r(d), "height_total": _r(h)}
+            cyl = h - d
+            s["physx"] = {
+                "radius": _r(d * 0.5 + SKIN_WIDTH),
+                "height": _r(cyl if cyl > 0 else MIN_CAPSULE_HEIGHT),
+                "axis": "local +Y",
+            }
+            s["contact"] = s["physx"] | {"radius": _r(d * 0.5)}
+        case 6:  # sphere
+            rad = float(v["radius"])
+            s["file"] = {"radius": _r(rad)}
+            s["physx"] = {"radius": _r(max(rad, MIN_EXTENT) + SKIN_WIDTH)}
+            s["contact"] = {"radius": _r(max(rad, MIN_EXTENT))}
+        case 5:  # box
+            s["file"] = {"size_full": _r(v["size"])}
+            s["physx"] = {
+                "half_extents": _r(
+                    [max(abs(float(x)) * 0.5, MIN_EXTENT) + SKIN_WIDTH for x in v["size"]]
+                )
+            }
+            s["contact"] = {
+                "half_extents": _r([max(abs(float(x)) * 0.5, MIN_EXTENT) for x in v["size"]])
+            }
+        case _:  # concave (2) / convex (4) mesh
+            s["file"] = {
+                "mode": int(v["mode"]),
+                "vertices": [_r(p) for p in np.asarray(v["verts"], float).reshape(-1, 3)],
+                "indices": [int(i) for i in v["indices"]],
+                "cooked_blob_bytes": len(v["blob"]),
+            }
     return s
 
 
@@ -434,7 +434,7 @@ def _build(mb, order=None, cloth_only=False):
             wq[i], wp[i] = list(nd["quat"]), list(nd["pos"])
         else:
             wq[i] = qmul(nd["quat"], wq[p])
-            wp[i] = [a + b for a, b in zip(wp[p], rot(wq[p], nd["pos"]))]
+            wp[i] = [a + b for a, b in zip(wp[p], rot(wq[p], nd["pos"]), strict=True)]
     objs = _sr.record_objects(ab["records"], property_names(), order)
     nb, nc, nj = len(ab["bodies"]), len(ab["cloths"]), len(ab["joints"])
     if len(objs) != nb + nc + nj:
@@ -481,9 +481,9 @@ def _build(mb, order=None, cloth_only=False):
         # parent frame = the child frame at bind pose seen from the parent body
         # (loader 0x517b34; the file stores no parent-space property)
         qjw = qmul(qcs, wq[cn])
-        pjw = [a + b for a, b in zip(wp[cn], rot(wq[cn], pcs))]
+        pjw = [a + b for a, b in zip(wp[cn], rot(wq[cn], pcs), strict=True)]
         qps = qmul(qjw, qconj(wq[pn]))
-        pps = rot(qconj(wq[pn]), [a - b for a, b in zip(pjw, wp[pn])])
+        pps = rot(qconj(wq[pn]), [a - b for a, b in zip(pjw, wp[pn], strict=True)])
         joints.append(
             {
                 "name": o["name"],
@@ -593,11 +593,15 @@ def pivot_sheets(pb, order=None):
         order = byte_order(pb, pivot_book=True)
     try:
         return _sr.parse_pivot_book(pb, property_names(), order)
-    except (ValueError, struct.error):
+    except (ValueError, struct.error) as ex:
         # the older record layout of stand-alone Part 1 (no type hash per record):
         # kapow_props reads both layouts and gives the same keys and the same id
         sheets = kapow_props.pivot_book(pb, order)["sheets"]
         if not sheets:
+            ex.add_note(
+                f"ragdoll_rig: pivot book of {len(pb)} bytes, {order_name(order)}; "
+                "kapow_props.pivot_book finds no sheet in either record layout"
+            )
             raise
         return sheets
 
@@ -670,18 +674,18 @@ def proxy_mesh(shape, size="contact"):
     """(vertices Nx3, triangles Mx3) of a shape in ITS OWN frame; None for a mesh
     shape without usable triangles.  size: "contact" (the stored size, default) or
     "physx" (grown by the skin width, what the engine creates)."""
-    t = shape["type"]
-    if t == "capsule":
-        return _capsule_mesh(shape[size]["radius"], shape[size]["height"])
-    if t == "sphere":
-        return _capsule_mesh(shape[size]["radius"], 0.0)
-    if t == "box":
-        return _box_mesh(shape[size]["half_extents"])
+    match shape["type"]:
+        case "capsule":
+            return _capsule_mesh(shape[size]["radius"], shape[size]["height"])
+        case "sphere":
+            return _capsule_mesh(shape[size]["radius"], 0.0)
+        case "box":
+            return _box_mesh(shape[size]["half_extents"])
     f = shape.get("file", {})
     v = np.array(f.get("vertices", []), float).reshape(-1, 3)
     idx = [int(i) for i in f.get("indices", [])]
     if f.get("mode") == 1:  # triangle list, else a strip (0x522d17)
-        tri = [idx[i : i + 3] for i in range(0, len(idx) - 2, 3)]
+        tri = [t3 for t3 in batched(idx, 3) if len(t3) == 3]  # a short tail is no triangle
     else:
         tri = [
             (idx[i], idx[i + 1], idx[i + 2]) if i % 2 == 0 else (idx[i + 1], idx[i], idx[i + 2])
@@ -785,7 +789,32 @@ def bullet_damping(c):
     return _r(1.0 - math.exp(-float(c)))
 
 
-def glb_helpers(rig, bind_names, Rb, tb, material=None, frame=None):
+def _joint_name(joint_names, k):
+    """Node name of joint k: joint_names[k], or the flat rig's 'b<k>' without a list."""
+    return joint_names[k] if joint_names is not None else "b%d" % k
+
+
+def relabel_joint_nodes(helpers, joint_names):
+    """A copy of glb_helpers() output whose joint node names are `joint_names`
+    (variant_glb.write_glb gives the helpers the names of the file it writes).
+    Names are only rewritten where the helpers carry the joint indices (built
+    with joint_names); helpers of the flat rig are returned unchanged."""
+    import copy
+
+    out = copy.deepcopy(helpers)
+    for sh in out.get("shapes", []):
+        body = (sh.get("extras") or {}).get("body") or {}
+        if "joint_index" in body:
+            body["joint_node"] = joint_names[body["joint_index"]]
+    for jn in out.get("joints", []):
+        ex = jn.get("extras") or {}
+        for side in ("parent", "child"):
+            if side + "_joint_index" in ex:
+                ex[side + "_joint_node"] = joint_names[ex[side + "_joint_index"]]
+    return out
+
+
+def glb_helpers(rig, bind_names, Rb, tb, material=None, frame=None, joint_names=None):
     """What variant_glb.write_glb adds for the rig (`rig`, Rb, tb: engine numbers,
     as build() and the binds give them):
       shapes: [{name "RB.<bone>.<i>", slot, verts (bind world, float32 Nx3), tris,
@@ -797,21 +826,27 @@ def glb_helpers(rig, bind_names, Rb, tb, material=None, frame=None):
     verts / translation / rotation are ENGINE numbers in both frames: write_glb
     reflects them with the rest of the document.  The `extras` are what ends up
     in the file unchanged, so they are in the output frame (`frame`, default
-    frame.mode()): in the true frame they are those of the reflected rig."""
-    out = _glb_helpers(rig, bind_names, Rb, tb, material)
+    frame.mode()): in the true frame they are those of the reflected rig.
+
+    joint_names: the GLB's joint node names in palette order (variant_glb.
+    glb_joint_names; None = the flat rig's 'b<k>').  With them the extras also
+    carry the palette index of every joint they name (joint_index,
+    parent_joint_index, child_joint_index)."""
+    out = _glb_helpers(rig, bind_names, Rb, tb, material, joint_names)
     if not _frame.is_true(frame):
         return out
     Rt = np.array([_frame.mat4(R) for R in np.asarray(Rb, float)])
     tt = np.asarray(tb, float) * np.array([-1.0, 1.0, 1.0])
-    true = _glb_helpers(reflect_rig(rig), bind_names, Rt, tt, material)
+    true = _glb_helpers(reflect_rig(rig), bind_names, Rt, tt, material, joint_names)
     for kind in ("shapes", "joints"):
-        for a, b in zip(out[kind], true[kind]):
+        # the same rig reflected: one helper of each kind per helper of the other
+        for a, b in zip(out[kind], true[kind], strict=True):
             a["extras"] = b["extras"]
     out["extras"] = true["extras"]
     return out
 
 
-def _glb_helpers(rig, bind_names, Rb, tb, material=None):
+def _glb_helpers(rig, bind_names, Rb, tb, material=None, joint_names=None):
     """glb_helpers for the rig and binds as given, all in one frame."""
     slots = bone_slots(rig, bind_names)
     Rb = np.asarray(Rb, float)
@@ -825,7 +860,7 @@ def _glb_helpers(rig, bind_names, Rb, tb, material=None):
         Bk = _m4(Rb[k], tb[k])
         body = {
             "bone": b["bone"],
-            "joint_node": "b%d" % k,
+            "joint_node": _joint_name(joint_names, k),
             "mass": b["mass"],
             "linear_damping": b["linear_damping"],
             "angular_damping": b["angular_damping"],
@@ -834,6 +869,8 @@ def _glb_helpers(rig, bind_names, Rb, tb, material=None):
                 "runtime": b["solver_iterations_runtime"],
             },
         }
+        if joint_names is not None:
+            body["joint_index"] = k
         if material:
             body["friction"] = material["friction"]
             body["restitution"] = material["restitution"]
@@ -877,8 +914,8 @@ def _glb_helpers(rig, bind_names, Rb, tb, material=None):
             "type": j["type"],
             "parent_bone": j["parent_bone"],
             "child_bone": j["child_bone"],
-            "parent_joint_node": "b%d" % kp,
-            "child_joint_node": "b%d" % kc,
+            "parent_joint_node": _joint_name(joint_names, kp),
+            "child_joint_node": _joint_name(joint_names, kc),
             "axes": "node +X = twist, +Y = swing1, +Z = swing2 (PhysX D6 frame)",
             "swing1": j["swing1"],
             "swing2": j["swing2"],
@@ -887,11 +924,13 @@ def _glb_helpers(rig, bind_names, Rb, tb, material=None):
             "projection": j["projection"],
             "breakable": j["breakable"],
             "collision_between_bodies": j["collision_between_bodies"],
-            "blender": dict(
-                blender_limits(j),
-                bind_world_matrix=_r(to_blender(W)[:3].reshape(-1).tolist(), 7),
-            ),
         }
+        if joint_names is not None:
+            ex["parent_joint_index"], ex["child_joint_index"] = kp, kc
+        ex["blender"] = dict(
+            blender_limits(j),
+            bind_world_matrix=_r(to_blender(W)[:3].reshape(-1).tolist(), 7),
+        )
         joints.append(
             {
                 "name": "RJ.%s" % j["child_bone"],
@@ -973,7 +1012,7 @@ def _refl_shape(s):
     if isinstance(f, dict) and "vertices" in f:
         # the triangle indices stay: in the true frame the file order is the
         # outward (counter-clockwise) one
-        s["file"] = dict(f, vertices=[_frame.vec(v) for v in f["vertices"]])
+        s["file"] = f | {"vertices": [_frame.vec(v) for v in f["vertices"]]}
     return s
 
 
@@ -1042,10 +1081,19 @@ def conventions(frame=None):
 
 
 def sidecar(
-    rig, bind_names=None, material=None, source_model=None, group=None, glb=None, frame=None
+    rig,
+    bind_names=None,
+    material=None,
+    source_model=None,
+    group=None,
+    glb=None,
+    frame=None,
+    joint_names=None,
 ):
     """The <Variant>.ragdoll.json document.  `rig`: build()'s (engine numbers);
-    it is written in `frame` (default frame.mode()), the frame of the GLB."""
+    it is written in `frame` (default frame.mode()), the frame of the GLB.
+    joint_names: the GLB's joint node names in palette order (None = the flat
+    rig's 'b<k>'); with them `joint_indices` gives each bone's palette index."""
     slots = bone_slots(rig, bind_names) if bind_names is not None else {}
     true = _frame.is_true(frame)
     if true:
@@ -1102,8 +1150,12 @@ def sidecar(
                 ],
             },
         },
-        "joint_nodes": {nm: ("b%d" % k if k is not None else None) for nm, k in slots.items()},
+        "joint_nodes": {
+            nm: (_joint_name(joint_names, k) if k is not None else None) for nm, k in slots.items()
+        },
     }
+    if joint_names is not None:
+        doc["joint_indices"] = dict(slots)
     if not rig["joints"]:
         doc["cloth_only_note"] = (
             "this model has no ragdoll: its articulated body holds cloths only "
@@ -1116,7 +1168,7 @@ def sidecar(
             "joint data is exported as stored and is not usable as a ragdoll"
         )
     doc.update(rig)
-    doc["joints"] = [dict(j, blender=blender_limits(j)) for j in rig["joints"]]
+    doc["joints"] = [j | {"blender": blender_limits(j)} for j in rig["joints"]]
     return _frame.stamp_json(doc, "true") if true else doc
 
 

@@ -1,9 +1,11 @@
-"""A light layer carries its sheet's opacity (watchmen_extract.blend_material).
+"""A light layer of the sky pass carries its sheet's opacity
+(watchmen_extract.blend_material).
 
-A sheet drawn SRCALPHA / ONE (blend type add outside the sky pass, or a manual
-blend) adds src.rgb * src.a, and the alpha the shader writes holds the opacity:
-the emissiveFactor of the glTF material is that opacity.  ONE / ONE (blend type
-add in the sky pass) does not read the alpha.
+A SkyBox sheet drawn SRCALPHA / ONE (a manual blend) adds src.rgb * src.a, and
+the alpha SkyBoxPS writes holds the opacity: the emissiveFactor of the glTF
+material is that opacity.  ONE / ONE (blend type add in the sky pass) does not
+read the alpha.  A SRCALPHA / ONE glow of the standard pass keeps factor 1
+(1.5.0; 1.4.0 scaled it): that pass's use of the opacity is not read from code.
 
 Synthetic fixtures only."""
 
@@ -55,13 +57,20 @@ def test_the_old_call_without_opacity_is_unchanged():
     assert we.blend_material(_mat(), blend, 0)["emissiveFactor"] == [1.0, 1.0, 1.0]
 
 
-def test_add_outside_the_sky_pass_reads_the_alpha_too():
-    """Blend type add on a "Standard with blending" sheet is SRCALPHA / ONE."""
+def test_add_outside_the_sky_pass_keeps_factor_one():
+    """Blend type add on a "Standard with blending" sheet is SRCALPHA / ONE, but
+    whether the standard pass multiplies the sheet opacity into the alpha is not
+    read from code: the factor stays 1 there (1.4.0 scaled it)."""
     blend = we.sheet_blend({"renderType": 1, "blendType": 1, "opacity": 0.25})
     assert (blend["src"], blend["dst"], blend["gltf"]) == ("srcAlpha", "one", "glow")
+    assert blend["pass"] == "standard"
     mat = we.blend_material(_mat(), blend, 0, 0.25)
-    assert mat["emissiveFactor"] == [0.25, 0.25, 0.25]
-    assert we.blend_material(_mat(), blend, 0, 0.0)["emissiveFactor"] == [0.0, 0.0, 0.0]
+    assert mat["emissiveFactor"] == [1.0, 1.0, 1.0] and "opacity" not in mat["extras"]["watchmen"]
+    assert we.blend_material(_mat(), blend, 0, 0.0)["emissiveFactor"] == [1.0, 1.0, 1.0]
+    # the same manual blend on a SkyBox sheet does scale (SkyBoxPS, read from code)
+    sky = we.sheet_blend(dict(SUNRAY, opacity=0.25))
+    assert sky["pass"] == "sky"
+    assert we.blend_material(_mat(), sky, 0, 0.25)["emissiveFactor"] == [0.25, 0.25, 0.25]
 
 
 def test_add_in_the_sky_pass_does_not_read_the_alpha():
@@ -139,4 +148,5 @@ def test_a_character_material_takes_it_from_its_sheet(tmp_path, rig):
     vg.write_glb([(V, SI, SW, T, UV, nm)], rig.manifest, str(out), str(rig.bind_npz), textures=tex)
     (mat,) = parse_glb(out).j["materials"]
     assert mat["extras"]["watchmen"]["blend"] == "add"
-    assert mat["emissiveFactor"] == [0.25, 0.25, 0.25]
+    # a type-1 sheet is drawn by the standard pass: factor 1 (1.4.0: 0.25)
+    assert mat["emissiveFactor"] == [1.0, 1.0, 1.0] and "opacity" not in mat["extras"]["watchmen"]

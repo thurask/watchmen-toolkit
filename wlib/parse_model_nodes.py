@@ -17,10 +17,7 @@ import os, struct, sys, numpy as np
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
 
-def _read_bytes(path):
-    """The file's bytes; the handle is closed before returning."""
-    with open(path, "rb") as fh:
-        return fh.read()
+from wutil import order_name, qmat_xyzw, read_bytes as _read_bytes  # one copy, in wlib/wutil.py
 
 
 def _detect_order(mb):
@@ -100,7 +97,9 @@ def parse(mb, order=None):
     f4 = order + "f4"
     occ = [(o, nm) for o, nm in _names(mb, order) if "/" not in nm and nm != "ModelRes"]
     if not occ:
-        raise ValueError("no node names")
+        ex = ValueError("no node names")
+        ex.add_note(f"parse_model_nodes: {len(mb)}-byte header read {order_name(order)}")
+        raise ex
     # node-0 anchor: count u32 sits 4+12+16+4+1 bytes before first named node?  Instead:
     # first named node's record starts at occ[0][0]-28; node0's record is the 33 bytes
     # before that: [pos 12][quat 16][len=1][\0][u32][u32 -1]... locate by parent -1 check.
@@ -155,10 +154,15 @@ def parse(mb, order=None):
     # line up -- fail loudly rather than emit a plausible but wrong hierarchy.
     n = len(names)
     if cn is not None and n != cn[1] and (n - 1) != cn[1]:
-        raise ValueError(
+        ex = ValueError(
             "node count mismatch: header says %d, parsed %d (dropped %r) -- "
             "parent indices would be misaligned" % (cn[1], n, dropped[:8])
         )
+        ex.add_note(
+            f"parse_model_nodes: node count u32 at header offset 0x{cn[0]:X} of {len(mb)} "
+            f"bytes, {order_name(order)}"
+        )
+        raise ex
     parent = [pa if -1 <= pa < n else -1 for pa in parent]
     return names, np.array(pos), np.array(quat), np.array(parent)
 
@@ -167,14 +171,7 @@ def qmat_wxyz(q):
     """WXYZ quaternion -> 3x3 rotation matrix."""
     w, x, y, z = q
     nn = (w * w + x * x + y * y + z * z) ** 0.5 or 1.0
-    w, x, y, z = w / nn, x / nn, y / nn, z / nn
-    return np.array(
-        [
-            [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
-            [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
-            [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
-        ]
-    )
+    return qmat_xyzw((x / nn, y / nn, z / nn, w / nn))
 
 
 def rest_by_name(mb, order=None):

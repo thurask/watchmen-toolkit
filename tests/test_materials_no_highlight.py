@@ -8,7 +8,9 @@ ignores the extension (F3D for one) then showed the default dielectric
 highlight at the sheet's narrow lobe: wet-looking hair, brows and eyes.  Such a
 material now has roughnessFactor 1.0 and no metallicRoughnessTexture; in the
 MTL of `extract` it gets `Ns 0` and no roughnessEngine.png.  Every other
-material, however weak its highlight, and `--materials legacy` are unchanged.
+material, however weak its highlight, and `--materials legacy` are unchanged
+(since 1.5.0 a material without a specSize layer has a plain `Ns` for its
+constant roughness instead of a roughnessEngine.png).
 """
 
 import io
@@ -291,7 +293,12 @@ def test_mtl_of_a_material_without_a_highlight_has_no_roughness_bake(tmp_path, m
     (d2 / "spec.txt").write_text("43.0 0.0")
     assert we.read_sheet_json(d2)["sheets"][0]["reflectionType"] == 2  # only in the full sheet
     lines = _mtl(tmp_path / "refl", path)
-    assert [x for x in lines if x.startswith("map_Ns")] and "Ns 0.000000" not in lines
+    # no specSize layer: the constant roughness is a plain Ns (not 0), no map (1.5.0)
+    ns = [x for x in lines if x.startswith("Ns ")]
+    assert ns and ns != ["Ns 0.000000"] and not [x for x in lines if x.startswith("map_Ns")]
+    assert not (d2 / "roughnessEngine.png").exists()
+    want = we._mtl_ns_of_roughness(we._mtl_const_roughness(43.0))
+    assert float(ns[0].split()[1]) == pytest.approx(want)
     # a specular layer that is black everywhere: no highlight either
     p3, d3 = _spec_size_tree(tmp_path / "black", 0.4)
     Image.new("RGB", (4, 4), (0, 0, 0)).save(d3 / "2_specMap_4x4_DXT1.png")

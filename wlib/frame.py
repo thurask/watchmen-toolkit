@@ -188,15 +188,15 @@ def _plan(j):
             for tg in prim.get("targets") or []:
                 for k in ("POSITION", "NORMAL", "TANGENT"):
                     want(tg.get(k), "vec3", what)
-            pmode = prim.get("mode", 4)
-            if pmode == 4:
-                if prim.get("indices") is None:
-                    raise FrameError("%s: triangles without indices" % what)
-                want(prim["indices"], "tri", what)
-            elif pmode in (5, 6):
-                raise FrameError("%s: triangle strips / fans are not supported" % what)
-            else:
-                want(prim.get("indices"), "keep", what)
+            match prim.get("mode", 4):
+                case 4:  # triangles
+                    if prim.get("indices") is None:
+                        raise FrameError("%s: triangles without indices" % what)
+                    want(prim["indices"], "tri", what)
+                case 5 | 6:  # strip / fan
+                    raise FrameError("%s: triangle strips / fans are not supported" % what)
+                case _:
+                    want(prim.get("indices"), "keep", what)
     for si, skin in enumerate(j.get("skins") or []):
         want(skin.get("inverseBindMatrices"), "mat4", "skin %d" % si)
     for ai, anim in enumerate(j.get("animations") or []):
@@ -205,12 +205,13 @@ def _plan(j):
             path = (ch.get("target") or {}).get("path")
             out = sm[ch["sampler"]].get("output")
             what = "animation %d" % ai
-            if path == "translation":
-                want(out, "vec3", what)
-            elif path == "rotation":
-                want(out, "quat", what)
-            else:
-                want(out, "keep", what)
+            match path:
+                case "translation":
+                    want(out, "vec3", what)
+                case "rotation":
+                    want(out, "quat", what)
+                case _:
+                    want(out, "keep", what)
     return ops
 
 

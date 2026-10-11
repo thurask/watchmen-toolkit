@@ -19,17 +19,14 @@ Replaces the old empirical face_glb.py (skin-cluster centroid bind + neutral
 """
 
 import os, sys, glob
-import numpy as np
+from wutil import load_npz
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.append(_HERE)  # append, never insert(0): flat module names must not shadow the stdlib
 
 
-def _read_bytes(path):
-    """The file's bytes; the handle is closed before returning."""
-    with open(path, "rb") as fh:
-        return fh.read()
+from wutil import read_bytes as _read_bytes  # one copy, in wlib/wutil.py
 
 
 def find_heads(extract_out):
@@ -50,7 +47,7 @@ def find_heads(extract_out):
         except Exception:
             continue
         if "Jaw" in names and "LowerLip" in names:
-            heads.append(m[:-6])
+            heads.append(m.removesuffix(".model"))
     return heads
 
 
@@ -127,7 +124,7 @@ def export(extract_out, outdir, budget=None):
                 anims.append((nm, pal, fps))
             except Exception as e:
                 print("  bake fail %s %s: %s" % (head, nm, e))
-        bv = np.load(bind, allow_pickle=True)
+        bv = load_npz(bind)
         bn = [str(x) for x in bv["names"]]
         parts = char_lib.load_parts([mbase], bn)
         tex = char_lib.find_textures(parts, texroots)

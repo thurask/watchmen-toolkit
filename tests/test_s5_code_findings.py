@@ -284,8 +284,11 @@ def _fake_archive(monkeypatch, tmp_path, blocks):
     naz = tmp_path / "game.naz"
     naz.write_bytes(b"")
     read = []
+    # archive_clip reads the header halves one block at a time (iter_blocks, 1.5.0)
     monkeypatch.setattr(
-        efa, "grab_blocks", lambda _naz: {"b%d" % i: {"h": i} for i in range(len(blocks))}
+        efa,
+        "iter_blocks",
+        lambda _naz, streams=True: iter([("b%d" % i, {"h": i}) for i in range(len(blocks))]),
     )
 
     def extract_block(h, s=None):

@@ -17,10 +17,7 @@ NAMEK = 0x7282B2A2  # kapow keyHash of NAME (stored in platform byte order)
 _NOT_PRINTABLE = bytes(0 if 32 <= c < 127 else 1 for c in range(256))
 
 
-def _read_bytes(path):
-    """The file's bytes; the handle is closed before returning."""
-    with open(path, "rb") as fh:
-        return fh.read()
+from wutil import read_bytes as _read_bytes  # one copy, in wlib/wutil.py
 
 
 def _schema_name(d, p, e):
@@ -90,6 +87,9 @@ def fragment_json(d, bo="<"):
         i = bisect.bisect_right(starts, off) - 1
         return heads[i][1] if i >= 0 else None
 
+    # approximate: these sweep transforms are the marked fallback of a fragment that
+    # does not parse to its end (instances_source "sweep"); their values stay rounded
+    # (pos 3, quat 4 places) in both --json-floats modes -- the exact parse replaces them
     tr = []
     for m in re.finditer(re.escape(struct.pack(bo + "I", POSK)), d):
         o = m.start() + 4
@@ -264,7 +264,7 @@ def scene_summary(out):
         props = {p[0]: p[2] for p in n["props"]}
         if t == "SceneNode" and root is None:
             own, setups = split(props)
-            root = dict(own, memory_setups=setups)
+            root = own | {"memory_setups": setups}
         elif t.startswith("SceneScope"):
             own, setups = split(props)
             scopes.append(
@@ -340,7 +340,11 @@ def to_json(name_lower, data, order=None, stream=None):
                 }
                 for i in r["inst"]
             ]
+            # lossless: the stream was parsed to its end and every stored value is in the
+            # JSON -- float32 values exactly (shortest round trip, f32json) unless
+            # float_values says "rounded" ($WATCHMEN_JSON_FLOATS=rounded, the 1.4.0 output)
             out["lossless"] = bool(r["ok"])
+            out["float_values"] = _kf.float_values()
             # nodes / named_instances / instances / transforms from the exact parse (the
             # byte sweep above read integers as text); the sweep stays only as the
             # marked fallback of a fragment that does not parse to its end
@@ -359,6 +363,7 @@ def to_json(name_lower, data, order=None, stream=None):
                 out["header"] = {k: v for k, v in r["header"].items() if k != "size"}
         except Exception as e:
             out["lossless"] = False
+            out["float_values"] = _kf.float_values()
             out["instances_source"] = "sweep"
             out["parse_error"] = str(e)[:200]
         if name_lower.endswith(".scene"):
@@ -547,7 +552,7 @@ def load_fragment(path):
     read when the binary is missing.  Cached per file (path, size, mtime)."""
     import os
 
-    frag = path[:-5] if path.endswith(".json") else path
+    frag = path.removesuffix(".json")
     if os.path.exists(frag):
         st = os.stat(frag)
         key = (os.path.abspath(frag), st.st_size, st.st_mtime_ns)
@@ -630,7 +635,7 @@ def find_fragment(root, stem):
     hits = set()
     for ext in (".fragment", ".fragment.json"):
         for f in glob.glob(os.path.join(root, "**", stem + ext), recursive=True):
-            hits.add(f[: -len(".json")] if f.endswith(".json") else f)
+            hits.add(f.removesuffix(".json"))
     return min(hits) if hits else None
 
 
@@ -645,7 +650,9 @@ if __name__ == "__main__":
     except OSError:
         _st = None
     d = to_json(sys.argv[1].lower(), b, stream=_st)
-    out = json.dumps(d, indent=1)
+    import f32json
+
+    out = f32json.dumps(d, indent=1)  # exact mode: NaN / infinity -> null
     if len(sys.argv) > 2:
         with open(sys.argv[2], "w", encoding="utf-8", newline="\n") as _f:
             _f.write(out)

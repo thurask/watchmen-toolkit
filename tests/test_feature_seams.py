@@ -51,9 +51,14 @@ fx_extract = test_fx_meta.fx_extract
 
 # ----------------------------------------------------------- the cached table
 def _current():
+    import f32json
+    import variant_glb
+
     return {
         "format": am.FORMAT,
         "revision": am.REVISION,
+        "float_values": f32json.mode(),
+        "skeleton_rig": variant_glb.rig_mode(),
         "face_format": face_rule.FACE_FORMAT,
         "combat_format": cm.COMBAT_FORMAT,
         "fx_format": fx.FORMAT,
@@ -81,6 +86,46 @@ def _resume(tmp_path, monkeypatch, table):
 @pytest.mark.usefixtures("engine_frame")  # pins the engine numbers; true frame: test_frame.py
 def test_a_current_table_is_reused(tmp_path, monkeypatch):
     assert _resume(tmp_path, monkeypatch, _current())[:2] == ("cached", 0)
+
+
+@pytest.mark.usefixtures("engine_frame")  # only the float marker differs
+def test_a_140_table_is_rebuilt(tmp_path, monkeypatch):
+    """A 1.4.0 anim_meta.json (revision 5, no `float_values`; its fragment floats
+    rounded) passes every other check: a resumed run must not copy its numbers."""
+    old = dict(_current(), revision=5)
+    del old["float_values"]
+    marker, builds, on_disk = _resume(tmp_path, monkeypatch, old)
+    assert (marker, builds) == ("new", 1) and on_disk["revision"] == am.REVISION == 6
+
+
+@pytest.mark.usefixtures("engine_frame")  # only the float marker differs
+@pytest.mark.parametrize("mode,other", [("exact", "rounded"), ("rounded", "exact")])
+def test_a_table_in_the_other_float_mode_is_rebuilt(tmp_path, monkeypatch, mode, other):
+    monkeypatch.setenv("WATCHMEN_JSON_FLOATS", mode)
+    assert _resume(tmp_path, monkeypatch, dict(_current(), float_values=other))[:2] == ("new", 1)
+
+
+@pytest.mark.parametrize("mode", ["exact", "rounded"])
+def test_a_table_in_this_float_mode_is_reused(tmp_path, monkeypatch, mode):
+    monkeypatch.setenv("WATCHMEN_JSON_FLOATS", mode)
+    monkeypatch.setenv("WATCHMEN_FRAME", "mirrored")  # the table has no frame marker
+    assert _current()["float_values"] == mode
+    assert _resume(tmp_path, monkeypatch, _current())[:2] == ("cached", 0)
+
+
+@pytest.mark.usefixtures("engine_frame")  # only the rig marker differs
+@pytest.mark.parametrize("rig,other", [("hierarchy", "flat"), ("flat", "hierarchy")])
+def test_a_table_describing_the_other_rig_is_rebuilt(tmp_path, monkeypatch, rig, other):
+    monkeypatch.setenv("WATCHMEN_RIG", rig)
+    assert _resume(tmp_path, monkeypatch, dict(_current(), skeleton_rig=other))[:2] == ("new", 1)
+    assert _current()["skeleton_rig"] == rig
+
+
+def test_writer_options_record_the_float_mode(monkeypatch):
+    monkeypatch.delenv("WATCHMEN_JSON_FLOATS", raising=False)
+    assert ce.writer_options()["json_floats"] == "exact"
+    monkeypatch.setenv("WATCHMEN_JSON_FLOATS", "rounded")
+    assert ce.writer_options()["json_floats"] == "rounded"
 
 
 @pytest.mark.parametrize("missing", ["combat_format", "fx_format"])

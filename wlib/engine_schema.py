@@ -27,13 +27,12 @@ Engine numeric constants (sources in docs/ENGINE_CONSTANTS.md):
   ANIMATION_CRITERIA enum  see anim_state_machine CRIT_* (exe PUSH pairs)
 """
 
-import json, os, re
+import functools, json, os, re
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 BASE_FPS = 30.0
 
 _reg = None
-_names = None
 
 
 def reg():
@@ -44,18 +43,16 @@ def reg():
     return _reg
 
 
+@functools.cache
 def prop_names():
-    global _names
-    if _names is None:
-        p = os.path.join(_HERE, "prop_names_from_reg.json")
-        if os.path.exists(p):
-            with open(p) as fh:
-                _names = json.load(fh)
-        else:  # pure aggregation of reg_dump.json - no need to ship the file
-            from gen_data import derive_prop_names
+    p = os.path.join(_HERE, "prop_names_from_reg.json")
+    if os.path.exists(p):
+        with open(p) as fh:
+            return json.load(fh)
+    # pure aggregation of reg_dump.json - no need to ship the file
+    from gen_data import derive_prop_names
 
-            _names = derive_prop_names(reg())
-    return _names
+    return derive_prop_names(reg())
 
 
 def classes():

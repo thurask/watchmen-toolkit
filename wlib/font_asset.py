@@ -96,10 +96,7 @@ def _named(d, name, alias):
 FALLBACK_CODE = 64
 
 
-def _read_bytes(path):
-    """The file's bytes; the handle is closed before returning."""
-    with open(path, "rb") as fh:
-        return fh.read()
+from wutil import read_bytes as _read_bytes  # one copy, in wlib/wutil.py
 
 
 class FontError(ValueError):

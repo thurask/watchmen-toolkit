@@ -30,6 +30,7 @@ exported document: "code" = read from the loader, "data" = verified on all shipp
 files, "inferred", "unknown".
 """
 
+import itertools
 import json
 import math
 import os
@@ -42,6 +43,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.append(_HERE)  # append, never insert(0)
 import frame as _frame  # noqa: E402
+from wutil import GlbPacker, glb_bytes  # noqa: E402
 
 FORMAT = "watchmen-nav/1"
 
@@ -79,7 +81,7 @@ def _ev(p):
     return [_f(-p[0]) + 0.0, _f(p[1]), _f(p[2])]
 
 
-class _Reader(object):
+class _Reader:
     def __init__(self, data, pos, end):
         self.d = data
         self.o = pos
@@ -154,19 +156,24 @@ def parse_aipathdata(data):
         if depth > 64:
             raise NavError("KS BIG FILE nesting too deep")
         kind = r.u32()
-        if kind == 0:
-            label = string()
-            name = string()
-            n = r.count(4)
-            return {"name": name, "label": label, "children": [node(depth + 1) for _ in range(n)]}
-        if kind == 1:
-            n = r.count(1)
-            raw = data[r.o : r.o + n]
-            r.o += n
-            return {"raw": raw.hex()}
-        if kind == 2:
-            name = string()
-            return {"attr": name, "value": string()}
+        match kind:
+            case 0:  # group
+                label = string()
+                name = string()
+                n = r.count(4)
+                return {
+                    "name": name,
+                    "label": label,
+                    "children": [node(depth + 1) for _ in range(n)],
+                }
+            case 1:  # raw data
+                n = r.count(1)
+                raw = data[r.o : r.o + n]
+                r.o += n
+                return {"raw": raw.hex()}
+            case 2:  # attribute
+                name = string()
+                return {"attr": name, "value": string()}
         raise NavError("KS BIG FILE node kind %d at 0x%x" % (kind, r.o - 4))
 
     root = node(0)
@@ -276,7 +283,7 @@ def config_summary(tree):
                             d = {"name": it["label"]}
                             d.update((k, _num(v)) for k, v in tree_attrs(it))
                             items.append(d)
-                    mods[m["name"][len("Modifiers_") :]] = {
+                    mods[m["name"].removeprefix("Modifiers_")] = {
                         "default": tree_attr(m, "default"),
                         "items": items,
                     }
@@ -418,8 +425,9 @@ def parse_hpd(data):
         "cell_mode": words[2],
         "lattice_origin": struct.unpack_from("<3f", data, 0x0C),
         "lattice_cell_size": struct.unpack_from("<f", data, 0x18)[0],
-        "vertex_attributes": [words[7 + 3 * i : 10 + 3 * i] for i in range(4)],
-        "edge_attributes": [words[19 + 3 * i : 22 + 3 * i] for i in range(4)],
+        # 4 x {u32 kind, u32, u32 bytes} at 0x1c, then 4 x {u32, u32, u32} at 0x4c
+        "vertex_attributes": list(itertools.batched(words[7:19], 3)),
+        "edge_attributes": list(itertools.batched(words[19:31], 3)),
         "vertex_stride": vstride,
         "edge_stride": estride,
     }
@@ -545,7 +553,14 @@ def parse_hpd(data):
                     "size": m_start - g_end,
                 }
             )
-        mesh, m_end = _parse_mesh(data, m_start, end - 8)
+        try:
+            mesh, m_end = _parse_mesh(data, m_start, end - 8)
+        except NavError as ex:
+            ex.add_note(
+                "cell %d (cell table entry at 0x%x): AI mesh of %d bytes at 0x%x..0x%x"
+                % (c["id"], c["table_offset"], msize, m_start, end - 8)
+            )
+            raise
         if m_end != end - 8:
             undecoded.append(
                 {
@@ -589,7 +604,7 @@ def floor_segments(fl):
     -> list of (a, b, kind) with kind "wall" | "link" | "mesh_link"."""
     out = []
     for pl in fl["outline"]:
-        for a, b in zip(pl, pl[1:]):
+        for a, b in itertools.pairwise(pl):
             out.append((a, b, "wall"))
     for a, b in fl["links"]:
         out.append((a, b, "link"))
@@ -636,7 +651,7 @@ def triangulate(segments):
         t = (z - a[2]) / (b[2] - a[2])
         return (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, z)
 
-    for z0, z1 in zip(zs, zs[1:]):
+    for z0, z1 in itertools.pairwise(zs):
         zm = 0.5 * (z0 + z1)
         act = [s for s in segs if s[0][2] <= z0 and s[1][2] >= z1]
         act.sort(key=lambda s: at(s, zm)[0])
@@ -1063,7 +1078,8 @@ def build_document(hpd, config=None, level=None, source=None):
                     "outline": [[_ev(p) for p in pl] for pl in fl["outline"]],
                     "links": [
                         {"a": _ev(a), "b": _ev(b), "to": list(t)}
-                        for (a, b), t in zip(fl["links"], fl["link_targets"])
+                        # one target per link (the loader's second pass, _parse_mesh)
+                        for (a, b), t in zip(fl["links"], fl["link_targets"], strict=True)
                     ],
                     "mesh_links": [_mesh_link(s) for s in fl["mesh_links"]],
                     "inner_walls": [[_ev(p) for p in pl] for pl in fl["inner_walls"]],
@@ -1075,7 +1091,9 @@ def build_document(hpd, config=None, level=None, source=None):
                 if fl["level_links"]:
                     of["level_links"] = [
                         {"a": _ev(a), "b": _ev(b), "to": list(t)}
-                        for (a, b), t in zip(fl["level_links"], fl["level_link_targets"])
+                        for (a, b), t in zip(
+                            fl["level_links"], fl["level_link_targets"], strict=True
+                        )
                     ]
                 if opn:
                     of["open_outline"] = True
@@ -1235,10 +1253,10 @@ def nav_geometry(hpd):
             for a, b, k in segs:
                 line("wall" if k == "wall" else "link", a, b)
             for pl in fl["inner_walls"]:
-                for a, b in zip(pl, pl[1:]):
+                for a, b in itertools.pairwise(pl):
                     line("inner", a, b)
             for _d, pl in fl["directional"]:
-                for a, b in zip(pl, pl[1:]):
+                for a, b in itertools.pairwise(pl):
                     line("inner", a, b)
     out["navmesh"] = {"mode": 4, "points": pts, "indices": idx, "material": 0}
     for name, kind, mat in (
@@ -1265,54 +1283,37 @@ def build_glb(hpd, level=None):
     numbers with --frame mirrored), so it overlays the level geometry.  Nodes: navmesh, navmesh_walls, navmesh_links,
     navmesh_inner_walls, graph_edges, graph_path_object_edges, graph_vertices."""
     geo = nav_geometry(hpd)
-    binbuf = bytearray()
     views, accessors, meshes, nodes = [], [], [], []
-
-    def view(raw, target):
-        while len(binbuf) % 4:
-            binbuf.append(0)
-        views.append(
-            {"buffer": 0, "byteOffset": len(binbuf), "byteLength": len(raw), "target": target}
-        )
-        binbuf.extend(raw)
-        return len(views) - 1
+    _pk = GlbPacker(views, accessors)
+    binbuf = _pk.bin
 
     for name, g in geo.items():
         if not g["points"]:
             continue
         p = np.asarray(g["points"], dtype="<f4").reshape(-1, 3)
-        accessors.append(
-            {
-                "bufferView": view(p.tobytes(), 34962),
-                "componentType": 5126,
-                "count": int(len(p)),
-                "type": "VEC3",
-                "min": [float(x) for x in p.min(axis=0)],
-                "max": [float(x) for x in p.max(axis=0)],
-            }
+        pos = _pk.accessor(
+            _pk.view(p.tobytes(), 34962),
+            5126,
+            int(len(p)),
+            "VEC3",
+            [float(x) for x in p.min(axis=0)],
+            [float(x) for x in p.max(axis=0)],
         )
         prim = {
-            "attributes": {"POSITION": len(accessors) - 1},
+            "attributes": {"POSITION": pos},
             "mode": g["mode"],
             "material": g["material"],
         }
         if g["indices"] is not None:
             i = np.asarray(g["indices"], dtype="<u4")
-            accessors.append(
-                {
-                    "bufferView": view(i.tobytes(), 34963),
-                    "componentType": 5125,
-                    "count": int(len(i)),
-                    "type": "SCALAR",
-                }
+            prim["indices"] = _pk.accessor(
+                _pk.view(i.tobytes(), 34963), 5125, int(len(i)), "SCALAR"
             )
-            prim["indices"] = len(accessors) - 1
         meshes.append({"name": name, "primitives": [prim]})
         nodes.append({"name": name, "mesh": len(meshes) - 1})
     root = {"name": "nav %s" % level if level else "nav", "children": list(range(len(nodes)))}
     nodes.append(root)
-    while len(binbuf) % 4:
-        binbuf.append(0)
+    _pk.align()
     gltf = {
         "asset": {"version": "2.0", "generator": "watchmen-kapow-toolkit nav_data"},
         "scene": 0,
@@ -1343,14 +1344,7 @@ def build_glb(hpd, level=None):
     if not binbuf:
         del gltf["buffers"], gltf["bufferViews"], gltf["accessors"], gltf["meshes"]
     _frame.finish_gltf(gltf, binbuf)  # geo above is engine space; --frame true reflects it
-    js = json.dumps(gltf, separators=(",", ":")).encode("utf-8")
-    js += b" " * (-len(js) % 4)
-    out = bytearray(b"glTF" + struct.pack("<II", 2, 0))
-    out += struct.pack("<I4s", len(js), b"JSON") + js
-    if binbuf:
-        out += struct.pack("<I4s", len(binbuf), b"BIN\0") + bytes(binbuf)
-    struct.pack_into("<I", out, 8, len(out))
-    return bytes(out)
+    return glb_bytes(gltf, binbuf, empty_bin_chunk=False)
 
 
 # ---------------------------------------------------------------------------

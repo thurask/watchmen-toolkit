@@ -39,6 +39,8 @@ def _current():
     return {
         "format": am.FORMAT,
         "revision": am.REVISION,
+        "float_values": "exact",
+        "skeleton_rig": "hierarchy",
         "face_format": face_rule.FACE_FORMAT,
         "combat_format": cm.COMBAT_FORMAT,
         "fx_format": fx.FORMAT,

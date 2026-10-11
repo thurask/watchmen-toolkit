@@ -20,6 +20,7 @@ groups) and waveC_renderer_check.md (cube maps); `evidence` in the JSON says per
 section what is read from code, what is data and what is inferred.
 """
 
+import functools
 import glob
 import json
 import math
@@ -851,7 +852,7 @@ def find_scenes(extract_out):
     hits = set()
     for ext in ("*.scene", "*.scene.json"):
         for f in glob.glob(os.path.join(base, "**", ext), recursive=True):
-            hits.add(f[:-5] if f.endswith(".json") else f)
+            hits.add(f.removesuffix(".json"))
     return sorted(hits)
 
 
@@ -863,7 +864,11 @@ def scene_levels(scene_path):
     """[(name, node id, asset)] of the load-block scopes of a scene file, in tree order."""
     import anim_state_machine as asm
 
-    roots = asm.load_tree(scene_path, resolve_fragments=False)
+    try:
+        roots = asm.load_tree(scene_path, resolve_fragments=False)
+    except Exception as ex:
+        ex.add_note("level_meta: reading the load blocks of scene file %s" % scene_path)
+        raise
     return [(n.name or n.id, n.id, n.p("assetName")) for n in asm.walk(roots) if _is_level_scope(n)]
 
 
@@ -1237,70 +1242,71 @@ def _label(lv, n, names):
     """A one-line reading of a condition or action node."""
     c = n.cls or ""
     act = names.get("m_iactiontype") or names.get("_iaction")
-    if c == "TriggerActionCharacter":
-        who = names.get("m_itargettype")
-        if who in (None, "ENTITYREF"):
-            who = _tname(lv, n, "m_etarget1")
-        return "%s %s" % (act or "action %s" % n.p("m_iactiontype"), who or "-")
-    if c in ("TriggerActionGeneral", "TriggerActionSound", "TriggerActionParticle"):
-        s = "%s %s" % (act or "action %s" % n.p("m_iactiontype"), _tname(lv, n, "m_etarget1"))
-        if c == "TriggerActionGeneral" and _signed(n.p("m_iactiontype", 0)) in (10, 11, 12):
-            s += " (no effect)"  # 0x85f77b: empty handlers / no branch
-        return s
-    if c == "TriggerActionCharacterForceMove":
-        who = _tname(lv, n, "m_eactivatorgroup")
-        return "%s %s -> %s" % (act, who, _tname(lv, n, "m_emovetotargetgroup1"))
-    if c == "TriggerActionDelay":
-        return "DELAY"
-    if c == "TriggerActionCheckpoint":
-        return "CHECKPOINT %s" % n.p("_icheckpointid")
-    if c == "TriggerActionCamera":
-        return "%s %s" % (act, _tname(lv, n, "_ecamera") or n.name)
-    if c == "TriggerActionMovie":
-        t = lv.resolve(n, "m_emovie")
-        return "MOVIE %s" % ((t.p("movie") or t.name) if t is not None else None)
-    if c == "TriggerActionGameEvent":
-        return "GAME_EVENT %s" % (names.get("m_iactioneventtype") or n.p("m_iactioneventtype"))
-    if c == "TriggerActionGameMode":
-        return "IF MODE %s" % "|".join(names.get("_igamemodetype") or [])
-    if c == "TriggerActionBase":
-        return "GROUP"
-    if c == "TriggerConditionCollision":
-        vol = lv.resolve(n, "m_etriggerentity") or n.parent
-        return "%s by %s in %s" % (
-            names.get("m_itrueon"),
-            names.get("m_iactivator"),
-            (vol.name or vol.cls) if vol is not None else None,
-        )
-    if c == "TriggerConditionGameEvent":
-        return "ON EVENT %s" % (names.get("m_itrueon") or n.p("m_itrueon"))
-    if c == "TriggerConditionLogical":
-        k = names.get("m_iconditiontype")
-        return "%s %s" % (k, n.p("m_icount")) if k == "SOME" else str(k)
-    if c == "TriggerConditionToggle":
-        return "TOGGLE (fires on %s)" % ("true" if n.p("_tfireon") else "false")
-    if c == "TriggerConditionGameMode":
-        return "MODE %s" % "|".join(names.get("_igamemodetype") or [])
-    if c == "TriggerConditionCharacter":
-        return "%s %s%% %s" % (
-            names.get("_iconditiontype"),
-            n.p("_nvalue1"),
-            _tname(lv, n, "_echaracter"),
-        )
-    if c == "TriggerConditionTrue":
-        if n.p("m_treactivatable") is True:
-            return "ON LOAD, every %s s" % n.p("m_treactivationdelay")
-        return "ON LOAD"
-    if c == "TriggerUse":
-        return "USE %s by %s" % (names.get("m_iusetype"), names.get("_iactivatortype"))
-    if c == "TriggerUseFragment":
-        t = _use_trigger_of(lv, n)
-        if t is None:
-            return c
-        tn = _params(lv, t)[1]
-        return "USE %s by %s" % (tn.get("m_iusetype"), tn.get("_iactivatortype"))
-    if c == "TriggerConditionVisibility":
-        return "LOOK+USE %s within %s m" % (names.get("_icharacter"), n.p("_nmaxdist"))
+    match c:
+        case "TriggerActionCharacter":
+            who = names.get("m_itargettype")
+            if who in (None, "ENTITYREF"):
+                who = _tname(lv, n, "m_etarget1")
+            return "%s %s" % (act or "action %s" % n.p("m_iactiontype"), who or "-")
+        case "TriggerActionGeneral" | "TriggerActionSound" | "TriggerActionParticle":
+            s = "%s %s" % (act or "action %s" % n.p("m_iactiontype"), _tname(lv, n, "m_etarget1"))
+            if c == "TriggerActionGeneral" and _signed(n.p("m_iactiontype", 0)) in (10, 11, 12):
+                s += " (no effect)"  # 0x85f77b: empty handlers / no branch
+            return s
+        case "TriggerActionCharacterForceMove":
+            who = _tname(lv, n, "m_eactivatorgroup")
+            return "%s %s -> %s" % (act, who, _tname(lv, n, "m_emovetotargetgroup1"))
+        case "TriggerActionDelay":
+            return "DELAY"
+        case "TriggerActionCheckpoint":
+            return "CHECKPOINT %s" % n.p("_icheckpointid")
+        case "TriggerActionCamera":
+            return "%s %s" % (act, _tname(lv, n, "_ecamera") or n.name)
+        case "TriggerActionMovie":
+            t = lv.resolve(n, "m_emovie")
+            return "MOVIE %s" % ((t.p("movie") or t.name) if t is not None else None)
+        case "TriggerActionGameEvent":
+            return "GAME_EVENT %s" % (names.get("m_iactioneventtype") or n.p("m_iactioneventtype"))
+        case "TriggerActionGameMode":
+            return "IF MODE %s" % "|".join(names.get("_igamemodetype") or [])
+        case "TriggerActionBase":
+            return "GROUP"
+        case "TriggerConditionCollision":
+            vol = lv.resolve(n, "m_etriggerentity") or n.parent
+            return "%s by %s in %s" % (
+                names.get("m_itrueon"),
+                names.get("m_iactivator"),
+                (vol.name or vol.cls) if vol is not None else None,
+            )
+        case "TriggerConditionGameEvent":
+            return "ON EVENT %s" % (names.get("m_itrueon") or n.p("m_itrueon"))
+        case "TriggerConditionLogical":
+            k = names.get("m_iconditiontype")
+            return "%s %s" % (k, n.p("m_icount")) if k == "SOME" else str(k)
+        case "TriggerConditionToggle":
+            return "TOGGLE (fires on %s)" % ("true" if n.p("_tfireon") else "false")
+        case "TriggerConditionGameMode":
+            return "MODE %s" % "|".join(names.get("_igamemodetype") or [])
+        case "TriggerConditionCharacter":
+            return "%s %s%% %s" % (
+                names.get("_iconditiontype"),
+                n.p("_nvalue1"),
+                _tname(lv, n, "_echaracter"),
+            )
+        case "TriggerConditionTrue":
+            if n.p("m_treactivatable") is True:
+                return "ON LOAD, every %s s" % n.p("m_treactivationdelay")
+            return "ON LOAD"
+        case "TriggerUse":
+            return "USE %s by %s" % (names.get("m_iusetype"), names.get("_iactivatortype"))
+        case "TriggerUseFragment":
+            t = _use_trigger_of(lv, n)
+            if t is None:
+                return c
+            tn = _params(lv, t)[1]
+            return "USE %s by %s" % (tn.get("m_iusetype"), tn.get("_iactivatortype"))
+        case "TriggerConditionVisibility":
+            return "LOOK+USE %s within %s m" % (names.get("_icharacter"), n.p("_nmaxdist"))
     return c
 
 
@@ -1432,16 +1438,17 @@ def _volume(lv, n):
     nat = _native(n)
     out = lv.brief(n)
     out["native"] = nat
-    if nat == "CollisionBoxNode":
-        out["shape"] = "box"
-        out["size"] = [n.p("width"), n.p("height"), n.p("depth")]
-    elif nat == "CollisionSphereNode":
-        out["shape"] = "sphere"
-        out["radius"] = n.p("radius")
-    elif nat == "CollisionCapsuleNode":
-        out["shape"] = "capsule"
-        out["radius_or_width"] = n.p("width")
-        out["height"] = n.p("height")
+    match nat:
+        case "CollisionBoxNode":
+            out["shape"] = "box"
+            out["size"] = [n.p("width"), n.p("height"), n.p("depth")]
+        case "CollisionSphereNode":
+            out["shape"] = "sphere"
+            out["radius"] = n.p("radius")
+        case "CollisionCapsuleNode":
+            out["shape"] = "capsule"
+            out["radius_or_width"] = n.p("width")
+            out["height"] = n.p("height")
     out["enabled"] = lv.enabled[id(n)]
     out.update(lv.placement(n))
     return out
@@ -1452,22 +1459,22 @@ _VOLUME_NATIVES = ("CollisionBoxNode", "CollisionSphereNode", "CollisionCapsuleN
 
 def _child_when(parent, i):
     """How a child action of `parent` is fired: (when, delay seconds or None)."""
-    c = parent.cls
-    if c == "TriggerActionDelay":
-        d = parent.p("m_ndelaynumber%d" % i, 0.0) if i < 20 else 0.0
-        return "delay", d
-    if c == "TriggerActionCheckpoint":
-        return "restore", None
-    if c == "TriggerActionMovie":
-        return "after_movie", None
-    if c == "TriggerActionGameMode":
-        return "mode", None
-    if c == "TriggerActionSound" and parent.p("_tchildrenafter"):
-        return "after_sound", None
-    if c == "TriggerActionCamera" and parent.p("_iaction") == 0:
-        # a direct action child of a tour is fired only by the base handler (0x84b299,
-        # 0x84aea3, 0x84bde2): the timed cuts are children of the tour's sequence node
-        return "tour_refire", None
+    match parent.cls:
+        case "TriggerActionDelay":
+            d = parent.p("m_ndelaynumber%d" % i, 0.0) if i < 20 else 0.0
+            return "delay", d
+        case "TriggerActionCheckpoint":
+            return "restore", None
+        case "TriggerActionMovie":
+            return "after_movie", None
+        case "TriggerActionGameMode":
+            return "mode", None
+        case "TriggerActionSound" if parent.p("_tchildrenafter"):
+            return "after_sound", None
+        case "TriggerActionCamera" if parent.p("_iaction") == 0:
+            # a direct action child of a tour is fired only by the base handler (0x84b299,
+            # 0x84aea3, 0x84bde2): the timed cuts are children of the tour's sequence node
+            return "tour_refire", None
     return "immediate", None
 
 
@@ -2100,7 +2107,11 @@ def _is_identity(world, eps=1e-6):
         return None
     if any(abs(x) > eps for x in pos):
         return False
-    return any(all(abs(a - s * b) <= eps for a, b in zip(q, (0.0, 0.0, 0.0, 1.0))) for s in (1, -1))
+    # a world quat is 4 values by construction (_Level keeps only 4-value localOrients)
+    return any(
+        all(abs(a - s * b) <= eps for a, b in zip(q, (0.0, 0.0, 0.0, 1.0), strict=True))
+        for s in (1, -1)
+    )
 
 
 def _section_terrain(lv):
@@ -2165,7 +2176,10 @@ def _host_offset_copies(lv):
                 qb = b.p("localOrient")
                 if b is a or len(qa) != len(qb):
                     continue
-                if max(abs(x - y) for x, y in zip(qa, qb)) > HOST_OFFSET_QUAT_TOLERANCE:
+                if (
+                    max(abs(x - y) for x, y in zip(qa, qb, strict=True))
+                    > HOST_OFFSET_QUAT_TOLERANCE
+                ):
                     continue
                 d = [lv.world[id(a)][0][i] - lv.world[id(b)][0][i] - hw[0][i] for i in range(3)]
                 if max(abs(x) for x in d) < 1e-3:
@@ -2310,7 +2324,7 @@ def _section_models(lv, cubes=None, culling=None):
         rec["cube_map"] = _nearest_cube(rec, cubes)
         above = {lv.uid[id(g)] for g in _pvs_chain(lv, n) if g.cls == VISIBILITY_GROUP}
         rec["cube_map_by_area"] = _cube_by_area(
-            rec, by_uid, [g for g, s in zip(groups, shows) if above <= s]
+            rec, by_uid, [g for g, s in zip(groups, shows, strict=True) if above <= s]
         )
         out.append(rec)
     return out
@@ -2348,6 +2362,8 @@ def _nearest_cube(rec, cubes, file_state=True):
         cp = (c.get("world") or {}).get("pos")
         if (file_state and not c.get("candidate_at_load")) or pos is None or cp is None:
             continue
+        # plain zip: positions come from stored localPos lists, whose length the generic
+        # property walk does not fix; a malformed one must not stop the level export
         d = sum((float(a) - float(b)) ** 2 for a, b in zip(pos, cp))
         if bd is None or d < bd:
             best, bd = c, d
@@ -3174,7 +3190,11 @@ def reapplyable_fragments(extract_out):
                 head = fh.read(600)
         except OSError:
             continue
-        h = kapow_fragment.parse_header(head, kapow_fragment.detect_order(head))
+        try:
+            h = kapow_fragment.parse_header(head, kapow_fragment.detect_order(head))
+        except Exception as ex:
+            ex.add_note("level_meta: header of fragment %s" % f)
+            raise
         if h and h["reapplyable"]:
             out.append(
                 {
@@ -3189,11 +3209,25 @@ def reapplyable_fragments(extract_out):
 
 def _bounds(scope):
     keys = ("quadTreeBoundMinX", "quadTreeBoundMinZ", "quadTreeBoundMaxX", "quadTreeBoundMaxZ")
-    return {k[13:].lower(): scope.p(k) for k in keys} if scope.p(keys[0]) is not None else None
+    return (
+        {k.removeprefix("quadTreeBound").lower(): scope.p(k) for k in keys}
+        if scope.p(keys[0]) is not None
+        else None
+    )
 
 
 def build_level(scene_path, name, scope_id, extract_out=None):
     """The level-meta dict of one load block of a scene."""
+    try:
+        return _build_level(scene_path, name, scope_id, extract_out)
+    except Exception as ex:
+        ex.add_note(
+            "level_meta: level %s (load block %s) of scene file %s" % (name, scope_id, scene_path)
+        )
+        raise
+
+
+def _build_level(scene_path, name, scope_id, extract_out):
     roots, scope = load_level_tree(scene_path, scope_id)
     lv = _Level(roots, scope)
     asset = scope.p("assetName") or ""
@@ -3507,7 +3541,12 @@ LOGICAL_INPUT_BUTTONS = {
 }
 
 
-_INPUT_CODES = []
+@functools.cache
+def _input_codes():
+    """wlib/input_code_enums.json, read once (callers only read it)."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    with open(os.path.join(here, "input_code_enums.json"), encoding="utf-8") as fh:
+        return json.load(fh)
 
 
 def input_code_name(device, code):
@@ -3515,11 +3554,7 @@ def input_code_name(device, code):
     GamepadButton on the pad devices; on KEYBOARD_MOUSE KeyboardKeys below 256 and
     "MOUSE_BUTTON_*" for 256 + a MouseButtons value (wlib/input_code_enums.json; the
     tables are read from code, their use for these codes is inferred)."""
-    if not _INPUT_CODES:
-        here = os.path.dirname(os.path.abspath(__file__))
-        with open(os.path.join(here, "input_code_enums.json"), encoding="utf-8") as fh:
-            _INPUT_CODES.append(json.load(fh))
-    t = _INPUT_CODES[0]
+    t = _input_codes()
     if device != "KEYBOARD_MOUSE":
         return t["GamepadButton"].get(str(code))
     if code >= 256:
@@ -3608,25 +3643,27 @@ def _save_value(ty, w, p):
         if n > len(w):
             raise ValueError("list count")
         out = []
+        item = ty.removeprefix("list(").removesuffix(")")
         for _ in range(n):
-            v, p = _save_value(ty[5:-1], w, p)
+            v, p = _save_value(item, w, p)
             out.append(v)
         return out, p
-    if ty == "truth":
-        return bool(w[p]), p + 1
-    if ty == "integer":
-        return _signed(w[p]), p + 1
-    if ty == "number":
-        return struct.unpack("<f", struct.pack("<I", w[p]))[0], p + 1
-    if ty in ("vector", "color", "quaternion"):
-        n = 4 if ty == "quaternion" else 3
-        return list(struct.unpack("<%df" % n, struct.pack("<%dI" % n, *w[p : p + n]))), p + n
-    if ty == "string":
-        n = w[p]
-        raw = struct.pack("<%dI" % n, *w[p + 1 : p + 1 + n])
-        return raw.split(b"\x00")[0].decode("latin1"), p + 1 + n
-    if ty == "Entity":
-        return "%08x" % w[p], p + 1
+    match ty:
+        case "truth":
+            return bool(w[p]), p + 1
+        case "integer":
+            return _signed(w[p]), p + 1
+        case "number":
+            return struct.unpack("<f", struct.pack("<I", w[p]))[0], p + 1
+        case "vector" | "color" | "quaternion":
+            n = 4 if ty == "quaternion" else 3
+            return list(struct.unpack("<%df" % n, struct.pack("<%dI" % n, *w[p : p + n]))), p + n
+        case "string":
+            n = w[p]
+            raw = struct.pack("<%dI" % n, *w[p + 1 : p + 1 + n])
+            return raw.split(b"\x00")[0].decode("latin1"), p + 1 + n
+        case "Entity":
+            return "%08x" % w[p], p + 1
     raise ValueError(ty)
 
 
@@ -3646,7 +3683,14 @@ def parse_save(data):
     p = 17
     title = data[p : p + 2 * nchars].decode("utf-16-le", "replace").rstrip("\x00")
     p += 2 * nchars
-    (size,) = struct.unpack_from("<I", data, p)
+    try:
+        (size,) = struct.unpack_from("<I", data, p)
+    except struct.error as ex:
+        ex.add_note(
+            ".kpw save: payload size at offset 0x%X (after a title of %d UTF-16 chars), file of"
+            " %d bytes" % (p, nchars, len(data))
+        )
+        raise
     p += 4
     end = min(len(data), p + size)
     types = _type_ids()
@@ -3656,7 +3700,12 @@ def parse_save(data):
         ent, key, tid, nw = struct.unpack_from("<4I", data, p)
         p += 16
         if p + 4 * nw > end:
-            raise ValueError("record at %d runs past the payload" % (p - 16))
+            ex = ValueError("record at %d runs past the payload" % (p - 16))
+            ex.add_note(
+                ".kpw save: record at offset 0x%X: entity %08x, property hash %08x, type id"
+                " %08x, %d words; payload ends at offset 0x%X" % (p - 16, ent, key, tid, nw, end)
+            )
+            raise ex
         words = list(struct.unpack_from("<%dI" % nw, data, p))
         p += 4 * nw
         known = kapow_fragment.NAMES.get(key)  # (name, declared type) of the key table
@@ -3714,7 +3763,12 @@ def parse_save(data):
 
 def read_save(path):
     with open(path, "rb") as fh:
-        return parse_save(fh.read())
+        data = fh.read()
+    try:
+        return parse_save(data)
+    except Exception as ex:
+        ex.add_note(".kpw save file: %s" % path)
+        raise
 
 
 if __name__ == "__main__":

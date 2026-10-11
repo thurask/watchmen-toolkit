@@ -9,16 +9,14 @@ docs/ENGINE_CONSTANTS.md).
 
 import os, sys, glob, struct
 import numpy as np
+from wutil import load_npz
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.append(_HERE)  # append, never insert(0): flat module names must not shadow the stdlib
 
 
-def _read_bytes(path):
-    """The file's bytes; the handle is closed before returning."""
-    with open(path, "rb") as fh:
-        return fh.read()
+from wutil import read_bytes as _read_bytes  # one copy, in wlib/wutil.py
 
 
 def _clip_bank(animroot):
@@ -27,7 +25,7 @@ def _clip_bank(animroot):
         dn.sort()  # os.walk order is the file system's: keep the result independent of it
         for f in sorted(fn):
             if f.endswith(".animation"):
-                bank[f[:-10].strip()] = os.path.join(dp, f)
+                bank[f.removesuffix(".animation").strip()] = os.path.join(dp, f)
     return bank
 
 
@@ -395,6 +393,37 @@ def flat_buffer(ms, off, nv, stride, ib, order):
 
 NO_BUFFER = "no vertex buffer with a valid index buffer found in the stream"
 NO_TRIANGLES = "the buffer found holds no valid triangle"
+NO_SKIN = "the piece has no skin (a vertex format without joints) in a skinned part list"
+
+#: palette names (nodes of a model) without a slot in the bind that move a
+#: weighted palette index, since the last dropped_palette_names(reset=True):
+#: [{model, name, where}]
+_PALETTE_DROPPED = []
+
+
+def note_palette_names(model, names):
+    """Record palette names of `model` that have no bind slot and move a
+    palette index (mesh_loader.palette_remap's dropped entries, {name, where})."""
+    for d in names:
+        _PALETTE_DROPPED.append(
+            {"model": os.path.basename(model), "name": str(d["name"]), "where": d["where"]}
+        )
+
+
+def dropped_palette_names(reset=False):
+    """The names noted since the last reset, each (model, name) once."""
+    seen, out = set(), []
+    for r in _PALETTE_DROPPED:
+        k = (r["model"], r["name"], r["where"])
+        if k not in seen:
+            seen.add(k)
+            out.append(dict(r))
+    if reset:
+        del _PALETTE_DROPPED[:]
+        import mesh_loader
+
+        mesh_loader.reset_notes()
+    return out
 
 
 def load_parts(models, bn, sheets=None):
@@ -403,110 +432,102 @@ def load_parts(models, bn, sheets=None):
     with engine-exact submesh->material mapping.
     sheets: {model base name (lower case): {texture key: sheet name}} -- the
     texture sheets a variant selects (characters_export.variant_sheets); a part
-    with such a texture gets a material of its own (sheet_ref)."""
-    import watchmen_extract as we, extract_skeletons as es, rig_glb
+    with such a texture gets a material of its own (sheet_ref).
+
+    The pieces come from mesh_loader.load_submeshes (the model header, the
+    descriptor scan only as a logged fallback); the skin from
+    mesh_loader.palette_remap / remap_skin.  A palette name without a bind slot
+    is logged and noted (dropped_palette_names); a piece with a skin influence
+    the palette does not cover keeps its other weights, and a vertex left
+    without any marks the piece not decoded (note_dropped)."""
+    import watchmen_extract as we
     import variant_glb as _vg
-
-    uslot = {n: i for i, n in enumerate(bn)}
-    # 2026-07-13: 'BipNN '-prefix-insensitive fallback. Thug/Heavies models
-    # say 'RUpArmTwist' where the medium bind says 'Bip02 RUpArmTwist';
-    # KnotTop_Large says 'Bip01 Attach RHand' vs bind 'Attach RHand'.
-    # A silently dropped MID-LIST name shifts the rotate-by-one palette and
-    # mis-skins everything after it (user QA: medium arms+head, large arms).
-    # Exact matches always win, so validated skeletons are unaffected.
-    import re
-
-    _canon = lambda n: re.sub(r"^Bip\d+\s+", "", n)
-    ucanon = {}
-    for i, n in enumerate(bn):
-        c = _canon(n)
-        if c not in uslot:
-            ucanon.setdefault(c, i)
-
-    def _slot(x):
-        if x in uslot:
-            return uslot[x]
-        if x in ucanon:
-            return ucanon[x]
-        c = _canon(x)
-        if c in uslot:
-            return uslot[c]
-        return ucanon.get(c)
+    import mesh_loader as ml
 
     parts = []
     for base in models:
-        mh = _read_bytes(base + ".model")
-        ms = _read_bytes(base + ".model.stream")
-        plat = we.console_platform_for(base + ".model")  # decides the console colour order
-        # byte order: console (X360/PS3) model headers/streams are big-endian.
-        # The header says which (model_order); counting descriptors per order tied
-        # on single-submesh models and picked a false little-endian one.
-        order = model_order(mh, ms, os.path.basename(base))
-        be = order == ">"
-        plist = [x for _, x in es._ordered_names(mh, order)]
-        pf = [x for x in plist if _slot(x) is not None]
-        ppal = [pf[(k - 1) % len(pf)] for k in range(len(pf))]  # engine rotate-by-one
-        remap = np.array([_slot(n) for n in ppal], dtype=np.int64)
-        descs = we.find_descriptors(mh, order)
-        mats = we.extract_materials(mh)
-        sel = (sheets or {}).get(os.path.basename(base).lower())
-        if sel:
-            mats = [sheet_ref(m, sel.get(we.texture_key(m.path or ""))) for m in mats]
-        smat = we.submesh_materials(mh, order)
-        off = 0
-        for si_, (nv, stride, ib) in enumerate(descs):
-            hi = len(ms) - nv * stride - ib
-            c = off
-            vbo = None
-            while c <= min(off + 65536, hi):
-                # require a CLEAN index buffer too: a false-positive VB (X360
-                # TwilightLadyHair / rorschachspots) sits ~4 bytes before the
-                # real one, passes _vb_ok, but has a ~50% repeated-index IB.
-                if (
-                    we._sane(struct.unpack_from(order + "f", ms, c)[0])
-                    and we._vb_ok(ms, c, nv, stride, ib, order)
-                    and we._ib_ok(ms, c, nv, stride, ib, order)
-                ):
-                    vbo = c
-                    break
-                c += 1
-            if vbo is None:
-                vbo = flat_buffer(ms, off, nv, stride, ib, order)
-            if vbo is None:
-                note_dropped(base, si_, nv, stride, ib, order, NO_BUFFER)
-                continue
-            v, _, uv = we._decode_sub(ms, vbo, nv, stride, be)
-            skidx, skw = rig_glb.decode_skin(ms, vbo, nv, stride, order)
-            ibo = vbo + nv * stride
-            T = []
-            for t in range(ib // 6):
-                x, y, z = struct.unpack_from(order + "3H", ms, ibo + t * 6)
-                if x < nv and y < nv and z < nv and len({x, y, z}) == 3:
-                    T.append((x, y, z))
-            off = ibo + ib
-            if not v or not T:
-                note_dropped(base, si_, nv, stride, ib, order, NO_TRIANGLES)
-                continue
-            SI = remap[np.clip(np.asarray(skidx, int), 0, len(remap) - 1)]
-            parts.append(
-                _vg.with_attrs(
-                    (
-                        np.array(v, float),
-                        SI.astype(np.uint16),
-                        np.asarray(skw, np.float32),
-                        np.array(T),
-                        np.array(uv if uv else [(0.0, 0.0)] * len(v), np.float32),
-                        (
-                            mats[smat[si_][1]]
-                            if si_ < len(smat) and smat[si_][1] < len(mats)
-                            else (mats[si_] if si_ < len(mats) else "sub%d" % si_)
-                        ),
-                    ),
-                    # header-driven attributes for the buffer the scan found
-                    _vg.buffer_vertex_attrs(mh, ms, order, vbo, nv, stride, plat),
-                )
-            )
+        try:
+            mh = _read_bytes(base + ".model")
+            ms = _read_bytes(base + ".model.stream")
+            plat = we.console_platform_for(base + ".model")  # decides the console colour order
+            name = os.path.basename(base)
+            # byte order: console (X360/PS3) model headers/streams are big-endian.
+            # The header says which (model_order); counting descriptors per order tied
+            # on single-submesh models and picked a false little-endian one.
+            order = model_order(mh, ms, name)
+            remap, lost = ml.palette_remap(mh, order, bn, name)
+            note_palette_names(name, [d for d in lost if d["where"] == ml.MID_LIST])
+            sel = (sheets or {}).get(name.lower())
+            subs, _rep = ml.load_submeshes(mh, ms, name, order=order, platform=plat)
+            for sb in subs:
+                sk = skinned_part(name, sb, remap, order, lost)
+                if sk is None:
+                    continue
+                SI, SW = sk
+                mat = sb["material"]
+                if sel:
+                    mat = sheet_ref(mat, sel.get(we.texture_key(getattr(mat, "path", None) or "")))
+                parts.append(_vg.with_attrs((sb["V"], SI, SW, sb["T"], sb["UV"], mat), sb["attrs"]))
+        except Exception as ex:
+            ex.add_note(f"char_lib.load_parts: {base}.model")
+            raise
     return parts
+
+
+def skinned_part(name, sb, remap, order, lost=()):
+    """(SI, SW) of a mesh_loader submesh in bind slots, or None (logged and
+    noted) when the piece has no skin or a vertex keeps no weight.
+    lost: palette_remap's dropped names; one that sits after the last name with
+    a slot is noted (note_palette_names) when a weighted influence of this
+    piece uses palette index 0, the index it changes."""
+    import mesh_loader as ml
+
+    si_, nv, st, ib = sb["index"], sb["vertex_count"], sb["stride"], sb["index_bytes"]
+    skidx, skw = sb["skin"]
+    if skidx is None:
+        note_dropped(name, si_, nv, st, ib, order, NO_SKIN)
+        return None
+    tail = [d for d in lost if d["where"] == ml.AFTER_LAST]
+    if tail:
+        n0 = int(((np.asarray(skidx) == 0) & (np.asarray(skw) != 0)).sum())
+        if n0:
+            print(
+                "  ! %s sub%d: %d weighted influence(s) use palette index 0, which the "
+                "names without a bind slot (%s) change"
+                % (name, si_, n0, ", ".join(repr(d["name"]) for d in tail))
+            )
+            note_palette_names(name, tail)
+    SI, SW, stt = ml.remap_skin(skidx, skw, remap)
+    if stt["oob_influences"]:
+        # a problem line only when weight was dropped: the highest such index
+        _I, _W = np.asarray(skidx, np.int64), np.asarray(skw)
+        kmax = int(_I[(_I >= len(remap)) & (_W != 0)].max())
+        print(
+            "  ! %s sub%d: %d skin influence(s) name palette index %d of a %d-entry palette: "
+            "weight dropped (%d vertices renormalised), not clamped onto another bone"
+            % (name, si_, stt["oob_influences"], kmax, len(remap), stt["vertices_changed"])
+        )
+    if stt["oob_zero_weight"]:
+        # weight 0 already: nothing is dropped and the skinning is unchanged (the
+        # slot is written as joint 0, as every zero-weight slot is)
+        print(
+            "  note: %s sub%d: %d zero-weight skin influence(s) name an index past the "
+            "%d-entry palette: written as joint 0, skinning unchanged"
+            % (name, si_, stt["oob_zero_weight"], len(remap))
+        )
+    if stt["vertices_unweighted"]:
+        note_dropped(
+            name,
+            si_,
+            nv,
+            st,
+            ib,
+            order,
+            "%d of %d vertices are weighted only to joints outside the %d-entry palette"
+            % (stt["vertices_unweighted"], nv, len(remap)),
+        )
+        return None
+    return SI, SW
 
 
 def find_textures(parts, texroots):
@@ -531,7 +552,7 @@ def build_lib(bind, models, clips, out, animroot, texroots=(), upsample=2, track
 
     bake_v4._load_bind(bind)
     bank = _clip_bank(animroot)
-    bv = np.load(bind, allow_pickle=True)
+    bv = load_npz(bind)
     bn = [str(x) for x in bv["names"]]
     parts = load_parts(models, bn)
     print("parts:", len(parts))

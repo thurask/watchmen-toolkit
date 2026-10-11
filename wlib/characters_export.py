@@ -8,8 +8,9 @@ fragments).  Bakes are cached per skeleton in <outdir>/_bake/<key>/ so the
 export is resumable and variants of the same skeleton share the work.
 """
 
-import os, sys, glob
+import os, struct, sys, glob
 import numpy as np
+from wutil import default_naz, load_npz, order_name, platform_name
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
@@ -75,10 +76,7 @@ ENEMY_FRAGS_P1 = [
 CLIP_PREFIX_P1 = {"large": ("EN1", "EN2"), "small": ("EN1", "EN3")}
 
 
-def _read_bytes(path):
-    """The file's bytes; the handle is closed before returning."""
-    with open(path, "rb") as fh:
-        return fh.read()
+from wutil import read_bytes as _read_bytes  # one copy, in wlib/wutil.py
 
 
 def _find_fragment(root, stem):
@@ -126,7 +124,7 @@ def bind_mismatches(extract_out):
             try:
                 with contextlib.redirect_stdout(io.StringIO()):
                     build_bind_file.build(base + ".model", None, ref)
-                a, b = np.load(p, allow_pickle=True), np.load(ref, allow_pickle=True)
+                a, b = load_npz(p), load_npz(ref)
             except (Exception, SystemExit):
                 continue  # not checkable: say nothing rather than guess
             if [str(x) for x in a["names"]] != [str(x) for x in b["names"]]:
@@ -161,7 +159,9 @@ VERTEX_COLOUR_REASON = (
 )
 
 
-def not_decoded_extras(part_lists, ragdoll_why=None, dropped=None, attrs_wanted=True):
+def not_decoded_extras(
+    part_lists, ragdoll_why=None, dropped=None, attrs_wanted=True, palette_names=None
+):
     """asset.extras.watchmen.not_decoded of a character GLB: what the game data
     holds and this export does NOT -- so that a gap is stated, never silent.  None
     when nothing is missing (every PC Part 2 character).
@@ -172,7 +172,10 @@ def not_decoded_extras(part_lists, ragdoll_why=None, dropped=None, attrs_wanted=
                          known: NORMAL / TANGENT written, COLOR_0 (and the
                          vertex-alpha blend) not
       ragdoll            why there is no ragdoll rig / .ragdoll.json
-      pieces             mesh pieces no loader could decode (char_lib.note_dropped)"""
+      pieces             mesh pieces no loader could decode (char_lib.note_dropped)
+      palette_names      nodes of a model with no slot in the bind, left out of
+                         its rotate-by-one palette (char_lib.dropped_palette_names;
+                         mesh_loader.palette_remap)"""
     out = {}
     n = k = c = 0
     for parts in part_lists:
@@ -199,6 +202,8 @@ def not_decoded_extras(part_lists, ragdoll_why=None, dropped=None, attrs_wanted=
         out["ragdoll"] = {"reason": ragdoll_why}
     if dropped:
         out["pieces"] = list(dropped)
+    if palette_names:
+        out["palette_names"] = list(palette_names)
     return {"not_decoded": out} if out else None
 
 
@@ -575,7 +580,11 @@ def discover(extract_out):
         if not hit:
             print("  ! fragment %s not found" % stem)
             continue
-        d = _load_fragment(hit)
+        try:
+            d = _load_fragment(hit)
+        except (OSError, ValueError, KeyError, IndexError) as ex:
+            ex.add_note("character fragment %s (%s)" % (hit, stem))
+            raise
         vs = {}
         for i in d.get("instances", []):
             refs = i.get("model_ref")
@@ -585,7 +594,10 @@ def discover(extract_out):
             if name == "(preamble)":
                 name = stem
             basenames = [r.rsplit("/", 1)[-1].replace(".model", "") for r in refs]
-            refbase = {b: _model_ref_base(extract_out, r, midx) for b, r in zip(basenames, refs)}
+            refbase = {
+                b: _model_ref_base(extract_out, r, midx)
+                for b, r in zip(basenames, refs, strict=True)  # one name per reference
+            }
             skel = [b for b in basenames if b in SKEL_BIND]
             meshes = [b for b in basenames if b not in SKEL_BIND]
             # runtime head selection: keep ONE head, prefer *_NoSKL (non-NoSKL
@@ -641,9 +653,11 @@ def discover(extract_out):
     return chars
 
 
-def ensure_bind(key, extract_out, naz="game.naz"):
+def ensure_bind(key, extract_out, naz=None):
     """bind npz path for key; builds the BS2 (or any missing) bind from the
     model's own embedded skeleton if needed."""
+    if naz is None:
+        naz = default_naz()  # 01_game.naz, else game.naz
     bdir = os.path.join(extract_out, "binds")
     p = os.path.join(bdir, "bind_%s_file_v1.npz" % key)
     if os.path.exists(p):
@@ -723,7 +737,7 @@ def bind_digest(bind):
     import hashlib
 
     h = hashlib.sha1()
-    with np.load(bind, allow_pickle=True) as z:
+    with load_npz(bind) as z:
         for k in ("Rb", "tb", "tloc", "par", "names"):
             a = z[k]
             if a.dtype.kind in "OUS":
@@ -803,7 +817,7 @@ def bake_cache(key, bind, extract_out, outdir, budget=None):
 
     bake_v4._load_bind(bind)
     _tn = track_names_for(extract_out)
-    bv = np.load(bind, allow_pickle=True)
+    bv = load_npz(bind)
     _NB = len(bv["Rb"])
     _B4 = np.tile(np.eye(4), (_NB, 1, 1))
     _B4[:, :3, :3] = bv["Rb"]
@@ -822,7 +836,7 @@ def bake_cache(key, bind, extract_out, outdir, budget=None):
                 continue
             for f in sorted(fn):
                 if f.endswith(".animation"):
-                    clips[f[:-10].strip()] = os.path.join(dp, f)
+                    clips[f.removesuffix(".animation").strip()] = os.path.join(dp, f)
     cdir = os.path.join(outdir, "_bake", key)
     os.makedirs(cdir, exist_ok=True)
     import time
@@ -912,19 +926,25 @@ def grip_anims(anims, bn, par):
 
 def anim_meta_is_current(m, extract_out):
     """True when a stored anim_meta table `m` is what this toolkit would write:
-    its own format and content revision, and the format marker of every block the
+    its own format and content revision, the float mode of this run
+    ($WATCHMEN_JSON_FLOATS, `float_values`), the rig layout its `skeletons` describe
+    (--rig, `skeleton_rig`), and the format marker of every block the
     build adds (face, combat, fx).  A table from before one of those blocks, or with an older one,
     is not reused by a resumed export -- it would keep the old tables for good."""
     import anim_meta
     import combat_meta
+    import f32json
     import face_rule
     import frame
     import fx_meta
+    import variant_glb as vg
 
     return (
         isinstance(m, dict)
         and m.get("format") == anim_meta.FORMAT
         and m.get("revision") == anim_meta.REVISION  # content, not layout: see anim_meta
+        and m.get("float_values") == f32json.mode()  # a table in the other mode is rebuilt
+        and m.get("skeleton_rig") == vg.rig_mode()  # `skeletons` describes this run's rig
         and frame.frame_of(m) == frame.mode()  # a table in the other frame is rebuilt
         and (
             _block_current(m, "face", face_rule.FACE_FORMAT)
@@ -961,7 +981,7 @@ def anim_meta_failures(m):
 
 
 #: bump when what the GLB writers put into a file changes for the same inputs and options
-GLB_REVISION = 1
+GLB_REVISION = 3
 #: per output folder: {GLB path relative to the folder: the options it was written with}
 OPTIONS_FILE = "_glb_options.json"
 OPTIONS_FORMAT = "watchmen-glb-options/1"
@@ -973,10 +993,13 @@ def _env_flag(name):
 
 def writer_options(**over):
     """What the GLB writers' output depends on besides the game files and the bakes:
-    the coordinate frame, materials, naming, vertex attributes, the environment switches
+    the coordinate frame, materials, naming, vertex attributes, the rig layout, the
+    float mode of the decoded fragments the clip extras copy ($WATCHMEN_JSON_FLOATS), the
+    environment switches
     WATCHMEN_MATERIAL_OPTS / NORMALS / CONSOLE / NO_SYNTH / NO_RESTORE and GLB_REVISION.
     `over` adds the options of one command (characters_options)."""
     import canonical_names
+    import f32json
     import frame
     import materials
     import variant_glb as vg
@@ -987,11 +1010,12 @@ def writer_options(**over):
         "materials": materials.mode(),
         "names": canonical_names.mode(),
         "vertex_attrs": vg.vertex_attrs_enabled(),
+        "rig": vg.rig_mode(),
+        "json_floats": f32json.mode(),
     }
     for k in ("MATERIAL_OPTS", "NORMALS", "CONSOLE", "NO_SYNTH", "NO_RESTORE"):
         o["env_" + k.lower()] = _env_flag("WATCHMEN_" + k)
-    o.update(over)
-    return o
+    return o | over
 
 
 def characters_options(
@@ -1146,10 +1170,12 @@ def pairs_without_contact_check(m):
     ]
 
 
-def ensure_all_binds(keys, extract_out, naz="game.naz"):
+def ensure_all_binds(keys, extract_out, naz=None):
     """Build every missing bind of `keys` now ({key: reason} for those that fail), so the
     animation table that is written next can run its contact check on every pair: the
     `bs2` bind used to be built after the table, on the first run of an export."""
+    if naz is None:
+        naz = default_naz()  # 01_game.naz, else game.naz
     failed = {}
     for key in sorted(keys):
         try:
@@ -1212,7 +1238,7 @@ def clip_loops(meta, name):
 def export(
     extract_out,
     outdir,
-    naz="game.naz",
+    naz=None,
     budget=None,
     only=None,
     jiggle_model=None,
@@ -1241,6 +1267,8 @@ def export(
     ragdoll: True (default; $WATCHMEN_RAGDOLL=0 turns it off) = the ragdoll rig of the
     variant's slot-0 model as helper nodes in the GLB (node "ragdoll", outside the
     scene) and <Variant>.ragdoll.json beside it (ragdoll_rig)."""
+    if naz is None:
+        naz = default_naz()  # 01_game.naz, else game.naz
     import char_lib, variant_glb as vg
     import extract_out as _xo
     import parts_rule
@@ -1296,6 +1324,7 @@ def export(
                     kept += 1
                     continue
                 char_lib.dropped_pieces(reset=True)
+                char_lib.dropped_palette_names(reset=True)
                 os.makedirs(os.path.dirname(out), exist_ok=True)
                 if anims is None:
                     # 2026-07-13 perf: npz members are lazy — when a jiggle
@@ -1348,7 +1377,7 @@ def export(
                         jn += 1
                     if jn:
                         print("  jiggle_d6: %d clips [%s]" % (jn, key))
-                bv = np.load(bind, allow_pickle=True)
+                bv = load_npz(bind)
                 bn = [str(x) for x in bv["names"]]
                 face = None
                 midx = _model_index(extract_out)
@@ -1521,7 +1550,17 @@ def export(
                     )
                 grips = grip_anims(anims, bn, bv["par"])
                 _rwhy = []
-                rag = ragdoll_helpers(extract_out, key, models, bind, out, ragdoll, why=_rwhy)
+                # the joint node names write_glb gives this file (None: flat rig)
+                _jnames = vg.glb_joint_names(
+                    bn,
+                    [int(p) for p in bv["par"]] if "par" in bv else None,
+                    [n for n, _ in atts]
+                    + [n for n, _ in alt_parts]
+                    + [n for n, _, _s in outfit_parts],
+                )
+                rag = ragdoll_helpers(
+                    extract_out, key, models, bind, out, ragdoll, why=_rwhy, joint_names=_jnames
+                )
                 # what this GLB does not carry is stated in it and in the log
                 _nd = not_decoded_extras(
                     [parts, (face or {}).get("parts")]
@@ -1531,6 +1570,7 @@ def export(
                     _rwhy[0] if _rwhy else None,
                     char_lib.dropped_pieces(reset=True),
                     vg.vertex_attrs_enabled(),
+                    char_lib.dropped_palette_names(reset=True),
                 )
                 if _nd and "vertex_attributes" in _nd["not_decoded"]:
                     _va = _nd["not_decoded"]["vertex_attributes"]
@@ -1564,7 +1604,7 @@ def export(
                     parts_record=prec,
                     outfit_parts=outfit_parts,
                     asset_extras=__import__("fx_meta").with_attachments(
-                        dict(reconstruction_extras(cname, vname) or {}, **(_nd or {})) or None,
+                        ((reconstruction_extras(cname, vname) or {}) | (_nd or {})) or None,
                         extract_out,
                         cname,
                         bn,
@@ -1603,11 +1643,13 @@ def ragdoll_source_model(extract_out, key, models):
     return path if path and os.path.exists(path) else None
 
 
-def ragdoll_helpers(extract_out, key, models, bind, out, enabled=None, why=None):
+def ragdoll_helpers(extract_out, key, models, bind, out, enabled=None, why=None, joint_names=None):
     """ragdoll_rig.glb_helpers for one variant (None when switched off or the
     model has no rig); writes <out stem>.ragdoll.json as a side effect.  Without a
     rig one line says why, and the reason is appended to the list `why`.  The byte
-    order is the one the model header states (console headers are big-endian)."""
+    order is the one the model header states (console headers are big-endian).
+    joint_names: the GLB's joint node names (variant_glb.glb_joint_names; None =
+    the flat rig's 'b<k>')."""
     if not ragdoll_enabled(enabled):
         return None
     import json
@@ -1641,7 +1683,7 @@ def ragdoll_helpers(extract_out, key, models, bind, out, enabled=None, why=None)
             mat = ragdoll_rig.material_from_pivot_book(_read_bytes(pb), ragdoll_rig.sheet_for(key))
         except (KeyError, ValueError) as e:
             print("  ! pivot book %s: %s" % (pb, e))
-    bv = np.load(bind, allow_pickle=True)
+    bv = load_npz(bind)
     names = [str(x) for x in bv["names"]]
     doc = ragdoll_rig.sidecar(
         rig,
@@ -1652,12 +1694,15 @@ def ragdoll_helpers(extract_out, key, models, bind, out, enabled=None, why=None)
         ),
         group=ragdoll_rig.group_for(key),
         glb=os.path.basename(out),
+        joint_names=joint_names,
     )
     side = out[:-4] + ".ragdoll.json"
     with open(side + ".tmp", "w", encoding="utf-8", newline="\n") as f:
         json.dump(doc, f, separators=(",", ":"))
     os.replace(side + ".tmp", side)
-    helpers = ragdoll_rig.glb_helpers(rig, names, bv["Rb"], bv["tb"], material=mat)
+    helpers = ragdoll_rig.glb_helpers(
+        rig, names, bv["Rb"], bv["tb"], material=mat, joint_names=joint_names
+    )
     helpers["extras"]["sidecar"] = os.path.basename(side)
     helpers["extras"]["source_model"] = doc["source_model"]
     return helpers
@@ -1670,8 +1715,12 @@ def weapon_sets(extract_out):
     )
     if not hit:
         return {}
-    d = _load_fragment(hit)
-    props = {n["id"]: {k: v for k, t, v in n["props"]} for n in d["nodes_full"]}
+    try:
+        d = _load_fragment(hit)
+        props = {n["id"]: {k: v for k, t, v in n["props"]} for n in d["nodes_full"]}
+    except (OSError, ValueError, KeyError, IndexError, TypeError) as ex:
+        ex.add_note("weapon fragment %s" % (hit,))
+        raise
     colls = {
         i: p["name"]
         for i, p in props.items()
@@ -1710,10 +1759,7 @@ def _weapon_attach_parts(model_base, slot, bind, bn, offset=None):
     BoneAttacher gives them the attach bone's world transform (identity local),
     optionally composed with an authored (localPos, localOrient) offset
     (TwilightLady's TW_weapon).  Verts -> body bind space, all weights on slot."""
-    import watchmen_extract as we, struct as st
-    import variant_glb as _vga
-
-    bv = np.load(bind, allow_pickle=True)
+    bv = load_npz(bind)
     Rb, tbb = bv["Rb"][slot], bv["tb"][slot]
     M, t = Rb, tbb
     if offset is not None:
@@ -1721,70 +1767,51 @@ def _weapon_attach_parts(model_base, slot, bind, bn, offset=None):
         Ro = _q2m_conj(q)
         M = Rb @ Ro
         t = Rb @ np.asarray(p, float) + tbb
+    return _rigid_parts(model_base, M, t, slot, "%s_sub%d", positional=True)
+
+
+def _rigid_parts(model_base, M, t, slot, fallback_name, positional):
+    """Every piece of `model_base` (mesh_loader.load_submeshes, no skin) moved
+    rigidly into the body's bind space (V' = M V + t, its normal / tangent frame
+    turned by M) with all weight on bind slot `slot`."""
+    import watchmen_extract as we
+    import variant_glb as _vga
+    import char_lib as _cl
+    import mesh_loader as ml
+
     mh = _read_bytes(model_base + ".model")
     ms = _read_bytes(model_base + ".model.stream")
     plat = we.console_platform_for(model_base + ".model")  # the console colour order
-    import char_lib as _cl
-
+    name = os.path.basename(model_base)
     # the header states the byte order (the descriptor-count rule tied on
     # single-submesh console models: WPN_2x4_2H was lost on Xbox 360 / PS3)
-    order = _cl.model_order(mh, ms, os.path.basename(model_base))
-    be = order == ">"
-    descs = we.find_descriptors(mh, order)
-    mats = we.extract_materials(mh)
-    smat = we.submesh_materials(mh, order)
-    wname = os.path.basename(model_base)
+    order = _cl.model_order(mh, ms, name)
+    try:
+        subs, _rep = ml.load_submeshes(
+            mh,
+            ms,
+            name,
+            order=order,
+            platform=plat,
+            fallback_name=fallback_name,
+            positional=positional,
+            skin=False,
+        )
+    except (ValueError, KeyError, IndexError, struct.error) as ex:
+        ex.add_note(
+            "model %s.model (%d header bytes, %d stream bytes, %s, platform %s)"
+            % (model_base, len(mh), len(ms), order_name(order), platform_name(plat, order))
+        )
+        raise
     parts = []
-    off = 0
-    for si_, (nv, stride, ib) in enumerate(descs):
-        himax = len(ms) - nv * stride - ib
-        c = off
-        vbo = None
-        while c <= min(off + 65536, himax):
-            if (
-                we._sane(st.unpack_from(order + "f", ms, c)[0])
-                and we._vb_ok(ms, c, nv, stride, ib, order)
-                and we._ib_ok(ms, c, nv, stride, ib, order)
-            ):  # clean IB -> skip false-positive VB
-                vbo = c
-                break
-            c += 1
-        if vbo is None:
-            _cl.note_dropped(model_base, si_, nv, stride, ib, order, _cl.NO_BUFFER)
-            continue
-        v, _, uv = we._decode_sub(ms, vbo, nv, stride, be)
-        ibo = vbo + nv * stride
-        T = []
-        for tt in range(ib // 6):
-            x, y, z = st.unpack_from(order + "3H", ms, ibo + tt * 6)
-            if x < nv and y < nv and z < nv and len({x, y, z}) == 3:
-                T.append((x, y, z))
-        off = ibo + ib
-        if not v or not T:
-            _cl.note_dropped(model_base, si_, nv, stride, ib, order, _cl.NO_TRIANGLES)
-            continue
-        V = (np.array(v, float) @ M.T) + t
+    for sb in subs:
+        V = (sb["V"] @ M.T) + t
         SI = np.full((len(V), 4), slot, np.uint16)
         SW = np.zeros((len(V), 4), np.float32)
         SW[:, 0] = 1
+        # the mesh buffer's own vectors, turned with the positions
         parts.append(
-            _vga.with_attrs(
-                (
-                    V,
-                    SI,
-                    SW,
-                    np.array(T),
-                    np.array(uv if uv else [(0.0, 0.0)] * len(V), np.float32),
-                    (
-                        mats[smat[si_][1]]
-                        if si_ < len(smat) and smat[si_][1] < len(mats)
-                        else (mats[si_] if si_ < len(mats) else "%s_sub%d" % (wname, si_))
-                    ),
-                ),
-                # the mesh buffer's own vectors, turned with the positions
-                _vga.buffer_vertex_attrs(mh, ms, order, vbo, nv, stride, plat),
-                rot=M,
-            )
+            _vga.with_attrs((V, SI, SW, sb["T"], sb["UV"], sb["material"]), sb["attrs"], rot=M)
         )
     return parts
 
@@ -1876,15 +1903,13 @@ def char_attachments(cname, bind, bn, extract_out):
 def _rigid_attach_parts(model_base, bone, bind, bn):
     """Decode a runtime-attached model (e.g. facial-rigged head) as rigid parts
     on `bone`: verts moved from the model's own node space into the body's bind
-    space, all weights on the attach bone's slot."""
+    space, all weights on the attach bone's slot.  The export itself attaches
+    heads with their face rig (_face_attach); this rigid form is kept for
+    callers of the module and reads its pieces through _rigid_parts, like the
+    weapon loader."""
     import parse_model_nodes, build_bind_file as bbf
-    import watchmen_extract as we, struct as st
-    import variant_glb as _vga
 
-    mh = _read_bytes(model_base + ".model")
-    ms = _read_bytes(model_base + ".model.stream")
-    plat = we.console_platform_for(model_base + ".model")  # the console colour order
-    names, pos, quat, parent = parse_model_nodes.parse(mh)
+    names, pos, quat, parent = parse_model_nodes.parse(_read_bytes(model_base + ".model"))
     pos[0] = 0
     quat[0] = np.array([0, 0, 0, 1.0])
     parent[0] = -1
@@ -1893,7 +1918,6 @@ def _rigid_attach_parts(model_base, bone, bind, bn):
     N = len(names)
     tb = np.zeros((N, 3))
     R = [bbf.q2m(Wq[i]) for i in range(N)]
-    order = sorted(range(N), key=lambda k: 0 if parent[k] < 0 else 1)
     done = [False] * N
 
     def go(k):
@@ -1910,72 +1934,12 @@ def _rigid_attach_parts(model_base, bone, bind, bn):
     for k in range(N):
         go(k)
     hi = names.index(bone)
-    bv = np.load(bind, allow_pickle=True)
+    bv = load_npz(bind)
     bidx = bn.index(bone)
     Rb, tbb = bv["Rb"][bidx], bv["tb"][bidx]
     M = Rb @ np.linalg.inv(R[hi])
     t = tbb - M @ tb[hi]
-    # byte order: console (X360/PS3) model headers/streams are big-endian; the
-    # header states which (char_lib.model_order).
-    import char_lib as _cl
-
-    order = _cl.model_order(mh, ms, os.path.basename(model_base))
-    be = order == ">"
-    descs = we.find_descriptors(mh, order)
-    mats = we.extract_materials(mh)
-    smat = we.submesh_materials(mh, order)
-    parts = []
-    off = 0
-    for si_, (nv, stride, ib) in enumerate(descs):
-        himax = len(ms) - nv * stride - ib
-        c = off
-        vbo = None
-        while c <= min(off + 65536, himax):
-            if (
-                we._sane(st.unpack_from(order + "f", ms, c)[0])
-                and we._vb_ok(ms, c, nv, stride, ib, order)
-                and we._ib_ok(ms, c, nv, stride, ib, order)
-            ):  # clean IB -> skip false-positive VB
-                vbo = c
-                break
-            c += 1
-        if vbo is None:
-            _cl.note_dropped(model_base, si_, nv, stride, ib, order, _cl.NO_BUFFER)
-            continue
-        v, _, uv = we._decode_sub(ms, vbo, nv, stride, be)
-        ibo = vbo + nv * stride
-        T = []
-        for tt in range(ib // 6):
-            x, y, z = st.unpack_from(order + "3H", ms, ibo + tt * 6)
-            if x < nv and y < nv and z < nv and len({x, y, z}) == 3:
-                T.append((x, y, z))
-        off = ibo + ib
-        if not v or not T:
-            _cl.note_dropped(model_base, si_, nv, stride, ib, order, _cl.NO_TRIANGLES)
-            continue
-        V = (np.array(v, float) @ M.T) + t
-        SI = np.full((len(V), 4), bidx, np.uint16)
-        SW = np.zeros((len(V), 4), np.float32)
-        SW[:, 0] = 1
-        parts.append(
-            _vga.with_attrs(
-                (
-                    V,
-                    SI,
-                    SW,
-                    np.array(T),
-                    np.array(uv if uv else [(0.0, 0.0)] * len(V), np.float32),
-                    (
-                        mats[smat[si_][1]]
-                        if si_ < len(smat) and smat[si_][1] < len(mats)
-                        else "head_sub%d" % si_
-                    ),
-                ),
-                _vga.buffer_vertex_attrs(mh, ms, order, vbo, nv, stride, plat),
-                rot=M,
-            )
-        )
-    return parts
+    return _rigid_parts(model_base, M, t, bidx, "head_sub%d", positional=False)
 
 
 def _icp_refine(A, B, M, t, iters=7):
@@ -2077,11 +2041,11 @@ def _face_attach(model_base, bone, bind, bn, cname, extract_out, outdir, align_r
     pos[0] = 0
     quat[0] = np.array([0, 0, 0, 1.0])
     parent[0] = -1
-    fb = np.load(fbind, allow_pickle=True)
+    fb = load_npz(fbind)
     fbn = [str(x) for x in fb["names"]]
     hi = fbn.index(bone)
     Rf, tf = fb["Rb"][hi], fb["tb"][hi]
-    bv = np.load(bind, allow_pickle=True)
+    bv = load_npz(bind)
     bidx = bn.index(bone)
     Rb, tbb = bv["Rb"][bidx], bv["tb"][bidx]
     M = Rb @ np.linalg.inv(Rf)

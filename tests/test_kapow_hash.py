@@ -10,12 +10,7 @@ import pytest
 
 import kapow_props as kp
 
-try:  # watchmenlib pulls in kapow_fragment, which needs the bundled data tables
-    import watchmenlib as wl
-except Exception as _ex:  # pragma: no cover - depends on the checkout
-    wl, _WL_ERR = None, _ex
-else:
-    _WL_ERR = None
+import watchmenlib as wl  # a broken facade (missing table, bad import) is an error
 
 POLY = 0x04C11DB7
 GEN = (1 << 32) | POLY  # x^32 + poly, as a GF(2) polynomial
@@ -108,7 +103,6 @@ def test_golden_values(name, expected):
     assert kp.kapow_hash(name) == expected
 
 
-@pytest.mark.skipif(wl is None, reason="watchmenlib unavailable: %s" % (_WL_ERR,))
 def test_lookup_convention_is_case_insensitive():
     """The public lookup (`watchmenlib.kapow_hash`) folds case; the raw one does not.
 

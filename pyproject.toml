@@ -4,23 +4,26 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "watchmen-kapow-toolkit"
-version = "1.4.0"
+version = "1.5.0"
 description = "Asset extraction toolkit for Watchmen: The End Is Nigh Parts 1 & 2 (Kapow engine) — .naz archives, textures, models, audio, fragments, and engine-exact character animation on PC, Xbox 360, and PS3."
 readme = "README.md"
 license = {text = "MIT"}
-# TODO before publishing: fill these in.
 authors = [{name = "thurask"}]
-requires-python = ">=3.8"
+requires-python = ">=3.13"
 keywords = ["reverse-engineering", "game-assets", "kapow", "watchmen", "naz", "glb"]
 classifiers = [
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Games/Entertainment",
     "Topic :: System :: Archiving",
 ]
 dependencies = [
-    "numpy>=1.20",
-    "Pillow>=9",
+    # the first releases with Python 3.13 wheels that declare 3.13 support
+    "numpy>=2.1",
+    "Pillow>=11",
 ]
 
 [project.urls]
@@ -35,13 +38,15 @@ regdump = ["capstone"]
 
 [project.scripts]
 watchmen = "watchmen:cli"
+# the same command under a name that does not collide with other "watchmen" tools
+watchmen-kapow = "watchmen:cli"
 
 [tool.setuptools]
 py-modules = ["watchmen"]
 packages = ["wlib"]
 
 [tool.setuptools.package-data]
-wlib = ["*.pkl", "*.npz", "*.json"]
+wlib = ["*.pkl", "*.json"]
 
 [tool.black]
 line-length = 100

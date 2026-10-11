@@ -227,7 +227,10 @@ def prune_gltf(doc, keep_animation=None, outfit=None):
     character, and the clips are what makes the import slow.  Kept: every node reachable
     from the scene's roots, the joints of the skins those nodes use (with their
     ancestors), and the animation named `keep_animation`.  Meshes, materials, images and
-    accessors stay as they are; an importer reads only what a node refers to."""
+    accessors stay as they are; an importer reads only what a node refers to.  By design
+    the pruned file is therefore no smaller, and the Khronos validator lists the
+    accessors of the dropped clips and of the nodes left out (and a texture sampler no
+    material uses any more) as UNUSED_OBJECT infos -- not warnings or errors."""
     doc = json.loads(json.dumps(doc))
     nodes = doc.get("nodes") or []
     scenes = doc.get("scenes") or []
@@ -590,7 +593,7 @@ def character_choice(doc, rec, chars_dir, turn=0):
         "variant": None,
         "glb": None,
         "pick": None,
-        "candidates": ["%s:%s" % (i, n) for i, n in zip(idx, names) if n],
+        "candidates": ["%s:%s" % (i, n) for i, n in zip(idx, names, strict=True) if n],
         "status": status,
         "member": None,
         "outfit": 1,

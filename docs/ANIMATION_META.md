@@ -735,6 +735,10 @@ stored strings and neither key. See "Asset strings in the JSON files" in the REA
 
 ```
 format       "watchmen-anim-meta/2"
+revision     6                   what the build puts into the layout (1.5.0); a resumed
+                                 `characters` run builds a table of another revision again
+float_values "exact" | "rounded" how the fragment numbers were read ($WATCHMEN_JSON_FLOATS)
+skeleton_rig "hierarchy" | "flat"  the GLB layout `skeletons` describes (--rig)
 coordinate_frame       "right-handed-true"   absent in a mirrored-frame file
 coordinate_frame_note  one sentence          (--frame mirrored, toolkit 1.3.0)
 conventions  { key: sentence }   units, up_axis, handedness, playpos, names,
@@ -752,7 +756,12 @@ enum_variables    { variable id: { name, values: family or null } }   16 variabl
 transition_start_priority  [ { rule, when, start } ]
 skeletons    { bind key: { joint_names, joint_parents, motion_root,
                            motion_root_joint, interact_joint, body_root_joint,
-                           roots, joint_space, attach_joints, joint_count } }
+                           roots, joint_space, attach_joints, joint_count,
+                           joint_nodes (hierarchy) } }
+             -- the record of a bind is the `skins[0].extras.watchmen` of the GLBs
+                written with it in the layout `skeleton_rig` names (`joint_space`
+                says which; a GLB in which an attachment or outfit node shares a
+                bone's name adds ` #<k>` to that joint: its own `joint_nodes` win)
 classes      { class: { fragment, character_type, character_type_id,
                         states: [ state ], transitions: [ transition ] } }
 clips        { clip name: { file, duration_s, key_count, key_rate_hz,
@@ -999,7 +1008,8 @@ face rig: `rule` (`engine`), `pose_family`, `face_class`, `baked_from` (`class`,
 (`written_time_s`, `pose`, `ease_in_s` — what is keyed), `not_baked[]`,
 `idle_cycle_baked`; or `note` when the metadata has no track for the clip.
 `skins[1].extras.watchmen.face`: `head_model`, `pose_family`, `face_classes`,
-`anchor_node`, `track_choice` (the rule in words), `idle_cycle_baked`, and
+`anchor_node` (`f_anchor`, or `face_root` in a `--rig flat` file),
+`anchor_parent` (hierarchy: the body joint node `f_anchor` hangs under), `track_choice` (the rule in words), `idle_cycle_baked`, and
 `game_head` when the head was taken from a head collection: `head`, `static`
 (the head it replaces), `head_model_type` (+ `_name`), `head_by_type`, `basis`,
 `texture_sheets` (the collection node's records: `slot`, `pivot`, `lod`,
@@ -1071,15 +1081,57 @@ same list.
 
 | Where | What |
 |---|---|
-| `asset.extras.watchmen` | `format`, `conventions`, `coordinate_frame` + `coordinate_frame_note` (true frame; absent = mirrored) |
-| `skins[0].extras.watchmen` | the skeleton record above |
-| each joint node's `extras` | `bone` (real name), `parent` (joint index, −1 for a root) |
+| `asset.extras.watchmen` | `format`, `conventions`, `coordinate_frame` + `coordinate_frame_note` (true frame; absent = mirrored), `rig` (`mode` `hierarchy` / `flat`; `reason` when a hierarchy was asked for and could not be written) |
+| `skins[0].extras.watchmen` | the skeleton record above; `joint_space` says which layout the file has, and a hierarchical file adds `joint_nodes` (the joint node names in palette order) |
+| each joint node's `extras` | `bone` (real name), `parent` (joint index, −1 for a root); a hierarchical file adds `index` (the joint's palette index) |
 | `animations[i].extras.watchmen` (not imported by Blender's stock importer; see README) | the clip record (`clip`, header facts, `loop`, `game_pivot`, `interact`, `weapon`, `speeds`), with `events` timed (`time_s`, `written_time_s`; `null` for leave-state events), `written_fps`, `written_duration_s`, `states`, and `pairs` (primary only) each carrying `role`, `other_clip`, `other_class`, the two state names, `same_duration`, `primary`, `confidence`, `placement`, `weapons` and `timeline`, and — when the pair has them — `camera_cuts`, `camera_return` (FX_META.md: the procedural camera of a finisher or counter, on the pair clock of `timeline`) and `trigger` (COMBAT_META.md: what starts the pair). The events carry `payload` / `payload_stale` |
 | `asset.extras.watchmen.fx_attachments` | the emitters and light flashes the game hangs on the character's joints (Rorschach, Nite Owl, Twilight Lady; FX_META.md) |
 
-Joint nodes keep their `b0…bN` names and stay flat under `root`, so existing
-importers are unaffected; the order is the palette order, which is
-`joint_names`. Synthetic animations (`GRIP 1H`, face poses) have no clip record
+The mesh pieces, their JOINTS_0 and WEIGHTS_0 come from `wlib/mesh_loader.py`
+(since 1.5.0 the one loader of `characters`, `char`, `charlibs`, `faces` and the
+weapon attachments): each piece is the render buffer the model header locates,
+its triangles read with the buffer's primitive type; a piece's joint index k
+names the model's k-th node in the rotate-by-one list of the nodes that have a
+slot in the bind, and that node's bind slot is the joint written. An influence
+whose index the list does not reach gets joint 0 and weight 0 and the vertex's
+other weights are renormalised (1.4.0 clamped it onto the last entry); a vertex
+left with no weight, or a triangle naming a vertex the buffer does not have,
+leaves its piece out (`not_decoded.pieces`, with the reason). A node without a
+bind slot is logged, and in a `characters` GLB listed under
+`asset.extras.watchmen.not_decoded.palette_names` when it moves a weighted
+index; on the six sets the only such node is `Interact` (the binds say
+`interact`), after every other node and moving none (measured).
+
+The joint order is the palette order, which is `joint_names`. Since 1.5.0 the
+joints are a hierarchy (`--rig hierarchy`, the default): joint node k is named
+after its bone (control characters removed; an empty name becomes `b<k>`, one
+another node of the file has gets ` #<k>`), it is a child of the joint of `joint_parents[k]`
+(a root bone: of `root`), and its rest transform and its animation keys are
+local to that parent — R_p^T R_k and R_p^T (t_k − t_p) of the world transforms
+the flat layout writes, so the product down the chain is that world transform.
+The inverse bind matrices are unchanged. The shown skinned mesh nodes (`mesh`,
+the shown outfit and weapon nodes, `face_mesh`) are scene roots. The face rig
+rides the skeleton: `f_anchor` is a child of the joint the head is attached to
+(`Head`), with the constant local transform inv(B_Head)·M (M places the face
+model on the body's bind), and each face proxy `face_proxy_b<k>_<i>` a child of
+body joint k with inv(B_k)·M_i; neither has a channel, so between two keys the
+face follows the head the viewer interpolates (1.4.0 drove both with world-space
+channels under a scene root `face_root`: on Dominatrix_1 the face then left the
+head between keys by up to 4.3 cm and 5.6°, measured). The face joints `f_<bone>`
+under `f_anchor` keep their local channels, byte for byte. The face skin's
+`skeleton` is `root`, and `skins[1].extras.watchmen.face.anchor_node` is
+`f_anchor` (with `anchor_parent`, the joint's node name); in a flat file it is
+`face_root`. A masked clip (`GRIP 1H` / `GRIP 2H`) keys its
+hand bones relative to their parents, from its own palette. Every other clip
+keys every joint (rotation and translation, one key per frame): Blender keeps
+the pose of the previous action on a bone that has no channel. `--rig flat`
+($WATCHMEN_RIG=flat) writes the 1.4.0 layout — joint nodes `b0…bN`, every one a
+child of `root` with the joint's world transform, the mesh nodes under `root`,
+the face rig under the scene root `face_root` with world channels on `f_anchor`
+and the proxies — for importers written against it. The validator's `NODE_SKINNED_MESH_NON_ROOT`
+warning stays on the hidden mesh nodes under `alternatives` and `ragdoll`
+(they are in no scene; grouping them is what hides them); see the README,
+"Skeleton". Synthetic animations (`GRIP 1H`, face poses) have no clip record
 [2026-10-04: the `FACE …` animations carry `extras.watchmen.face_pose`, and
 body clips of a character with a face rig carry `face`; see "The face block"].
 

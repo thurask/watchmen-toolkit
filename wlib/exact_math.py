@@ -104,24 +104,28 @@ def _reduce(x):
 
 def sin(x):
     n, r = _reduce(x)
-    if n == 0:
-        return _k_sin(r)
-    if n == 1:
-        return _k_cos(r)
-    if n == 2:
-        return -_k_sin(r)
-    return -_k_cos(r)
+    match n:  # quadrant
+        case 0:
+            return _k_sin(r)
+        case 1:
+            return _k_cos(r)
+        case 2:
+            return -_k_sin(r)
+        case _:
+            return -_k_cos(r)
 
 
 def cos(x):
     n, r = _reduce(x)
-    if n == 0:
-        return _k_cos(r)
-    if n == 1:
-        return -_k_sin(r)
-    if n == 2:
-        return -_k_cos(r)
-    return _k_sin(r)
+    match n:  # quadrant
+        case 0:
+            return _k_cos(r)
+        case 1:
+            return -_k_sin(r)
+        case 2:
+            return -_k_cos(r)
+        case _:
+            return _k_sin(r)
 
 
 def tan(x):
@@ -230,7 +234,12 @@ POLAR_TOL = 1e-15
 def nearest_rotation(m):
     """Orthogonal polar factor of the 3x3 `m` (rows of floats): the orthogonal matrix
     nearest to it, what U @ Vt of its SVD is.  Newton's iteration X <- (X + X^-T) / 2;
-    a singular matrix raises ValueError."""
+    a singular matrix raises ValueError.
+
+    The polar factor keeps the sign of the determinant: for a matrix with det(m) < 0
+    the result is a reflection (det -1), not a rotation -- nothing is flipped to make
+    it one.  The callers feed near-rotations (a rotation plus rounding), whose polar
+    factor is the nearest rotation; tests/test_v150_hardening.py pins both cases."""
     x = tuple(tuple(float(v) for v in row) for row in m)
     for _ in range(POLAR_MAX_ITERATIONS):
         c = _cofactors(x)

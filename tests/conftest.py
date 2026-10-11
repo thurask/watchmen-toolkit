@@ -275,6 +275,21 @@ class Rig:
         }
 
 
+def pytest_collection_modifyitems(config, items):
+    """tests/test_gltf_validator.py runs only when $WATCHMEN_GLTF_VALIDATOR names
+    the Khronos validator (see that file); otherwise its tests are deselected --
+    reported as "deselected", never as skipped or passed."""
+    if os.environ.get("WATCHMEN_GLTF_VALIDATOR"):
+        return
+    keep, drop = [], []
+    for item in items:
+        is_validator = Path(str(item.fspath)).name == "test_gltf_validator.py"
+        (drop if is_validator else keep).append(item)
+    if drop:
+        config.hook.pytest_deselected(items=drop)
+        items[:] = keep
+
+
 @pytest.fixture(autouse=True)
 def no_leaked_options():
     """A test leaves the WATCHMEN_* variables as it found them, so no test

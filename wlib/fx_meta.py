@@ -226,20 +226,21 @@ def damage_slots(pose, case="unarmed"):
         return []
     part = "head" if hp == 0 else "body"
     out = []
-    if case == "uber":
-        out.append(part + "uber")
-    elif case == "kill":
-        out.append(part + "kill")
-    elif case == "taser":
-        out += ["effect_id:%d" % TASER_EFFECT_ID, part + "weaponsteel"]
-    elif case == "wood":
-        out.append(part + "weaponwood")
-    elif case == "steel":
-        out.append(part + "weaponsteel")
-    elif case == "sharp":
-        out.append("sharpweapon")
-    else:
-        out.append(part + ("fast" if pose in FAST_POSES else "heavy"))
+    match case:
+        case "uber":
+            out.append(part + "uber")
+        case "kill":
+            out.append(part + "kill")
+        case "taser":
+            out += ["effect_id:%d" % TASER_EFFECT_ID, part + "weaponsteel"]
+        case "wood":
+            out.append(part + "weaponwood")
+        case "steel":
+            out.append(part + "weaponsteel")
+        case "sharp":
+            out.append("sharpweapon")
+        case _:
+            out.append(part + ("fast" if pose in FAST_POSES else "heavy"))
     if pose in KNOCKDOWN_POSES:
         out.append("knockdown")
     elif pose in STUN_POSES:
@@ -1096,33 +1097,34 @@ class FxDB:
         self._effects[k] = rec
         for c in n.children:
             pl = c.p("_iplacement")
-            if c.cls == "EffectParticle":
-                slot = self.db.resolve(c.p("_eparticle"), rel)
-                asset = slot[1].p("definition") if slot else None
-                rec["particles"].append(
-                    {
-                        "particle": self.particle(asset),
-                        "slot": [slot[0], slot[1].id] if slot else None,
-                        "placement": PLACEMENT.get(pl, pl),
-                        "local_transform": bool(c.p("_tlocaltransform")),
-                        "local_position": _vec(c.p("_vlocalposition")),
-                        "local_orientation": _vec(c.p("_qlocalorient")),
-                    }
-                )
-            elif c.cls == "EffectSound":
-                d = self.db.resolve(c.p("_esounddef"), rel)
-                rec["sounds"].append(
-                    {
-                        "definition": _key(d[0], d[1].id) if d else None,
-                        "definition_name": (d[1].name or None) if d else None,
-                        "placement": PLACEMENT.get(pl, pl),
-                    }
-                )
-            elif c.cls == "EffectSpeak":
-                sid = c.p("_ispeakid")
-                rec["speaks"].append({"speak_id": sid, "speak": self.sm.SPEAK_ID.get(sid)})
-            elif c.cls == "EffectBase":
-                rec["children"].append(self.effect(rel, c))
+            match c.cls:
+                case "EffectParticle":
+                    slot = self.db.resolve(c.p("_eparticle"), rel)
+                    asset = slot[1].p("definition") if slot else None
+                    rec["particles"].append(
+                        {
+                            "particle": self.particle(asset),
+                            "slot": [slot[0], slot[1].id] if slot else None,
+                            "placement": PLACEMENT.get(pl, pl),
+                            "local_transform": bool(c.p("_tlocaltransform")),
+                            "local_position": _vec(c.p("_vlocalposition")),
+                            "local_orientation": _vec(c.p("_qlocalorient")),
+                        }
+                    )
+                case "EffectSound":
+                    d = self.db.resolve(c.p("_esounddef"), rel)
+                    rec["sounds"].append(
+                        {
+                            "definition": _key(d[0], d[1].id) if d else None,
+                            "definition_name": (d[1].name or None) if d else None,
+                            "placement": PLACEMENT.get(pl, pl),
+                        }
+                    )
+                case "EffectSpeak":
+                    sid = c.p("_ispeakid")
+                    rec["speaks"].append({"speak_id": sid, "speak": self.sm.SPEAK_ID.get(sid)})
+                case "EffectBase":
+                    rec["children"].append(self.effect(rel, c))
         return k
 
     def effect_of(self, ref, home):
@@ -2453,9 +2455,7 @@ def with_attachments(extras, extract_out, cname, bone_names=None, meta=None):
         att = {}
     if not att:
         return extras
-    out = dict(extras or {})
-    out.update(att)
-    return out
+    return dict(extras or {}) | att
 
 
 # ---------------------------------------------------------------------- CLI
@@ -2463,8 +2463,12 @@ def build(extract_out, anim=None, log=None):
     """A stand-alone fx table: the top-level block plus, when an anim_meta dict
     (or its path) is given, its per-state and per-pair fx data by reference."""
     if isinstance(anim, str):
-        with open(anim, encoding="utf-8") as fh:
-            anim = json.load(fh)
+        try:
+            with open(anim, encoding="utf-8") as fh:
+                anim = json.load(fh)
+        except Exception as ex:
+            ex.add_note("fx_meta: anim_meta table %s" % anim)
+            raise
     if anim and anim.get("fx"):
         out = dict(anim["fx"])
     else:

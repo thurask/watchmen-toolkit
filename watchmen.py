@@ -28,7 +28,10 @@ Commands
                                  --no-text) and nav/ (the levels' navigation data,
                                  see `navmeta`; --no-nav).
   binds NAZ OUT_DIR              Build engine-exact FILE-ONLY binds for all skeletons
-  charlibs EXTRACT_OUT OUT_DIR   Textured+animated character-library glbs (needs extract+binds)
+  charlibs EXTRACT_OUT OUT_DIR [NAZ]
+                                 Textured+animated character-library glbs (needs
+                                 extract+binds; NAZ, read for a bind that is
+                                 missing: default 01_game.naz, else game.naz)
   animmeta EXTRACT_OUT OUT.json [BINDS_DIR]
                                  The game's own animation metadata as JSON (format
                                  "watchmen-anim-meta/2"): every state's clips, loop,
@@ -173,6 +176,17 @@ Commands
                                  opacity and twoSided; a <model>.model.json next to
                                  each extracted model (LOD distances).  `legacy`: the
                                  materials as before (GLB and MTL byte-identical).
+  --rig hierarchy|flat           (all, extract, characters, char, charlibs, faces;
+                                 also $WATCHMEN_RIG) The skeleton of the rigged
+                                 GLBs.  `hierarchy` (default): one joint node per
+                                 bone, named after it and parented as the skeleton
+                                 says, with rest pose and animation channels local
+                                 to the parent; the skinned mesh nodes are scene
+                                 roots.  `flat`: the 1.4.0 layout -- joint nodes
+                                 b0..bN, all children of `root`, each carrying the
+                                 joint's world transform (extract --glb: joints
+                                 without a transform, identity inverse binds).  The
+                                 skinning and every pose are the same in both.
   --frame true|mirrored          (all, extract, characters, char, charlibs, faces,
                                  animmeta, fxmeta, levelmeta, navmeta, ragdoll)
                                  The coordinate frame of every GLB / OBJ and of the
@@ -215,6 +229,17 @@ Commands
                                  the option is given.  Decoded asset data
                                  (extracted/**.json, the per-file particle JSON)
                                  always keeps the stored strings.
+  --json-floats exact|rounded    (all, extract, fragment; also $WATCHMEN_JSON_FLOATS)
+                                 How the decoded JSON (extracted/**.fragment.json,
+                                 .sequence.json, .pb.json, ...) writes the game's
+                                 float32 values.  `exact` (default): the shortest
+                                 decimal that reads back as the same float32, bit
+                                 for bit (1.2345e-05, not 1.2e-05); NaN / infinity
+                                 as null.  `rounded`: the 1.4.0 output (6 places
+                                 for property values, 5 for sequence keys, 3 / 4
+                                 for transform pos / quat), byte for byte.  Derived
+                                 numbers (yaw_deg, a sequence key's quat) are
+                                 rounded in both.
   grademeta EXTRACT_OUT OUT.json The levels' post-process grade (contrast, tint,
                                  gamma, bloom, fog) from their GFXEffect nodes, and
                                  what the game's options add to brightness,
@@ -229,7 +254,13 @@ Commands
                                  model exports).  FILE_OR_DIR is an extract output
                                  (.hpd under files/, .aipathdata under extracted/),
                                  a game data directory or a single file.
-  fragment FILE [OUT.json]       Lossless .fragment -> JSON
+  fragment FILE [OUT.json]       Lossless .fragment -> JSON (also .pb, .sequence,
+                                 ...; --json-floats as for extract).  Exit code 0:
+                                 written and `lossless` (parsed to its end, every
+                                 stored value in the JSON); 3: written, but the
+                                 parse did not reach the end of the file (`lossless`
+                                 false, the `warn` key says where); 2: not a Kapow
+                                 asset or not readable.
   bake CLIPNAME BIND.npz OUT.npy [NAZ]
                                  Engine-exact palettes for one clip, read from the
                                  archive NAZ (default: 01_game.naz, else game.naz,
@@ -271,6 +302,15 @@ Commands
                                  install (strings/respell/regdump/propnames/keys-export/
                                  keys-import/check; see gendata -h)
 
+Exit codes
+----------
+  0 done; 1 an unknown command, or a failure the command reports itself (`ragdoll`
+  on a model without joints, `scriptdb` on a file it does not consume exactly,
+  `navmeta` / `particlemeta` when a file fails); 2 bad arguments or options, a
+  missing / unreadable input or data table, a Python older than 3.13;
+  3 `fragment` wrote a JSON that is not lossless; 130 interrupted.
+  Set WATCHMEN_DEBUG=1 to see the traceback of an error before its one-line message.
+
 Examples
 --------
   python3 watchmen.py all game.naz OUT      # fresh install -> everything
@@ -281,20 +321,66 @@ Examples
 
 import os, sys, json, struct
 
+#: The oldest Python the toolkit runs on (pyproject.toml: requires-python).
+MIN_PYTHON = (3, 13)
+
+
+def python_too_old(version_info=None):
+    """The error line for an interpreter older than MIN_PYTHON, else None.
+
+    Checked before anything from wlib/ is imported: wlib uses library features of
+    Python 3.13 (``itertools.batched``, exception notes), and on an older
+    interpreter a command would otherwise stop later with an ImportError that does
+    not say why.  pip refuses the install on such a Python; this covers
+    ``python3 watchmen.py`` run from a checkout."""
+    v = sys.version_info if version_info is None else version_info
+    if tuple(v[:2]) >= MIN_PYTHON:
+        return None
+    return "error: watchmen-kapow-toolkit needs Python %d.%d or later (this is %d.%d)" % (
+        MIN_PYTHON + tuple(v[:2])
+    )
+
+
+if python_too_old():
+    print(python_too_old(), file=sys.stderr)
+    sys.exit(2)
+
 # append, never insert(0): wlib holds flat, generically-named modules
 # (char_lib, gen_data, engine_schema, ...) that must not shadow the stdlib.
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "wlib"))
 
-try:
-    from wlib import __version__ as VERSION
-except Exception:  # running from a source checkout without the package installed
-    VERSION = "1.4.0"
+
+def _version():
+    """The toolkit version: ``wlib.__version__`` -- the one place the code holds it
+    (pyproject.toml repeats it for packaging; tests/test_v150_cli.py checks that the
+    two, this value and the first CHANGELOG heading agree).
+
+    ``importlib.metadata`` is deliberately not asked first: the metadata of an
+    installed distribution can be another version than the checkout being run (a
+    stale ``pip install`` next to a source tree), and the version printed must be
+    the code's.  When the ``wlib`` package cannot be imported as a package (the
+    script copied elsewhere with its wlib/ folder beside it), the value is read from
+    wlib/__init__.py as text."""
+    try:
+        from wlib import __version__
+
+        return __version__
+    except Exception:
+        import re
+
+        try:
+            here = os.path.dirname(os.path.abspath(__file__))
+            with open(os.path.join(here, "wlib", "__init__.py"), encoding="utf-8") as fh:
+                m = re.search(r'^__version__\s*=\s*["\']([^"\']+)["\']', fh.read(), re.M)
+            return m.group(1) if m else "unknown"
+        except OSError:
+            return "unknown"
 
 
-def _read_bytes(path):
-    """The file's bytes; the handle is closed before returning."""
-    with open(path, "rb") as fh:
-        return fh.read()
+VERSION = _version()
+
+
+from wutil import read_bytes as _read_bytes  # one copy, in wlib/wutil.py
 
 
 def _wl():
@@ -318,22 +404,26 @@ USAGE = {
     "all": (
         2,
         "all NAZ OUT [--no-vertex-attrs] [--materials engine|legacy] [--no-text] [--no-nav]"
-        " [--frame true|mirrored] [--names canonical|stored] [--jiggle-model %s]"
-        " [--face-rule engine|legacy] [--no-face-idle] [--parts game|all] [--no-ragdoll]" % _JM,
+        " [--rig hierarchy|flat] [--glb-texture-size N] [--frame true|mirrored] [--names canonical|stored] [--jiggle-model %s]"
+        " [--json-floats exact|rounded] [--face-rule engine|legacy] [--no-face-idle] [--parts game|all] [--no-ragdoll]"
+        % _JM,
     ),
     "extract": (
         2,
-        "extract NAZ OUT [--vgmstream-cli PATH] [--keep-xma] [--glb [--no-vertex-attrs] ...]"
-        " [--materials engine|legacy] [--no-text] [--no-nav] [--frame true|mirrored] [--names canonical|stored]",
+        "extract NAZ OUT [--vgmstream-cli PATH] [--keep-xma] [--glb [--no-vertex-attrs]"
+        " [--rig hierarchy|flat] [--glb-texture-size N] ...] [--materials engine|legacy] [--no-text] [--no-nav] [--frame true|mirrored] [--names canonical|stored]"
+        " [--json-floats exact|rounded] [--quiet]",
     ),
     "binds": (2, "binds NAZ OUT_DIR"),
     "charlibs": (
         2,
-        "charlibs EXTRACT_OUT OUT_DIR [NAZ] [--no-vertex-attrs] [--materials engine|legacy] [--frame true|mirrored] [--names canonical|stored]",
+        "charlibs EXTRACT_OUT OUT_DIR [NAZ] [--no-vertex-attrs] [--materials engine|legacy]"
+        " [--rig hierarchy|flat] [--frame true|mirrored] [--names canonical|stored]",
     ),
     "faces": (
         2,
-        "faces EXTRACT_OUT OUT_DIR [--no-vertex-attrs] [--materials engine|legacy] [--frame true|mirrored] [--names canonical|stored]",
+        "faces EXTRACT_OUT OUT_DIR [--no-vertex-attrs] [--materials engine|legacy]"
+        " [--rig hierarchy|flat] [--frame true|mirrored] [--names canonical|stored]",
     ),
     "animmeta": (
         2,
@@ -363,17 +453,17 @@ USAGE = {
         2,
         "characters EXTRACT_OUT OUT_DIR [NAZ] [--jiggle-model %s]"
         " [--face-rule engine|legacy] [--no-face-idle] [--parts game|all] [--no-vertex-attrs]"
-        " [--materials engine|legacy] [--no-ragdoll] [--frame true|mirrored] [--names canonical|stored]"
-        % _JM,
+        " [--materials engine|legacy] [--no-ragdoll] [--rig hierarchy|flat] [--frame true|mirrored]"
+        " [--names canonical|stored]" % _JM,
     ),
-    "fragment": (1, "fragment FILE [OUT.json]"),
+    "fragment": (1, "fragment FILE [OUT.json] [--json-floats exact|rounded]"),
     "ragdoll": (1, "ragdoll MODEL [PIVOTBOOK.pb] [OUT.json] [--frame true|mirrored]"),
     "bake": (3, "bake CLIPNAME BIND.npz OUT.npy [NAZ]"),
     "char": (
         3,
         "char FRAG.json VARIANT OUT.glb [BINDDIR [BAKEDIR [NAZ]]] [--jiggle-model %s] [--no-meta]"
-        " [--no-vertex-attrs] [--materials engine|legacy] [--frame true|mirrored] [--names canonical|stored]"
-        % _JM,
+        " [--no-vertex-attrs] [--materials engine|legacy] [--rig hierarchy|flat]"
+        " [--frame true|mirrored] [--names canonical|stored]" % _JM,
     ),
     "grademeta": (
         2,
@@ -397,6 +487,9 @@ RAGDOLL_COMMANDS = ("all", "characters")
 FACE_RULES = ("engine", "legacy")
 MATERIALS_COMMANDS = ("all", "extract", "characters", "char", "charlibs", "faces")
 MATERIALS_MODES = ("engine", "legacy")
+# --rig hierarchy|flat: the skeleton layout of the rigged GLBs (variant_glb.RIG_MODES)
+RIG_COMMANDS = ("all", "extract", "characters", "char", "charlibs", "faces")
+RIG_MODES = ("hierarchy", "flat")
 # --frame true|mirrored: every command that writes GLBs or data in the GLBs' frame
 FRAME_COMMANDS = (
     "all",
@@ -428,6 +521,293 @@ NAMES_COMMANDS = (
     "grademeta",
 )
 NAMES_MODES = ("canonical", "stored")  # canonical_names.MODES; "canonical" is the default
+# --json-floats exact|rounded: the commands that write fragment / sequence / property-bag JSON
+JSON_FLOATS_COMMANDS = ("all", "extract", "fragment")
+JSON_FLOATS_MODES = ("exact", "rounded")  # f32json.MODES; "exact" is the default
+
+
+# ---- the options of the commands, as one table ------------------------------------
+#
+# Each option: the flag, its values (a tuple of choices, "N" for an integer the
+# command checks itself, None for a switch), the commands it applies to, the
+# environment variable it sets (and the value a switch sets), the commands that get
+# the token(s) passed on unchanged (the extractor parses them itself), and a help
+# line.  main() consumes the options with this table; `watchmen.py CMD -h` prints
+# CMD's usage and the options of CMD, from argparse parsers built of one parent
+# parser per option.
+
+
+class Option:
+    __slots__ = (
+        "flag",
+        "values",
+        "commands",
+        "env",
+        "env_value",
+        "env_commands",
+        "keep",
+        "label",
+        "help",
+    )
+
+    def __init__(
+        self,
+        flag,
+        values,
+        commands,
+        env=None,
+        env_value=None,
+        env_commands=None,
+        keep=(),
+        label=None,
+        help="",
+    ):
+        self.flag, self.values, self.commands = flag, values, tuple(commands)
+        self.env, self.env_value = env, env_value
+        self.env_commands = self.commands if env_commands is None else tuple(env_commands)
+        self.keep, self.label, self.help = tuple(keep), label, help
+
+    def applies_message(self):
+        if self.label:  # two flags that share one message (--face-rule / --no-face-idle)
+            return "error: %s apply to: %s" % (self.label, ", ".join(self.commands))
+        return "error: %s applies to: %s" % (self.flag, ", ".join(self.commands))
+
+
+OPTIONS = (
+    Option(
+        "--jiggle-model",
+        JIGGLE_MODELS,
+        JIGGLE_COMMANDS,
+        help="bake the jiggle bones with this model (default: solver)",
+    ),
+    Option(
+        "--no-vertex-attrs",
+        None,
+        ("extract",) + VERTEX_ATTR_COMMANDS,
+        env="WATCHMEN_VERTEX_ATTRS",
+        env_value="0",
+        env_commands=VERTEX_ATTR_COMMANDS,
+        keep=("extract", "all"),
+        help="GLBs without NORMAL / TANGENT / COLOR_0 (the 1.3.0 files)",
+    ),
+    Option(
+        "--face-rule",
+        FACE_RULES,
+        FACE_RULE_COMMANDS,
+        env="WATCHMEN_FACE_RULE",
+        label="--face-rule / --no-face-idle",
+        help="the face track of the body clips: engine (default) or the 1.3.0 rule",
+    ),
+    Option(
+        "--no-face-idle",
+        None,
+        FACE_RULE_COMMANDS,
+        env="WATCHMEN_FACE_IDLE",
+        env_value="0",
+        label="--face-rule / --no-face-idle",
+        help="leave the seeded idle cycle out of the baked face track",
+    ),
+    Option(
+        "--parts",
+        PARTS_MODES,
+        PARTS_COMMANDS,
+        env="WATCHMEN_PARTS",
+        help="which models a character GLB shows: what the game shows (default) or all",
+    ),
+    Option(
+        "--materials",
+        MATERIALS_MODES,
+        MATERIALS_COMMANDS,
+        env="WATCHMEN_MATERIALS",
+        help="glTF materials from the texture sheets (engine, default) or as before",
+    ),
+    Option(
+        "--rig",
+        RIG_MODES,
+        RIG_COMMANDS,
+        env="WATCHMEN_RIG",
+        help="skeleton of the rigged GLBs: one node per bone, parented (default), "
+        "or the flat layout of 1.4.0",
+    ),
+    Option(
+        "--glb-texture-size",
+        "N",
+        ("all", "extract"),
+        keep=("all", "extract"),
+        help="extract --glb: shrink the embedded textures to at most N x N "
+        "(default: their full size; 512 gives the 1.4.0 images)",
+    ),
+    Option(
+        "--frame",
+        FRAME_MODES,
+        FRAME_COMMANDS,
+        env="WATCHMEN_FRAME",
+        help="coordinate frame: true (default, as the game looks) or mirrored (engine numbers)",
+    ),
+    Option(
+        "--names",
+        NAMES_MODES,
+        NAMES_COMMANDS,
+        env="WATCHMEN_NAMES",
+        help="asset path spelling: canonical (default) or as each archive stores it",
+    ),
+    Option(
+        "--json-floats",
+        JSON_FLOATS_MODES,
+        JSON_FLOATS_COMMANDS,
+        env="WATCHMEN_JSON_FLOATS",
+        help="decoded JSON floats: exact float32 values (default) or rounded as in 1.4.0",
+    ),
+    Option(
+        "--no-ragdoll",
+        None,
+        RAGDOLL_COMMANDS,
+        env="WATCHMEN_RAGDOLL",
+        env_value="0",
+        help="character GLBs without the ragdoll helpers and .ragdoll.json",
+    ),
+    Option("--no-meta", None, ("char",), help="no clip metadata (the GLB of 1.3.0)"),
+)
+_OPTION = {o.flag: o for o in OPTIONS}
+
+#: commands that hand every other option to a parser of their own: the extractor
+#: (`extract`, and `all`, which runs it first) and `gendata`
+PASSTHROUGH_COMMANDS = ("extract", "all", "gendata")
+#: options a command's own reader takes (handed on unchanged)
+OWN_OPTIONS = {"scriptdb": ("--find",)}
+
+
+class OptionError(Exception):
+    """A command-line option the command does not take; str() is the message."""
+
+
+def move_out_option(args):
+    """`extract` / `all`: OUT given as `-o OUT`, `--out OUT` or `--out=OUT` (the
+    extractor's own spelling, which `extract -h` shows) -> the second positional
+    argument, after NAZ.  OptionError when it has no value or OUT is given twice."""
+    out, rest, i = None, [], 0
+    while i < len(args):
+        a = args[i]
+        if a in ("-o", "--out"):
+            if i + 1 >= len(args) or args[i + 1].startswith("-"):
+                raise OptionError("error: %s needs the output folder" % a)
+            val, i = args[i + 1], i + 2
+        elif a.startswith("--out="):
+            val, i = a.removeprefix("--out="), i + 1
+        else:
+            rest.append(a)
+            i += 1
+            continue
+        if out is not None:
+            raise OptionError("error: the output folder is given twice")
+        out = val
+    if out is None:
+        return list(args)
+    if len(rest) > 1 and not rest[1].startswith("-"):
+        raise OptionError("error: the output folder is given twice (%s and %s)" % (rest[1], out))
+    return rest[:1] + [out] + rest[1:]
+
+
+def parse_options(cmd, args, env=None):
+    """Consume the table's options of `cmd` from `args` -> (remaining args, {flag:
+    value}).  Options in `keep` stay in the remaining args, in place; the environment
+    variables are set in `env` (default os.environ) only when the whole line is
+    valid.  OptionError: an option of another command, a value that is not one of
+    the choices, or an unknown --option of a command that has no parser of its
+    own."""
+    env = os.environ if env is None else env
+    rest, values, setenv = [], {}, []
+    i = 0
+    while i < len(args):
+        a = args[i]
+        opt = _OPTION.get(a)
+        if opt is None:
+            if (
+                a.startswith("--")
+                and len(a) > 2
+                and cmd not in PASSTHROUGH_COMMANDS
+                and a not in OWN_OPTIONS.get(cmd, ())
+            ):
+                raise OptionError(
+                    "error: unknown option %s for %s (see `watchmen.py %s -h`)" % (a, cmd, cmd)
+                )
+            rest.append(a)
+            i += 1
+            continue
+        if cmd not in opt.commands:
+            raise OptionError(opt.applies_message())
+        if opt.values is None:  # a switch
+            value, n = True, 1
+        else:
+            value, n = (args[i + 1] if i + 1 < len(args) else None), 2
+            if isinstance(opt.values, tuple) and value not in opt.values:
+                raise OptionError("error: %s takes one of: %s" % (opt.flag, ", ".join(opt.values)))
+        if cmd in opt.keep:
+            rest.extend(args[i : i + n])
+        values[opt.flag] = value
+        if opt.env and cmd in opt.env_commands:
+            setenv.append((opt.env, opt.env_value if opt.values is None else value))
+        i += n
+    for k, v in setenv:
+        env[k] = v
+    return rest, values
+
+
+def _command_help():
+    """{command: its description lines} from the Commands list of this module's
+    docstring (the text in the description column; the usage continuation lines,
+    `[--option ...]`, are left out)."""
+    col = 33  # the description column of the list
+    out, cur = {}, None
+    for line in __doc__.split("Exit codes\n----------")[0].splitlines():
+        if line.startswith("  ") and not line.startswith("   ") and line[2:3].isalpha():
+            cur = line[2:].split(" ", 1)[0]
+            out.setdefault(cur, [])
+        elif not (cur and line.startswith(" " * col)):
+            cur = None
+            continue
+        text = line[col:].strip() if len(line) > col and line[col - 1] == " " else ""
+        if text and not text.startswith("["):
+            out[cur].append(text)
+    return out
+
+
+def command_parser(cmd):
+    """The argparse parser that documents `cmd`: its usage line, its description from
+    the docstring and one parent parser per option of the table that applies to it
+    (used for `watchmen.py CMD -h`; main() parses with parse_options)."""
+    import argparse
+
+    parents = []
+    for o in OPTIONS:
+        if cmd not in o.commands:
+            continue
+        p = argparse.ArgumentParser(add_help=False)
+        if o.values is None:
+            p.add_argument(o.flag, action="store_true", help=o.help)
+        elif isinstance(o.values, tuple):
+            p.add_argument(o.flag, choices=o.values, help=o.help)
+        else:
+            p.add_argument(o.flag, metavar=o.values, type=int, help=o.help)
+        parents.append(p)
+    desc = "\n".join(_command_help().get(cmd, [])) or None
+    epilog = None
+    if cmd == "all":
+        epilog = "Every option of `extract` (see `watchmen.py extract -h`) is passed on to its first step."
+    elif cmd == "gendata":
+        epilog = "The sub-commands take options of their own: see `watchmen.py gendata` without arguments."
+    elif cmd in OWN_OPTIONS:
+        epilog = "Also: %s (read by the command itself, see the usage line)." % ", ".join(
+            OWN_OPTIONS[cmd]
+        )
+    return argparse.ArgumentParser(
+        prog="watchmen.py " + cmd,
+        usage="watchmen.py " + USAGE[cmd][1],
+        description=desc,
+        epilog=epilog,
+        parents=parents,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
 
 
 def extract_out_of(path):
@@ -522,128 +902,25 @@ def main(argv):
         return 1
     if "-h" in args or "--help" in args:
         if cmd == "extract":
-            # forward to the extractor's argparse help (shows --vgmstream-cli, --glb, ...)
+            # forward to the extractor's argparse help (shows --vgmstream-cli, --glb, ...),
+            # after the command's own usage line: OUT is the second argument here
             import watchmen_extract as _we
 
+            print("usage: watchmen.py %s" % USAGE[cmd][1])
+            print("OUT is the second argument (or -o / --out OUT). The extractor's options:\n")
             return _we.main(["--help"])
-        print("usage: watchmen.py %s" % USAGE[cmd][1])
+        command_parser(cmd).print_help()
         return 0
-    jiggle_model = None
-    if "--jiggle-model" in args:
-        i = args.index("--jiggle-model")
-        value = args[i + 1] if i + 1 < len(args) else None
-        if cmd not in JIGGLE_COMMANDS or value not in JIGGLE_MODELS:
-            if cmd not in JIGGLE_COMMANDS:
-                print("error: --jiggle-model applies to: %s" % ", ".join(JIGGLE_COMMANDS))
-            else:
-                print("error: --jiggle-model takes one of: %s" % ", ".join(JIGGLE_MODELS))
-            print("usage: watchmen.py %s" % USAGE[cmd][1])
-            return 2
-        jiggle_model = value
-        args = args[:i] + args[i + 2 :]
-    # --no-vertex-attrs: GLBs without NORMAL / TANGENT / COLOR_0 (the 1.3.0 files).
-    # `extract` hands it to the extractor's own parser; the character commands
-    # switch variant_glb's writer.
-    if "--no-vertex-attrs" in args and cmd != "extract":
-        if cmd not in VERTEX_ATTR_COMMANDS:
-            print(
-                "error: --no-vertex-attrs applies to: extract, %s" % ", ".join(VERTEX_ATTR_COMMANDS)
-            )
-            print("usage: watchmen.py %s" % USAGE[cmd][1])
-            return 2
-        os.environ["WATCHMEN_VERTEX_ATTRS"] = "0"
-        if cmd != "all":  # `all` also forwards it to its extract step
-            args = [a for a in args if a != "--no-vertex-attrs"]
-    # --face-rule engine|legacy / --no-face-idle: the face channels `characters`
-    # bakes into body clips (face_rule.rule / face_rule.idle_enabled read these).
-    if "--face-rule" in args or "--no-face-idle" in args:
-        value = "engine"
-        if "--face-rule" in args:
-            i = args.index("--face-rule")
-            value = args[i + 1] if i + 1 < len(args) else None
-            args = args[:i] + args[i + 2 :]
-        if cmd not in FACE_RULE_COMMANDS or value not in FACE_RULES:
-            if cmd not in FACE_RULE_COMMANDS:
-                print(
-                    "error: --face-rule / --no-face-idle apply to: %s"
-                    % ", ".join(FACE_RULE_COMMANDS)
-                )
-            else:
-                print("error: --face-rule takes one of: %s" % ", ".join(FACE_RULES))
-            print("usage: watchmen.py %s" % USAGE[cmd][1])
-            return 2
-        os.environ["WATCHMEN_FACE_RULE"] = value
-        if "--no-face-idle" in args:
-            os.environ["WATCHMEN_FACE_IDLE"] = "0"
-            args = [a for a in args if a != "--no-face-idle"]
-    # --parts game|all: which of a variant's models the character GLBs show
-    if "--parts" in args:
-        i = args.index("--parts")
-        value = args[i + 1] if i + 1 < len(args) else None
-        if cmd not in PARTS_COMMANDS or value not in PARTS_MODES:
-            if cmd not in PARTS_COMMANDS:
-                print("error: --parts applies to: %s" % ", ".join(PARTS_COMMANDS))
-            else:
-                print("error: --parts takes one of: %s" % ", ".join(PARTS_MODES))
-            print("usage: watchmen.py %s" % USAGE[cmd][1])
-            return 2
-        os.environ["WATCHMEN_PARTS"] = value
-        args = args[:i] + args[i + 2 :]
-    # --materials engine|legacy: wlib/materials.py reads $WATCHMEN_MATERIALS
-    if "--materials" in args:
-        i = args.index("--materials")
-        value = args[i + 1] if i + 1 < len(args) else None
-        if cmd not in MATERIALS_COMMANDS or value not in MATERIALS_MODES:
-            if cmd not in MATERIALS_COMMANDS:
-                print("error: --materials applies to: %s" % ", ".join(MATERIALS_COMMANDS))
-            else:
-                print("error: --materials takes one of: %s" % ", ".join(MATERIALS_MODES))
-            print("usage: watchmen.py %s" % USAGE[cmd][1])
-            return 2
-        os.environ["WATCHMEN_MATERIALS"] = value
-        args = args[:i] + args[i + 2 :]
-    # --frame true|mirrored: wlib/frame.py reads $WATCHMEN_FRAME
-    if "--frame" in args:
-        i = args.index("--frame")
-        value = args[i + 1] if i + 1 < len(args) else None
-        if cmd not in FRAME_COMMANDS or value not in FRAME_MODES:
-            if cmd not in FRAME_COMMANDS:
-                print("error: --frame applies to: %s" % ", ".join(FRAME_COMMANDS))
-            else:
-                print("error: --frame takes one of: %s" % ", ".join(FRAME_MODES))
-            print("usage: watchmen.py %s" % USAGE[cmd][1])
-            return 2
-        os.environ["WATCHMEN_FRAME"] = value
-        args = args[:i] + args[i + 2 :]
-    # --names canonical|stored: wlib/canonical_names.py reads $WATCHMEN_NAMES
-    if "--names" in args:
-        i = args.index("--names")
-        value = args[i + 1] if i + 1 < len(args) else None
-        if cmd not in NAMES_COMMANDS or value not in NAMES_MODES:
-            if cmd not in NAMES_COMMANDS:
-                print("error: --names applies to: %s" % ", ".join(NAMES_COMMANDS))
-            else:
-                print("error: --names takes one of: %s" % ", ".join(NAMES_MODES))
-            print("usage: watchmen.py %s" % USAGE[cmd][1])
-            return 2
-        os.environ["WATCHMEN_NAMES"] = value
-        args = args[:i] + args[i + 2 :]
-    # --no-ragdoll: character GLBs without the ragdoll helper nodes and sidecar
-    if "--no-ragdoll" in args:
-        if cmd not in RAGDOLL_COMMANDS:
-            print("error: --no-ragdoll applies to: %s" % ", ".join(RAGDOLL_COMMANDS))
-            print("usage: watchmen.py %s" % USAGE[cmd][1])
-            return 2
-        os.environ["WATCHMEN_RAGDOLL"] = "0"
-        args = [a for a in args if a != "--no-ragdoll"]
-    # --no-meta: `char` without the animation metadata (as 1.3.0 wrote the file)
-    no_meta = "--no-meta" in args
-    if no_meta:
-        if cmd != "char":
-            print("error: --no-meta applies to: char")
-            print("usage: watchmen.py %s" % USAGE[cmd][1])
-            return 2
-        args = [a for a in args if a != "--no-meta"]
+    try:
+        if cmd in ("extract", "all"):
+            args = move_out_option(args)
+        args, opts = parse_options(cmd, args)
+    except OptionError as ex:
+        print(ex)
+        print("usage: watchmen.py %s" % USAGE[cmd][1])
+        return 2
+    jiggle_model = opts.get("--jiggle-model")
+    no_meta = bool(opts.get("--no-meta"))
     need = USAGE[cmd][0]
     if len(args) < need:
         print("usage: watchmen.py %s" % USAGE[cmd][1])
@@ -804,8 +1081,10 @@ def main(argv):
         import extract_out
 
         extract_out.require(exout)
+        import bake_v4
+
         binds = wl.ensure_binds(
-            args[2] if len(args) > 2 else "game.naz",
+            args[2] if len(args) > 2 else bake_v4.default_naz(),
             os.path.join(exout, "binds"),
             extract_dir=exout,
         )
@@ -844,8 +1123,10 @@ def main(argv):
             print("error: %s is not a recognized Kapow asset type" % args[0], file=sys.stderr)
             return 2
         out = args[1] if len(args) > 1 else args[0] + ".json"
+        import f32json
+
         with open(out, "w", encoding="utf-8", newline="\n") as fh:
-            fh.write(json.dumps(j, indent=1))
+            fh.write(f32json.dumps(j, indent=1))  # exact mode: NaN / infinity -> null
         print("wrote", out, "(lossless:", j.get("lossless"), ")")
         if j.get("lossless") is False:
             print("warning: parse was not lossless -- see the 'warn' key", file=sys.stderr)
@@ -940,8 +1221,14 @@ def write_sound_meta(extract_out, outdir):
         return None
 
 
+def debug_enabled(env=None):
+    """True when $WATCHMEN_DEBUG is set to anything but '' or '0'."""
+    v = (os.environ if env is None else env).get("WATCHMEN_DEBUG", "")
+    return v.strip() not in ("", "0")
+
+
 def cli():
-    """Console-script entry point (``watchmen`` after ``pip install``)."""
+    """Console-script entry point (``watchmen`` / ``watchmen-kapow`` after ``pip install``)."""
     try:
         sys.exit(main(sys.argv))
     except KeyboardInterrupt:
@@ -951,8 +1238,20 @@ def cli():
         # bad path / wrong file type / truncated asset / missing data table:
         # an actionable line, not a traceback (struct.error + ImportError
         # added 2026-08-17: truncated propbags raise struct.error, and
-        # kapow_fragment now raises ImportError for a missing key table)
+        # kapow_fragment now raises ImportError for a missing key table).
+        # WATCHMEN_DEBUG=1 prints the traceback first: where it happened.
+        # The notes of the error (where it happened: archive entry, offset, asset)
+        # go under the `error:` line; the traceback already ends with them, so they
+        # are printed once either way.
+        debug = debug_enabled()
+        if debug:
+            import traceback
+
+            traceback.print_exc()
         print("error: %s" % ex, file=sys.stderr)
+        if not debug:
+            for note in getattr(ex, "__notes__", ()):
+                print("  %s" % note, file=sys.stderr)
         sys.exit(2)
 
 

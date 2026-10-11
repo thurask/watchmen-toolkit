@@ -17,6 +17,13 @@ with the `OUTFIT …` and `WPN_…` alternatives). Switch it on to see them. The
 Armature modifier on the body armature `root` and follow every clip; the `RJ` empties are
 children of the empty `ragdoll` and stay at the bind pose.
 
+The extras name the joint node each body and joint belongs to: `body.joint_node`,
+`parent_joint_node` / `child_joint_node`, and `joint_nodes` in the sidecar. Since 1.5.0 these
+are the GLB's own node names — the bone names of the hierarchical rig — with the palette index
+beside them (`joint_index`, `parent_joint_index`, `child_joint_index`; `joint_indices` in the
+sidecar). A file written with `--rig flat` names the nodes `b<k>` as 1.4.0 did and carries no
+index keys.
+
 The rig comes from the model in slot 0 of the character's model list: the skeleton model for the
 enemies, the body model for Rorschach and Nite Owl, `BS2_WithoutWeapon` for the Twilight Lady.
 `tuned: false` marks a rig nobody authored (Twilight Lady: every mass 100, every limit 0).

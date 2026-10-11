@@ -24,12 +24,10 @@ _D = _os.path.dirname(_os.path.abspath(__file__))
 if _D not in sys.path:
     sys.path.append(_D)  # append, never insert(0): flat module names must not shadow the stdlib
 from parse_model_nodes import parse
+from wutil import load_npz, qmat_xyzw
 
 
-def _read_bytes(path):
-    """The file's bytes; the handle is closed before returning."""
-    with open(path, "rb") as fh:
-        return fh.read()
+from wutil import read_bytes as _read_bytes  # one copy, in wlib/wutil.py
 
 
 def qmul(a, b):
@@ -52,14 +50,8 @@ def qrot(q, v):
 
 
 def q2m(q):
-    x, y, z, w = q / np.linalg.norm(q)
-    return np.array(
-        [
-            [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
-            [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
-            [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
-        ]
-    )
+    """Matrix of v -> q v q* for the (x, y, z, w) quaternion q, normalised first."""
+    return qmat_xyzw(q / np.linalg.norm(q))
 
 
 def fk(names, pos, quat, parent):
@@ -98,14 +90,18 @@ def build(header_path, template_npz, out_npz):
     """template_npz=None -> engine palette order = file bone list rotated by one
     (palette[k] = bones[(k-1) % N]; verified female/gimp)."""
     mb = _read_bytes(header_path)
-    names, pos, quat, parent = parse(mb)
+    try:
+        names, pos, quat, parent = parse(mb)
+    except Exception as ex:
+        ex.add_note(f"build_bind_file: skeleton header {header_path} ({len(mb)} bytes)")
+        raise
     pos[0] = 0
     quat[0] = np.array([0, 0, 0, 1.0])
     parent[0] = -1
     Wq, Wp = fk(names, pos, quat, parent)
     Wqr = fk_conj(names, pos, quat, parent)
     if template_npz:
-        t = np.load(template_npz, allow_pickle=True)
+        t = load_npz(template_npz)
         tn = [str(n) for n in t["names"]]
         mask = t["mask"]
     else:

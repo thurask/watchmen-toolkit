@@ -417,7 +417,19 @@ def _skinned_model():
     return tf._model([{"lods": [[("Body", 1, 6, 0.0, 1)]]}], tf._TEXTURES)
 
 
-def _write(path, attrs, tris=((0, 1, 2), (0, 2, 3)), **kw):
+def _nmap(tmp_path):
+    """A texture index whose material `m` has a diffuse and a normal map, for
+    engine_materials=True: TANGENT is only written for a normal-mapped material."""
+    from PIL import Image
+
+    d = tmp_path / "m.bmp"
+    d.mkdir(exist_ok=True)
+    Image.fromarray(np.full((4, 4, 3), 200, np.uint8)).save(d / "0_diffuse_4x4_DXT1.png")
+    Image.fromarray(np.full((4, 4, 3), (128, 128, 255), np.uint8)).save(d / "1_normal_4x4_ATI2.png")
+    return {"m": d}
+
+
+def _write(path, attrs, tris=((0, 1, 2), (0, 2, 3)), tex=None, **kw):
     V = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)]
     U = [(0, 0), (1, 0), (1, 1), (0, 1)]
     SI = np.zeros((4, 4), np.uint8)
@@ -431,7 +443,21 @@ def _write(path, attrs, tris=((0, 1, 2), (0, 2, 3)), **kw):
     # purpose to prove it changes nothing
     N = [(0.0, 0.0, 1.0)] * 4
     rig_glb.build_rigged_glb(
-        path, V, N, U, SI, SW, list(tris), subs, ["m"], {}, _PAL, None, None, static=True, **extra
+        path,
+        V,
+        N,
+        U,
+        SI,
+        SW,
+        list(tris),
+        subs,
+        ["m"],
+        tex or {},
+        _PAL,
+        None,
+        None,
+        static=True,
+        **extra,
     )
     return path.read_bytes()
 
@@ -462,8 +488,14 @@ def test_mesh_vertex_attributes_follow_the_model_buffers(monkeypatch):
 def test_glb_gets_normal_tangent_and_colour_as_valid_accessors(tmp_path):
     h, s = _skinned_model()
     at = rig_glb.mesh_vertex_attributes(h, s, [(0, 4, 0, 2, 56)])
-    _write(tmp_path / "on.glb", at)
+    # TANGENT only for a material with a normal map (else it is unused:
+    # the validator's UNUSED_MESH_TANGENT)
+    _write(tmp_path / "plain.glb", at)
+    A = parse_glb(tmp_path / "plain.glb").j["meshes"][0]["primitives"][0]["attributes"]
+    assert set(A) == {"POSITION", "NORMAL", "TEXCOORD_0", "COLOR_0"}
+    _write(tmp_path / "on.glb", at, tex=_nmap(tmp_path), engine_materials=True)
     g = parse_glb(tmp_path / "on.glb")
+    assert "normalTexture" in g.j["materials"][0]
     A = g.j["meshes"][0]["primitives"][0]["attributes"]
     assert set(A) == {"POSITION", "NORMAL", "TANGENT", "TEXCOORD_0", "COLOR_0"}
     n, t, c = g.j["accessors"][A["NORMAL"]], g.j["accessors"][A["TANGENT"]], g.j["accessors"]
@@ -501,10 +533,13 @@ def test_malformed_attribute_data_is_left_out_not_repaired(tmp_path):
     h, s = _skinned_model()
     at = rig_glb.mesh_vertex_attributes(h, s, [(0, 4, 0, 2, 56)])
 
+    tex = _nmap(tmp_path)
+
     def attrs(**kw):
-        _write(tmp_path / "x.glb", dict(at, **kw))
+        _write(tmp_path / "x.glb", dict(at, **kw), tex=tex, engine_materials=True)
         return set(parse_glb(tmp_path / "x.glb").j["meshes"][0]["primitives"][0]["attributes"])
 
+    assert "TANGENT" in attrs()  # well-formed: written
     zero_n = at["normals"].copy()
     zero_n[2] = 0
     assert attrs(normals=zero_n) == {"POSITION", "TEXCOORD_0", "COLOR_0"}  # and no TANGENT
@@ -544,8 +579,10 @@ def test_tangents_are_written_as_stored_unless_orthogonalised(tmp_path):
     skew = np.tile(np.array([0.8, 0.0, 0.6, 1.0], np.float32), (4, 1))  # |n.t| = 0.6, as shipped
     at = {"normals": n, "colors": None, "tangents": skew}
 
+    tex = _nmap(tmp_path)
+
     def tangent(**kw):
-        _write(tmp_path / "t.glb", at, **kw)
+        _write(tmp_path / "t.glb", at, tex=tex, engine_materials=True, **kw)
         g = parse_glb(tmp_path / "t.glb")
         return np.asarray(g.accessor(g.j["meshes"][0]["primitives"][0]["attributes"]["TANGENT"]))
 
