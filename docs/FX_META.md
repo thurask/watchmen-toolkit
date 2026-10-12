@@ -42,8 +42,8 @@ fx                   { format, evidence, conventions, event_fields, effects, eff
 ```
 
 Only keys are added: with them removed the table is byte-identical to the one written without
-the module (checked on Part 2 PC against the 12,380,171-byte table of the r4 export). The
-additions are 2.04 MB (16.5 %). `clips.*.events` share the state records, so they carry
+the module (checked on Part 2 PC against a 12,380,171-byte table). The additions are 2.04 MB
+(16.5 %). `clips.*.events` share the state records, so they carry
 `payload` too, and through `clip_extras` so do the animations of the character GLBs.
 
 ## Event payload
@@ -84,7 +84,7 @@ has no `fx` key.
 
 | List | Event | Fields |
 |---|---|---|
-| `impact_effects` | IMPACT_EFFECTS (56) | `damage_pose`, `damage_pose_name`, `hit_position` (HEAD / BODY), `local_position`, `local_direction` (the acting character's visual space), `ignore_weapon`; `extra_effect` = an effect key when the event also fires an effect of its own (`m_ttruth3` + `_etarget01`: 26 events, mostly the cattle-prod discharge); with `m_ttruth1` set the event deals close-combat damage itself (`CharacterRootLogic.SetCloseCombatDamageToTarget(victim, m_ecuranimstate, m_nvalue)` 0x6ae57f): `deals_damage: true` and `override_damage` (the damage when > 0, else the state's default); `truth1` / `value` carry the same two values under their earlier names |
+| `impact_effects` | IMPACT_EFFECTS (56) | `damage_pose`, `damage_pose_name`, `hit_position` (HEAD / BODY), `local_position`, `local_direction` (the acting character's visual space), `ignore_weapon`; `extra_effect` = an effect key when the event also fires an effect of its own (`m_ttruth3` + `_etarget01`: 26 events, mostly the cattle-prod discharge); with `m_ttruth1` set the event deals close-combat damage itself (`CharacterRootLogic.SetCloseCombatDamageToTarget(victim, m_ecuranimstate, m_nvalue)` 0x6ae57f): `deals_damage: true` and `override_damage` (the damage when > 0, else the state's default); `truth1` / `value` repeat the same two values under those names |
 | `camera_cuts` | CAMERA_CUT (59) | see below |
 | `camera_return` | CAMERA_CUT_TO_CHARACTER_CAM (61) | `transition_s`, `set_in_vector` (the character camera is first aimed looking from the actor toward the partner, 16.7° down, heading turned by −45.84° (atan2(x, z) decreases by 0.8 rad)) |
 | `rumble` | RUMBLE (82) | `duration_s`, `power` (0..1), `fade` |
@@ -164,8 +164,8 @@ read h = atan2(d.x, d.z) − radians(`angle_deg`) and v = normalize((l.z, 0, −
 - `side_of_pair` (`angle_deg` = 0): v = normalize((−l.z, 0, l.x)), l = target − actor (3-D); v is
   flipped when it points away from the camera node's position; position = actor + l / 2 +
   `distance_m` · v + (0, `height_m`, 0), so its y is the midpoint of the two roots' heights +
-  `height_m` (the same as before in pair space, where both roots are at one height); if the
-  sweep to it is blocked, the second try is the other side.
+  `height_m` (in pair space, where both roots are at one height, that is the roots' height +
+  `height_m`); if the sweep to it is blocked, the second try is the other side.
 - `previous_position`: the previous cut's target position is kept; when there is no previous cut
   it is the character camera's position. It is valid without a partner and without a sweep.
 
@@ -173,7 +173,7 @@ read h = atan2(d.x, d.z) − radians(`angle_deg`) and v = normalize((l.z, 0, −
 from the look-at point — the joint's world position, or for bone GAME_PIVOT the looked-at root +
 `look_at_height_m` — with up +Y, no roll (hold update 0x633011). `UpdateWorldPos` 0x633f28, which
 would move the camera with the looked-at root, is registered but has no caller on PC, X360 or
-PS3; toolkit tables written before 2026-10-05 described that follow as if it ran.
+PS3, so the camera does not follow the root.
 The effects' `local_position` / `local_direction` / `local_orientation` and the attachment
 offsets below are engine values too, in both frames.
 `actor` / `target` are the root positions of the character carrying the event and of its
@@ -270,8 +270,8 @@ the slave-locked rule of `anim_meta._pair_event`.
 To reproduce a shot list: place the pair (`pair.placement`), run both clips at the shared play
 position, and for each cut compute the camera from the two roots at `time_s` and hold that
 position until the next cut, re-aiming at the look-at point every frame
-(a reference render of `Rorschach` x `Enemy04` `Finish_move_WPN_1H` was made this way from the
-character GLBs; `fx_meta.cut_camera` is the placement).
+(a reference render of `Rorschach` x `Enemy04` `Finish_move_WPN_1H` from the character GLBs
+exists, built this way; `fx_meta.cut_camera` is the placement).
 
 ### In a character GLB
 

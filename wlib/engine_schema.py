@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """engine_schema.py — exe-derived engine constants, saved into the library.
 
-Per project policy (2026-07-09): constants mined from the game executable are
+Project policy: constants mined from the game executable are
 legitimate library data — the pipeline must run from game.naz + wlib alone,
 and this module is where the exe knowledge lives.
 
@@ -27,7 +27,10 @@ Engine numeric constants (sources in docs/ENGINE_CONSTANTS.md):
   ANIMATION_CRITERIA enum  see anim_state_machine CRIT_* (exe PUSH pairs)
 """
 
-import functools, json, os, re
+import functools
+import json
+import os
+import re
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 BASE_FPS = 30.0

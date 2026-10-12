@@ -1,23 +1,26 @@
-# Topic C — jiggle (secondary motion) from the exe side
+# Jiggle (secondary motion) from the exe side
 
 Evidence tags: **[code]** read from the exe (decompilation plus capstone for every constant and branch quoted),
-**[data]** measured on the user's files (read-only: skeleton models, bind npz, capture palettes), **[inferred]**, **[not established]**.
+**[data]** measured on files (skeleton models, bind npz, capture palettes), **[inferred]**, **[not established]**.
 Constants table: `findings/jiggle_constants.json`. Scratch: `work/jiggle/`.
+Toolkit: `wlib/jiggle_d6.py` (models `solver`, `pivot`, `pinned`; see the last section). The PhysX side of the joint
+(what the solver makes of the soft swing limits) is in `findings/physx_d6.md`.
 
-## Verdict on the ≈1.7 factor
+## The ≈1.7 amplitude factor of the `pinned` model
 
 **No constant in the exe explains it, and none is expected to.** Nothing the game hands to PhysX is scaled (spring and damping go in
 verbatim, only limit angles are converted deg→rad), and the write-back from the simulated body to the bone has no gain.
-What the exe shows instead is that our model differs from the engine in geometry and drive, in ways that change amplitude:
+The exe shows instead that the `pinned` model differs from the engine in geometry and drive, in ways that change amplitude:
 
-1. the pivot is the **parent bone origin** and the bone is written back with **translation as well as rotation**; we pin the bone origin and rotate about it;
-2. our lever `r = tb[k]` is the bone's bind position measured from the **model origin** (0.346 m for the breasts), not the parent→bone offset (0.132 m);
-   the same wrong length sets our angle clamp (13.2° instead of 35.2°);
-3. the game **cancels gravity** on the jiggle bodies every frame; we drive with gravity;
-4. the PhysX substep is 1/60 s; our "2 substeps → 1/120" softening has no basis in the exe.
+1. the pivot is the **parent bone origin** and the bone is written back with **translation as well as rotation**; `pinned` pins the
+   bone origin and rotates about it;
+2. the `pinned` lever `r = tb[k]` is the bone's bind position measured from the **model origin** (0.346 m for the breasts), not the
+   parent→bone offset (0.132 m); the same wrong length sets its angle clamp (13.2° instead of 35.2°);
+3. the game **cancels gravity** on the jiggle bodies every frame; `pinned` drives with gravity;
+4. the PhysX substep is 1/60 s; the `pinned` "2 substeps → 1/120" softening has no basis in the exe.
 
 All four are confirmed independently by the capture palettes (§5). The effective stiffness/damping the PhysX solver produces from
-k = 200, d = 0.8 on this body cannot be derived from the exe (it is inside PhysXCore) — that part stays empirical.
+k = 200, d = 0.8 on this body cannot be derived from the exe (it is inside PhysXCore; `findings/physx_d6.md` reads the DLL).
 
 ## 1. Setup — `CharacterAddonCtrl` 0x6574cd **[code]**
 
@@ -32,11 +35,11 @@ Per addon i (count = `[0xe171f4]+0x10 → +0x78`): parent bone list `Spine2, Spi
 | placed at | parent bone world pos/orient (`FUN_004b0557` / `FUN_004b0582`) | child bone world pos/orient |
 | movement type (prop 0x61f13948) | 1 | 1 here, **2 (dynamic)** in initialize_external 0x648d58 |
 
-Docs said "0.1³ MockupBox": that is the anchor box; the simulated body is the 0.8 m cube.
+The "0.1³ MockupBox" is the anchor box; the simulated body is the 0.8 m cube.
 An `EmbeddedJointNode` is created as a **child of box A** (0x657c..: parent argument = record[0]); `record+0xc` = distance limit from the
 PhysicsWorld block (+0x24 breast, +0x30 belly, +0x3c hair).
 
-`SetMass` stores `max(arg, 0.1)`; no other RigidBody property is set, so the constructor defaults apply (0x4fe311):
+`SetMass` stores the argument if it is above a threshold, else 0.1 (the result is 0.1 here); no other RigidBody property is set, so the constructor defaults apply (0x4fe311):
 numSolverIterations **4** (+0x9c), linearDamping **0.0** (+0xa4), **angularDamping 1.0** (+0xa8), max linear / angular velocity **200** (0x9e615c).
 Actor creation 0x506b79 (0x50722f–0x5072a4): `actor->vtbl+0xcc(0.0, mass)` (update mass from shapes with total mass, **[inferred]** from the argument pair),
 then linear damping, angular damping, max angular velocity. So mass 0.1 with the inertia of the body's shapes; if the shape is the
@@ -44,7 +47,7 @@ then linear damping, angular damping, max angular velocity. So mass 0.1 with the
 
 ## 2. Joint — `CharacterAddonCtrl.initialize_external` 0x648858 **[code]**
 
-Setter ↔ name mapping from the D6Joint property table `FUN_0051ff66` (now in the dump).
+Setter ↔ name mapping from the D6Joint property table `FUN_0051ff66`.
 
     EmbeddedJointNode.SetChildNode (0x4a6e1c, node+0x130) = box A
     EmbeddedJointNode.SetParentNode(0x4a6e6c, node+0x134) = box B
@@ -95,10 +98,10 @@ Per addon and frame:
 The bone's local **position and orientation** are both replaced by the box pose; there is no gain or multiplier.
 The limit is a distance in metres on the bone origin, not an angle.
 
-## 5. Checks against the user's data **[data]**
+## 5. Checks against the files and captures **[data]**
 
 Levers (skeleton `.model`, engine-exact parse): BreastL / BreastR parent→bone offset 0.1323 / 0.1317 m; bind position from the model
-origin 0.3460 m (what `jiggle_d6` uses as `r`); JiggleBelly 0.1015 vs 0.1929 m.
+origin 0.3460 m (what the `pinned` model uses as `r`); JiggleBelly 0.1015 vs 0.1929 m.
 
 Capture palettes, child relative to parent (6000 sampled frames each):
 
@@ -113,38 +116,45 @@ Capture palettes, child relative to parent (6000 sampled frames each):
 
 - The maxima equal the file distance limits (0.08 / 0.1 m) to four digits → §4 step 5.
 - The fixed point sits at the parent bone origin, not at the child bone origin → §2 frames.
-- The mean deviation is zero → no gravity sag, §3 anti-gravity. Our model has a constant sag of about 1.6°.
-- Angles of 20–60° occur; our clamp caps the angle at `limit / |tb|` = 13.2° (breast) and 29.7° (belly).
+- The mean deviation is zero → no gravity sag, §3 anti-gravity. The `pinned` model has a constant sag of about 1.6°.
+- Angles of 20–60° occur; the `pinned` clamp caps the angle at `limit / |tb|` = 13.2° (breast) and 29.7° (belly).
   The engine's geometric bound for a pure rotation about the parent origin is `2·asin(limit / (2·lever))` = 35.2° and 59.0°.
 - In the parent bone's frame the RMS rotation is 2.7° about X and 4.2° about each of Y and Z: the locked twist axis is the quiet one,
   the two swing axes respond alike. This supports keeping the swing response isotropic.
 
-## 6. What stays unexplained
+## 6. Not established from the exe
 
-- The emergent stiffness and damping (capture fits near K ≈ 150–170 s⁻², D ≈ 11–19 s⁻¹). With k = 200 N·m/rad on a body whose inertia
-  about the pivot is of order 0.012 kg·m² (0.8 m cube, 0.1 kg, lever 0.13 m — **[inferred]**), a rigid-spring reading gives a far stiffer system;
-  how PhysX 2.8.1 treats a soft swing limit of value 0 next to a 45° one, and how its implicit spring behaves at h = 1/60, is not in the exe.
+- The emergent stiffness and damping. Linear (K, D) fits to the capture depend on the frame rate the capture is read at:
+  K ≈ 150–170 s⁻², D ≈ 11–19 s⁻¹ reading it at 30 fps, K ≈ 570 s⁻², D ≈ 37.5 s⁻¹ (breast) at 55 fps; the capture averaged
+  about 64–65 fps with frames that ran no physics step, so neither pair is the engine's law. With k = 200 N·m/rad on a body whose
+  inertia about the pivot is of order 0.012 kg·m² (0.8 m cube, 0.1 kg, lever 0.13 m — **[inferred]**), a rigid-spring reading gives a
+  far stiffer system; how PhysX 2.8.1 treats a soft swing limit of value 0 next to a 45° one, and how its implicit spring behaves at
+  h = 1/60, is not in the exe (it is in PhysXCore.dll: `findings/physx_d6.md`).
 - Whether the addon force is applied on every substep when a frame takes several.
 - Per-slot AnimSlot speed and anything else upstream is unrelated to jiggle.
 
-## Proposed toolkit change (`wlib/jiggle_d6.py: apply_jiggle`)
+## Toolkit (`wlib/jiggle_d6.py: apply_jiggle`)
 
-Minimal, in order of confidence:
+The engine geometry above is what the `pivot` model implements (and the `solver` model, the default, on top of it with the PhysX
+soft-limit row arithmetic of `findings/physx_d6.md`). The `pinned` model keeps the pre-exe-read behaviour. Differences of `pivot`
+from `pinned`, in order of confidence:
 
-1. **Lever**: use the parent→bone offset, `r = tloc[k]` (already in the bind npz, parent-local), instead of `r = tb[k]`. This also fixes the
+1. **Lever**: the parent→bone offset, `r = tloc[k]` (in the bind npz, parent-local), instead of `r = tb[k]`. This also fixes the
    frame mix-up in `np.cross(r, f_o)` (`f_o` is parent-local, `tb` is model-space).
-2. **Clamp**: clamp the bone-origin displacement, not the angle: with `x` the deviation rotation, `δ = R(x)·r − r`; if `|δ| > limit` scale by
-   `t = limit/|δ|` (position) and slerp the rotation by `t`. Replace `max_x = lim / rlen`.
+2. **Clamp**: on the bone-origin displacement, not the angle: with `x` the deviation rotation, `δ = R(x)·r − r`; if `|δ| > limit` scale by
+   `t = limit/|δ|` (position) and slerp the rotation by `t`. Replaces `max_x = lim / rlen`.
 3. **Write-back about the parent origin**: the palette of the jiggle bone becomes `T(c)·D·T(−c)·P_old` with `c` = world position of the parent
    bone origin (`P[i,p]·tb[p]`) and `D` the world deviation rotation — i.e. `P[i,k,:,:3] = Dm @ P[i,k,:,:3]`,
    `P[i,k,:,3] = c + Dm @ (P_old[i,k,:,3] − c)` — instead of re-pinning the origin with `jw − P·tb[k]`.
-4. **Drop gravity from the drive**: `f_o = A_oᵀ·(−acc_o)`; keep the `−α_parent` term.
-5. **Substep**: pass `dts = 1/hz` to `solver_soften` (or drop the softening and fit K, D once), since the exe steps at 1/60. This changes the
-   effective constants and must be re-validated against the capture before it ships; items 1–4 are independent of it.
-6. Remove `joint_frames()` / `mode='aniso'` inputs taken from the model's "joint records": those are collision capsules (`findings/skeleton_blobs.md`).
-   The real swing axes are the parent bone's Y and Z.
+4. **No gravity in the drive**: `f_o = A_oᵀ·(−acc_o)`; the `−α_parent` term stays.
+5. **Substep**: `dts = 1/hz` for `solver_soften` (mode `engine`), since the exe steps at 1/60. This changes the
+   effective constants; items 1–4 are independent of it.
+6. `joint_frames()` / `mode='aniso'` inputs taken from the model's "joint records" are not used: those are collision capsules
+   (`findings/skeleton_blobs.md`). The real swing axes are the parent bone's Y and Z.
 
-After 1–4 the empirical amplitude factor should be re-measured from zero; it was compensating for the missing translation, the
-short clamp and the gravity bias at the same time, so it is not expected to survive as a single number.
-Docs to correct: "0.1³ MockupBox" (the dynamic body is 0.8³), "gravity (0, −14.82, 0) drives the pendulum" (cancelled per frame),
-"dts = 1/120, 2 solver substeps" (no exe basis), "EmbeddedJointNode type-7 records are the D6 frames" (they are capsules).
+After 1–4 the empirical amplitude factor of `pinned` does not carry over: it was compensating for the missing translation, the
+short clamp and the gravity bias at the same time, so it is not a single number.
+
+Ruled out (statements that older descriptions made): "0.1³ MockupBox" is the dynamic body (it is 0.8³); "gravity (0, −14.82, 0)
+drives the pendulum" (cancelled per frame); "dts = 1/120, 2 solver substeps" (no exe basis); "EmbeddedJointNode type-7 records are
+the D6 frames" (they are capsules).

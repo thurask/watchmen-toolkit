@@ -8,7 +8,7 @@ CharacterDef / combo fragments in the extract, or a fragment the module cannot
 read) simply has no `combat_format`.
 
 Source of every statement: `re/wp3_combat.md` (the game's script, lifted
-from `KapowMultiDEDRM.exe`, Part 2 PC) and the later reads of the damage path,
+from `KapowMultiDEDRM.exe`, Part 2 PC) and the reads of the damage path,
 the area attacks, the sweep and the enemy AI, each cited with its handler in
 `combat.rules`. Evidence classes used below and in the JSON:
 
@@ -47,8 +47,8 @@ maximum 2.0). Interval kinds follow `MathLib.InsideInterval` 0x77aa25:
 `X in [a;b[`, `X < b`, `X >= a`. An ENUM criterion reads `VARIABLE = VALUE`;
 `TARGET_MODE` (enum 7) uses the names of `combat.enums.TARGET_MODE`. `NOT` is
 the criterion's own flag. `entry_only` criteria are not tested while the
-current state lies inside the group that owns them. The existing `criteria` /
-`criteria_tree` fields are unchanged.
+current state lies inside the group that owns them. The state's own `criteria` /
+`criteria_tree` fields are those of ANIMATION_META.md.
 
 `random_pick`: a group with "Choose Random State" starts its member scan at a
 random member; otherwise the first acceptable member in tree order is taken
@@ -362,7 +362,8 @@ She does not use the reaction table below: her routine counts the attacks of
 each attacker and answers with a dodge (probability 0.22 early on), a forced
 fast attack, a stun attack or a counter, using engine random numbers. The
 four constants, the rule that attacks from behind are not exempt and the
-clamp of `dodges_before_counter` were read twice; the branch order once.
+clamp of `dodges_before_counter` rest on two independent reads; the branch
+order on one.
 
 ### Underboss (Part 1) (`rules.underboss`)
 
@@ -641,8 +642,10 @@ is shared by several states, so they stay in `anim_meta.json`.
 
 `watchmen characters` reuses an `anim_meta.json` it finds in the output folder only when it
 carries this block's current marker (`combat_format`) and the effects marker (`fx_format`) besides
-the table and face formats; an older table, or one with another `combat_format`, is rebuilt. If the combat step itself fails on an extract
-(`combat: skipped (...)` in the log) the table has no marker and is rebuilt on every run.
+the table and face formats; a table without the marker, or with another `combat_format`, is
+rebuilt. If the combat step itself fails on an extract (`combat: skipped (...)` in the log) the
+table has no marker; the failure is recorded under `build_failed`, which counts as current, so the
+table is not rebuilt on every run (ANIMATION_META.md, `characters_export.anim_meta_is_current`).
 
 ## Not exported
 

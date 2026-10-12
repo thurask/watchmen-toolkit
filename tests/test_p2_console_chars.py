@@ -356,8 +356,9 @@ def test_a_bind_from_another_skeleton_is_reported_even_under_a_part1_path(tmp_pa
     blob[i : i + 12] = struct.pack("<3f", 0.1, 0.25, 0.0)
     (sk / "Medium_Skeleton.model").write_bytes(bytes(blob))
     got = ce.bind_mismatches(str(ex))
-    assert list(got) == ["medium"] and "rest pose differs from Medium_Skeleton.model" in (
-        got["medium"]
+    assert (
+        list(got) == ["medium"]
+        and "rest pose differs from Medium_Skeleton.model" in (got["medium"])
     )
     # a bind whose skeleton the extract does not have at all (a Part 2 bind)
     os.replace(

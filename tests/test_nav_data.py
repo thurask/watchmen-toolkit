@@ -588,7 +588,7 @@ def test_glb_structure_and_space():
     assert g.total_length == len(g.raw) and len(g.bin_chunk) % 4 == 0
 
 
-def parse_glb_bytes(raw, _tmp=[0]):
+def parse_glb_bytes(raw, _tmp=[0]):  # noqa: B006
     import tempfile
 
     with tempfile.NamedTemporaryFile(suffix=".glb", delete=False) as fh:

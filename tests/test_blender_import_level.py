@@ -344,7 +344,7 @@ def test_host_offset_copies_go_to_a_collection_of_their_own(export):
     src = inspect.getsource(bil)
     assert '("Characters", "Scene models"), HOST_OFFSET_GROUP)' in src
     assert "Whether the game draws these nodes is not established" in bil.__doc__
-    assert "run by the user on desktop Blender 5.2" in bil.__doc__
+    assert "a level import on desktop Blender 5.2" in bil.__doc__
     assert "was not inspected in detail" in bil.__doc__
 
 

@@ -1,16 +1,17 @@
-# Topic B — "joint blob types 4 and 5" in .model node records
+# Node collision volumes ("joint blob types 4 and 5") in .model node records
 
 Evidence tags: **[code]** read from the exe (capstone; the functions are SEH stubs in the Ghidra dump), **[data]** verified on the
-extracted game files (read-only, device tool), **[inferred]**. Table: `findings/skeleton_blobs_layout.json`. Scratch: `work/skel/`.
+extracted game files, **[inferred]**. Table: `findings/skeleton_blobs_layout.json`. Scratch: `work/skel/`.
 
-## Result in one paragraph
+## Summary
 
-The records our docs call "EmbeddedJointNode joints, types 4/5/6/7" are not joints. They are the node's **collision volumes**
+The records formerly documented as "EmbeddedJointNode joints, types 4/5/6/7" are not joints. They are the node's **collision volumes**
 (`kernel/collision/volumes/*.cpp`): type 2 concave mesh, 4 convex mesh, 5 box, 6 sphere, 7 capsule. A node carries **two** volume lists
-(one per PhysX scene) followed by a third, always-empty list — the "[u32 0][u32 0] terminator" in our layout is the second list's count
-and the third list's count. The "blob" is a cooked PhysX mesh and exists only for mesh types (type 4 → `NXS\x01CVXM…`). Records are
-not a fixed 48 bytes: only the capsule happens to be 48. With the engine layout, 2003 of 2004 mesh-free node regions in all 1475
-`.model` files tile exactly **[data]** (old `parse_node_aux`: 1743).
+(one per PhysX scene) followed by a third list of particle emission surfaces (`MeshParticleData`, 0x561d1c; element 0x28 bytes) —
+the "[u32 0][u32 0] terminator" of the old fixed-48-byte layout is the second list's count and the third list's count. The "blob"
+is a cooked PhysX mesh and exists only for mesh types (type 4 → `NXS\x01CVXM…`). Records are not a fixed 48 bytes: only the capsule
+happens to be 48. With the engine layout, 2,069 of 2,069 mesh-free node regions in the 740 `.model` files tile exactly **[data]**
+(a count of "1475 files" includes the `.model.stream` files; the fixed-48-byte layout tiles 1743 regions).
 
 ## Reader
 
@@ -55,9 +56,10 @@ Type-specific data **[code]**:
 
 Record sizes without blob: sphere 44, capsule 48, box 52, mesh 8 + 4 + 4 + 12·nVerts + 4 + 4·nIdx + 28 + 4.
 
-What our field names really are (capsule case): `[type][0][pos.x][pos.y][pos.z][a][a'][quat]` = `[type][base][diameter][height][pos.x][pos.y][pos.z][quat]`.
-So for the female "breast pair on Spine2" our "anchor (0.143, 0.243, −0.189), a = ∓0.095, a' = 0.024" is a capsule of diameter 0.1429,
-height 0.2428 at local position (−0.1887, ∓0.0953, 0.0237).
+Mapping of the old fixed-48-byte field names onto the capsule layout: `[type][0][pos.x][pos.y][pos.z][a][a'][quat]` =
+`[type][base][diameter][height][pos.x][pos.y][pos.z][quat]`. So the female "breast pair on Spine2" formerly read as "anchor
+(0.143, 0.243, −0.189), a = ∓0.095, a' = 0.024" is a capsule of diameter 0.1429, height 0.2428 at local position
+(−0.1887, ∓0.0953, 0.0237).
 
 ## The two lists
 
@@ -67,8 +69,9 @@ Accessors `FUN_004f922b` / `FUN_004f9252` / `FUN_004f927a` (volume / position / 
 (0x507205: `[0xe1528c] + idx×4 + 0x30`) **[code]** — so list 0 holds the shapes for PhysX scene 0 and list 1 those for scene 1.
 What each scene is used for in game terms (main world vs. a character/ragdoll scene) is **[not established]**.
 
-Corpus **[data]**: list 0 — 17 convex meshes, 82 boxes, 51 spheres, 543 capsules; list 1 — 41 boxes, 200 capsules; third list always 0.
-`Female_Skeleton.model`: 30 volumes on 16 bones, all in list 0 (capsules on spine/limbs/head, a sphere on each upper arm, boxes on hands and feet).
+Corpus **[data]**: list 0 — 17 convex meshes, 82 boxes, 51 spheres, 543 capsules; list 1 — 41 boxes, 200 capsules. The third list is
+empty in almost every node: 29 surfaces in 19 of the 738 distinct PC Part 2 models (e.g. `ACUnit_Wall_02`, "splash emitter").
+`Female_Skeleton.model`: 32 volumes on 16 bones, all in list 0 (capsules on spine/limbs/head, a sphere on each upper arm, boxes on hands and feet).
 `Small_Skeleton.model`: 17 convex meshes (10–32 vertices, cooked blobs 1.3–7.7 kB). `Fimale_Gimp_Hair.model`: both lists populated.
 
 ## Relevance
@@ -79,13 +82,15 @@ Corpus **[data]**: list 0 — 17 convex meshes, 82 boxes, 51 spheres, 543 capsul
   interpretation is wrong. The real jiggle joint is created at run time with the parent bone's frame (see `findings/jiggle.md`).
   It only feeds the rejected `mode='aniso'`, so no shipped output depends on it.
 
-## Proposed toolkit change
+## Toolkit
 
-1. `wlib/parse_model_nodes.py: parse_node_aux` — replace the fixed 48-byte joint loop with the engine layout: two volume lists,
-   per-type data as in the table, then the third count; return `{'f1','parent','volumes': [list0, list1]}` with entries
-   `{type, base, params, pos, quat, blob}`. Reference implementation (validated on the corpus): `work/skel/vol_parse.py`.
-   Keep a `joints` alias only if a caller still needs it.
-2. `wlib/jiggle_d6.py: joint_frames` — remove, or rename and document as "collision capsule frames"; delete the `jointframes_v2_*`
-   cache use. Not needed by `mode='engine'`.
-3. Docs: replace "EmbeddedJointNode joint records" by "node collision volumes"; types 4/5 are closed.
-4. The existing unit test `test_v120_regressions.py` case 9 builds a synthetic region in the old layout and must be regenerated with it.
+1. `wlib/parse_model_nodes.py: parse_node_aux` reads the engine layout through `skeleton_records.parse_node_tail`: two volume lists,
+   per-type data as in the table, then the surface list. It returns `{'f1','parent','volumes': [list0, list1], 'surfaces', 'has_mesh'}`
+   with volume entries `{type, base, params, pos, quat, blob}` (type-specific keys: size | radius | diameter, height | mode, verts,
+   indices), plus a `joints` alias (the same volumes flattened in file order, with `scene`, and `a`/`a2` = a capsule's
+   diameter/height) for callers of the old layout. Reference implementation validated on the corpus: `work/skel/vol_parse.py`.
+2. `wlib/jiggle_d6.py: joint_frames` is kept only as the legacy input of `mode='aniso'` (with its `jointframes_v2_*` cache); it is not
+   needed by `mode='engine'`.
+3. Docs use "node collision volumes", not "EmbeddedJointNode joint records"; types 4/5 are closed.
+4. `test_v120_regressions.py` case 9 builds its synthetic region in the engine layout
+   (`[type][base=0][type data][pos x3][quat x4][blobLen][blob] [n1=0][n2=0]`).

@@ -13,8 +13,9 @@ REDeferredMain2::SetMaterial 0x571d5d) lights display-encoded values with
 
 Missing layers default to (0x5382aa): normal grey 128 (Gfx+0x598); specular, glow,
 fallOff, ambOcc white (+0x59c); height and specSize black (+0x5a0).  `engine` mode
-translates that into glTF's metallic-roughness model; `legacy` leaves the writers as they were
-(flat 0.85 roughness / roughnessGen.png, raw specMap as specularColorTexture).
+translates that into glTF's metallic-roughness model; `legacy` writes the materials of
+releases before 1.4.0 (flat 0.85 roughness / roughnessGen.png, raw specMap as
+specularColorTexture).
 
 A material the game draws NO highlight on (specularPower <= 0 without a cube
 reflection, or a reflectance of nothing) is written fully rough -- roughnessFactor
@@ -123,7 +124,7 @@ def exponent(spec_size, g=None):
 
 def roughness(n):
     """glTF (perceptual) roughness of a lobe of exponent n: GGX alpha^2 = 2/(n+2),
-    roughness = sqrt(alpha).  (sqrt(2/(n+2)), the old bake, is alpha itself.)"""
+    roughness = sqrt(alpha).  (sqrt(2/(n+2)), the `legacy` bake, is alpha itself.)"""
     import numpy as np
 
     return np.clip((2.0 / (np.asarray(n, dtype=np.float64) + 2.0)) ** 0.25, 0.045, 1.0)
@@ -253,7 +254,7 @@ def texture_has_alpha(sheet_json, pixel_alpha):
     sheet_json: the sheet.json of the texture the diffuse layer comes from (the
     override texture when the sheet takes its diffuse elsewhere); its
     "textureHasAlpha" is the Texture header's alpha byte of layer 0, written by
-    the texture pass.  Absent (an older extract, or a texture without a sheet):
+    the texture pass.  Absent (an extract without it, or a texture without a sheet):
     the pixel extrema `pixel_alpha`."""
     v = (sheet_json or {}).get("textureHasAlpha")
     if isinstance(v, bool):

@@ -1,7 +1,7 @@
 """jiggle_d6: FILE-ONLY jiggle pass -- NxD6 swing-soft-limit pendulum integrator.
 
-Drop-in for jiggle_pass.apply_jiggle (same signature); replaces the capture-fit
-AR(2) params (jiggle_params.npz) with pure file-side data:
+Drop-in for jiggle_pass.apply_jiggle (same signature); pure file-side data, no
+capture-fit AR(2) params (jiggle_params.npz):
 
   spring/damping/limit : GameEssentials.fragment PhysicsWorld node
                          (m_n{breast,belly,hair}springconstant/springdamping/
@@ -22,7 +22,7 @@ Three models, selected with apply_jiggle(..., model=):
     motion; any other clip starts with the parent already moving at its
     frame-0 velocity (see _apply_jiggle_solver).
 
-'pivot' (opt-in, 2026-10; exe re-read + capture re-measurement):
+'pivot' (opt-in; geometry read from the exe, constants measured on captures):
   - Setup 0x6574cd: per addon (Spine2->BreastL/R, Spine->JiggleBelly, Head->Hair)
     a kinematic 0.1 m anchor box on the PARENT bone and a dynamic 0.8 m box of
     mass 0.1 on the jiggle bone; RigidBody ctor 0x4fe311 leaves angular damping
@@ -42,18 +42,20 @@ Three models, selected with apply_jiggle(..., model=):
     measured on the capture palettes, mode='engine' the file k, d
     through solver_soften at 1/60 s.
 
-'pinned' (opt-in; the default up to 1.3.0, output unchanged since 1.2.0):
+'pinned' (opt-in; output bit-identical to the jiggle of releases 1.2.0 - 1.3.0):
   - joint pinned at the bone origin, lever r = tb (bone position from the model
     origin), drive r x (g - a) - alpha with gravity (0,-14.82,0), K/D from
     solver_soften at 1/120 s (166.3 / 18.8), angle clamp limit/|tb|.  The 1/120
-    "capture-exact" match came from reading the capture at 30 fps; the
-    'pivot' capture fit (K ~ 570, D ~ 37.5, breast) assumed 55 fps; the capture
-    actually averaged about 64-65 fps with frames that ran no physics step.
+    "capture-exact" match reads the capture at 30 fps; the 'pivot' capture fit
+    (K ~ 570, D ~ 37.5, breast) assumes 55 fps; the capture averages about
+    64-65 fps with frames that run no physics step.
 
 Usage: from jiggle_d6 import apply_jiggle;  apply_jiggle(P, fps, bind_npz)
 """
 
-import numpy as np, os, math
+import numpy as np
+import os
+import math
 import exact_math as _em
 from wutil import default_naz, load_npz
 
@@ -146,7 +148,7 @@ def solver_soften(k, zeta, dts=1.0 / 120.0):
     return k / den, d / den
 
 
-from wutil import qmat_xyzw as _q2m  # v -> q v q*, (x, y, z, w), not normalised
+from wutil import qmat_xyzw as _q2m  # v -> q v q*, (x, y, z, w), not normalised  # noqa: E402
 
 _SKEL_ASSETS = {
     "female": "Female_Skeleton.model",
@@ -156,13 +158,13 @@ _SKEL_ASSETS = {
 
 
 def joint_frames(bindpath, naz=None):
-    """LEGACY input of the rejected mode='aniso' only.  The "type-7 joint
-    records" read here are the node's collision CAPSULES (skeleton_records
-    module docstring), not D6 joint frames; the real jiggle joint frame is the
-    parent bone frame (0x648858).  Kept so mode='aniso' still runs.
-    Original description: D6 swing axes per jiggle bone, in the parent-local frame.
+    """Input of mode='aniso' only (a model ruled out, see apply_jiggle).  The
+    "type-7 joint records" read here are the node's collision CAPSULES
+    (skeleton_records module docstring), not D6 joint frames; the real jiggle
+    joint frame is the parent bone frame (0x648858).
+    What it computes: D6 swing axes per jiggle bone, in the parent-local frame.
     Reads EmbeddedJointNode type-7 records from the skeleton .model in the naz
-    (parse_node_aux, 2026-07-12c field-order fix: [pos][a][a'][quat]).  Joint
+    (parse_node_aux, field order [pos][a][a'][quat]).  Joint
     quats are model-space (conj-FK); mirrored breast pair verified.  Axes:
     X=twist (outward), Y=swing1 (FREE to 45deg), Z=swing2 (always-sprung).
     Matching: per jiggle bone, the parent-node joint whose model-space twist
@@ -193,7 +195,9 @@ def joint_frames(bindpath, naz=None):
             )
             raise
     try:
-        import watchmenlib as W, parse_model_nodes as PMN, struct
+        import watchmenlib as W
+        import parse_model_nodes as PMN
+        import struct
 
         hdr = None
         for bk, b in W.iter_blocks(naz, streams=False):  # a skeleton header
@@ -269,23 +273,23 @@ def _apply_jiggle_pinned(
 ):
     """P: (F,nbones,3,4) world palettes; fps: clip rate; bindpath: bind npz.
     mode: 'engine'   -- file k,zeta + solver_soften (capture-exact k,d; default)
-          'aniso'    -- EXPERIMENTAL anisotropic wedge -- TESTED AND REJECTED
-                        2026-07-12c: a force-free swing1 axis is gravity-
+          'aniso'    -- anisotropic wedge, ruled out (for reference and
+                        experiments only): a force-free swing1 axis is gravity-
                         unstable (idle drifts to the distance clamp ~10deg vs
                         capture 1.4deg) for BOTH axis assignments.  PhysX's
                         eccentric elliptic cone (swing2max=0) acts as a SINGLE
-                        combined near-isotropic swing constraint => 'engine'
-                        mode is the correct file-only model.  The capture-fit
-                        C weak middle row = the LOCKED TWIST DOF along rhat
+                        combined near-isotropic swing constraint, so 'engine'
+                        mode is the file-only model.  The capture-fit C weak
+                        middle row = the LOCKED TWIST DOF along rhat
                         (parent-local rhat ~ (-0.27,0.94,0.19), Y-dominated),
-                        not a free swing.  Kept for reference/experiments.
+                        not a free swing.
           'ratio'    -- D = 2*d_file*sqrt(K), no softening
           'absolute' -- D = d_file raw torque-domain reading
     gain kept for interface parity (scales deviation; default 1).
     KNOWN GAP: dynamic amplitude ~1.4-1.5x below capture-fit AR(2)+gain on
     run/dance (statics match exactly; a x2 visual double-cover matches
-    dynamics but doubles statics -> rejected).  Needs raw-capture window
-    validation; see ENGINE_CONSTANTS.md handoff."""
+    dynamics but doubles statics: ruled out).  Not validated on raw-capture
+    windows; see docs/ENGINE_CONSTANTS.md."""
     if naz is None:
         naz = default_naz()  # 01_game.naz, else game.naz
     bt = load_npz(bindpath)
@@ -393,9 +397,9 @@ def _apply_jiggle_pinned(
         # back to clip grid + apply (same convention as jiggle_pass)
         for i, ti in enumerate(t_o):
             j = min(int(ti * hz), N - 2)
-            # 2026-08-17: clamp w -- on clips faster than the sim grid (4x
-            # dense bakes, fps > hz) the tail frames extrapolated past x[N-1]
-            # and could overshoot the engine distance clamp.
+            # clamp w: on clips faster than the sim grid (4x dense bakes,
+            # fps > hz) the tail frames would extrapolate past x[N-1] and
+            # overshoot the engine distance clamp.
             w = min(ti * hz - j, 1.0)
             xw = (1 - w) * x[j] + w * x[j + 1]
             Ai = A_o[i]
@@ -406,7 +410,7 @@ def _apply_jiggle_pinned(
     return P.astype(np.float32)
 
 
-# --- engine "pivot" model (2026-10: exe re-read, findings/jiggle.md) ---------
+# --- engine "pivot" model (read from the exe; findings/jiggle.md) ------------
 # Simulated body: the 0.8 m MockupBox of mass 0.1 (setup 0x6574cd: size props
 # f32 @0xa06d84, RigidBody::SetMass 0x4fe514 with f32 @0x9e664c); the 0.1 m box
 # is the kinematic anchor that follows the parent bone.
@@ -426,9 +430,9 @@ _CAPTURE_FIT = {
 
 MODELS = ("pivot", "pinned", "solver")
 # "solver" steps the PhysX soft-limit row itself with the file constants: the DEFAULT.
-# "pinned" = the model of 1.2.0 (joint pinned at the bone origin, lever |tb|,
-# gravity drive, angle clamp), the default up to 1.3.0; its output is bit-identical
-# to those releases: apply_jiggle(model="pinned"), `--jiggle-model pinned`.
+# "pinned" = joint pinned at the bone origin, lever |tb|, gravity drive, angle
+# clamp (see the module docstring for the releases it reproduces):
+# apply_jiggle(model="pinned"), `--jiggle-model pinned`.
 # "pivot" follows the engine geometry read from the exe with a linear spring whose
 # constants (mode 'capture') are fitted to captures at an estimated frame rate.
 DEFAULT_MODEL = "solver"
@@ -452,10 +456,10 @@ def resolve_model(model=None, mode=None):
 
 
 #: version of the on-disk jiggle cache KEY of the solver model (directory tag +
-#: cache_file name).  2 = the clip's loop flag is part of the file name; the
-#: directories of key 1 (`<clip>.npz` baked with whatever loop flag the first run
-#: had) get another tag and are never read again.  The older models do not use the
-#: loop flag, so their 1.3.0 tags stay.
+#: cache_file name).  2 = the clip's loop flag is part of the file name; a
+#: directory of key 1 (`<clip>.npz` baked with whatever loop flag the first run
+#: had) has another tag and is never read.  The other models do not use the
+#: loop flag, so their tags carry no key version.
 CACHE_KEY_VERSION = 2
 
 
@@ -489,7 +493,7 @@ def cache_signature(model=None, mode=None, props=None):
         BODY_ANGULAR_DAMPING,
         MODEL_REVISION[model],
     )
-    if model == "solver":  # its own constants; the tuples of the older models stay as 1.3.0
+    if model == "solver":  # its own constants; the tuples of the other models are unchanged
         consts = consts[1:] + (
             SOLVER_BIAS,
             SOLVER_ITERATIONS,
@@ -549,7 +553,7 @@ def _slerp_m(Ra, Rb_, t):
 def swing_constants(mode, grp, W, model="pivot"):
     """(K, D) of the swing spring for one addon group.
     'engine'   -- file k, zeta through solver_soften at the PhysX substep
-                  (pivot: 1/rate_hz, FUN_004f4d20; pinned: historical 0.5/rate_hz)
+                  (pivot: 1/rate_hz, FUN_004f4d20; pinned: 0.5/rate_hz)
     'capture'  -- pivot only: capture-measured effective constants (_CAPTURE_FIT)
     'ratio'    -- D = 2*d_file*sqrt(K), no softening
     'absolute' -- D = d_file
@@ -692,7 +696,7 @@ def _apply_jiggle_pivot(P, fps, bindpath, bones, gain, mode, props, extract_root
     return P.astype(np.float32)
 
 
-# --- 'solver' model (2026-10: PhysXCore.dll 2.8.1.1 read, findings/physx_d6.md) ---
+# --- 'solver' model (PhysXCore.dll 2.8.1.1 read, findings/physx_d6.md) ------------
 # The jiggle joint has NO drive (game 0x5146ec: every driveType 0).  The file's spring
 # and damping are the SOFT SWING LIMITS (swing1 45 deg, swing2 0 deg, both LIMITED); two
 # limited swing axes form one cone limit of radius 0, i.e. one unilateral soft row.
@@ -1342,7 +1346,7 @@ def _apply_jiggle_solver(
 
 
 def apply_jiggle_legacy(P, fps, bindpath, **kw):
-    """The pre-2026-10 'pinned' model (apply_jiggle(..., model='pinned'))."""
+    """The 'pinned' model (apply_jiggle(..., model='pinned'))."""
     kw.pop("model", None)
     return apply_jiggle(P, fps, bindpath, model="pinned", **kw)
 
@@ -1372,7 +1376,7 @@ def apply_jiggle(
            'pivot'  -- engine geometry (parent-origin pivot, parent->bone lever,
                        position+rotation write-back, metre clamp, no gravity,
                        twist locked, one-frame latency); see _apply_jiggle_pivot
-           'pinned' -- the default of 1.2.0 - 1.3.0 (see _apply_jiggle_pinned)
+           'pinned' -- the pinned-joint model (see _apply_jiggle_pinned)
            None     -- DEFAULT_MODEL ('solver')
     mode:  spring constants, see swing_constants ('aniso' is pinned-only);
            None = DEFAULT_MODE[model].  'solver' has one mode, 'file'.

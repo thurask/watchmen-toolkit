@@ -5,9 +5,7 @@ game's own data. Written by `watchmen animmeta EXTRACT_OUT OUT.json [BINDS_DIR]`
 and by `watchmen characters`, which saves the same table as
 `OUT_DIR/anim_meta.json` and embeds the relevant part in every GLB's `extras`.
 
-This document describes **format 2** (`"format": "watchmen-anim-meta/2"`,
-toolkit 1.3.0). Format 1 was written only by a development build of 1.3.0 that
-was never tagged; the differences are listed in the next section.
+The table is **format 2** (`"format": "watchmen-anim-meta/2"`).
 
 Source: `wlib/anim_meta.py` builds the records; the engine rules it applies
 (fragment splicing, reference resolution, criteria, event timing, sync markers,
@@ -26,17 +24,11 @@ The same labels are in the file itself, as text, under `conventions`
 (`pair_timeline`, `pair_weapons`, `evidence`) and per event in
 `event_semantics[*].evidence`.
 
-Since 1.4.0 the table also has a face block (`face_format:
-"watchmen-face/2"`): additive, the format string stays `watchmen-anim-meta/2`,
-and no key of a 1.3.0 table changes name or type. One value does change: the
-`joint_space` sentence of every skeleton record, which in 1.3.0 said that
-`GamePivot` and `interact` both carry absolute scene tracks. Only `GamePivot`
-does; `interact` is written relative to it like every other joint (see
-"Coordinate conventions"). See "The face block".
+Three additive blocks ride on the table, each with its own marker and its own
+section or document; none changes the name or type of a core key:
 
-Two more blocks were added the same way, each with its own marker and its own
-document, and neither changes an existing key:
-
+- `face_format: "watchmen-face/2"` — top-level `face`, per state `face` /
+  `inflicts`, per pair `face`: the face rig's rule. See "The face block".
 - `combat_format: "watchmen-combat-meta/1"` — top-level `combat`, per state
   `group_criteria` / `criteria_rendered` / `combat`, per pair `trigger`: the
   combat rules. See [COMBAT_META.md](COMBAT_META.md).
@@ -45,38 +37,33 @@ document, and neither changes an existing key:
   `fx`: effects, the procedural finisher camera, rumble. See
   [FX_META.md](FX_META.md).
 
-The two blocks share no key. A consumer checks the marker before reading a
+The blocks share no key. A consumer checks the marker before reading a
 block: a table built from an extract without the fragments a block needs, or
 whose build step failed (`face: skipped (...)` / `combat: skipped (...)` /
 `fx_meta: skipped (...)` in the log), has no marker and no block; the failure
 is recorded under `build_failed`. `watchmen characters` reuses a table it
 finds in its output folder only when all the markers are current or recorded
 as failed in the current format (`characters_export.anim_meta_is_current`), so
-a table whose face, combat or fx step fails is not rebuilt on every run. Part 2 PC: the table is 12.4 MB
-without the two blocks; with the combat block alone 15.7 MB, with the fx block
-alone 14.4 MB (with both blocks and the face block, in the six-set export:
-21.5 MB on PC Part 2, 17.2 MB on PC Part 1; measured).
+a table whose face, combat or fx step fails is not rebuilt on every run. Part 2
+PC: the table is 12.4 MB without the combat and fx blocks; with the combat block
+alone 15.7 MB, with the fx block alone 14.4 MB (with both blocks and the face
+block, in the six-set export: 21.5 MB on PC Part 2, 17.2 MB on PC Part 1;
+measured).
 
-## What changed since format 1
+## Reading the table
 
-A consumer written against format 1 has to deal with the following. No
-format 1 key was removed; values changed as listed.
-
-1. **Check `format == "watchmen-anim-meta/2"`.** A cached `anim_meta.json` of
-   format 1 next to your GLBs is rebuilt by `watchmen characters` because the
-   string differs.
-2. **Events have a trigger kind, and `playpos` can be `null`.** Format 1
-   exported every event's stored number as a play position. That is right only
-   for `PLAY_POS` events. Use `trigger`; for timing use `time_s` (seconds on
-   the clip's own timeline) or `play_time_s` (seconds since the state was
-   entered). `playpos` is `null` for `LEAVE_STATE` events and for a
-   `TOTAL_PLAY_TIME` event that falls beyond one pass of the clip. On the
-   states both tables contain, 801 events had a wrong `playpos` in format 1
-   (enter-state 419, leave-state 82, total-play-time 300).
-3. **Event names are the executable's.** Ids 6 and 14 are renamed: `FOOTSTEP`
-   → `LEFT_FOOT_DOWN`, `WALK_CYCLE_POINT` → `UNUSED`. The editor's label is
-   kept in `caption_name` when it differs. What an event does is in
-   `event_semantics[event_id]`.
+1. **Check `format == "watchmen-anim-meta/2"`.** `watchmen characters` rebuilds
+   a cached `anim_meta.json` next to the GLBs whose format string differs.
+2. **Events have a trigger kind, and `playpos` can be `null`.** The stored
+   number is a play position only for `PLAY_POS` events. Use `trigger`; for
+   timing use `time_s` (seconds on the clip's own timeline) or `play_time_s`
+   (seconds since the state was entered). `playpos` is `null` for
+   `LEAVE_STATE` events and for a `TOTAL_PLAY_TIME` event that falls beyond one
+   pass of the clip.
+3. **Event names are the executable's.** Ids 6 and 14 differ from the editor
+   captions: `LEFT_FOOT_DOWN` (caption `FOOTSTEP`) and `UNUSED` (caption
+   `WALK_CYCLE_POINT`). The editor's label is kept in `caption_name` when it
+   differs. What an event does is in `event_semantics[event_id]`.
 4. **Some `PLAY_POS` events do not fire on the first pass.** An event at or
    before the state's start position carries `fires_first_pass: false`
    (34 events; on the 29 that sit on non-looping states `play_time_s` is
@@ -88,35 +75,33 @@ format 1 key was removed; values changed as listed.
    Every event repeats the `start_playpos` its times were computed for and a
    `start_basis` (`state_default`: the state's own start, the engine's default
    entry).
-6. **Pairs have a `timeline`.** `placement` is unchanged on every pair that
-   was in the format 1 table; `timeline` says when to apply it. Do not snap
-   the master. Hold the partner at its own entry pose during `own_entry_pose`,
-   blend during `blend_to_anchor`, use `placement` during `anchored`, stop
-   constraining at `released`. The pair runs on the master's clock, from
-   the master's start position (`timeline.start_playpos`; past 0 on 205 of
-   240 primary pairs).
+6. **Pairs have a `placement` and a `timeline`.** `placement` says where the
+   partner is; `timeline` says when to apply it. Do not snap the master. Hold
+   the partner at its own entry pose during `own_entry_pose`, blend during
+   `blend_to_anchor`, use `placement` during `anchored`, stop constraining at
+   `released`. The pair runs on the master's clock, from the master's start
+   position (`timeline.start_playpos`; past 0 on 205 of 240 primary pairs).
 7. **`timeline.anchor_rotation_unverified`** is true on 39 primary pairs: the
    master turns while the partner is anchored. The engine keeps the partner
    rigid in the master node's frame (`timeline.anchor_frame`, read from code),
    so it swings with the master and leaves the fixed marker of `placement` by
-   up to `anchor_drift_if_master_turns_m`. Treat contact there as approximate
-   (the key keeps its name from earlier tables).
-8. **More states, fewer clip entries, more pairs.** 1,290 states (format 1:
-   1,162) because the root nodes of nested fragments are no longer lost;
-   1,159 clip entries (1,375) because blend-slot captions such as
-   `pos 2, CLIP` are no longer exported as clip names; 413 pair candidates,
-   240 primary (395, 234). State `path` and pair `master_path` include the
-   restored groups. The order of `classes.*.states` can differ.
-9. **`character_type`** is an `OPPONENT_MODEL_TYPE` name. The ids are the same
-   as before.
-10. **New data:** `criteria_tree` per state, `classes.*.transitions` with
+   up to `anchor_drift_if_master_turns_m`. Treat contact there as approximate.
+   The key's name notwithstanding, the swing itself is read from code (see
+   *Pair timeline*).
+8. **Counts.** 1,290 states (the root nodes of nested fragments are included);
+   1,159 clip entries (blend-slot captions such as `pos 2, CLIP` are not clip
+   names and are not exported as such); 413 pair candidates, 240 primary. State
+   `path` and pair `master_path` include the nesting groups. The order of
+   `classes.*.states` is not fixed.
+9. **`character_type`** is an `OPPONENT_MODEL_TYPE` name; `character_type_id`
+   is the id.
+10. **Further data:** `criteria_tree` per state, `classes.*.transitions` with
     `start` (sync markers or an override), `transition_start_priority`,
     `enums`, `enum_variables`, `special_handling` and `animation_type` per
     state, `weapons`, group criteria and `master_opponent_models` per pair,
     `speeds` per clip.
-11. **Python:** the private `_VAR_PARTNER` is gone (`VAR_OPPONENT_MODEL`).
-    Public functions and the CLI are unchanged; `state_record` and
-    `allowed_enum_names` gained optional arguments.
+11. **Python:** the opponent-model variable constant is `VAR_OPPONENT_MODEL`;
+    `state_record` and `allowed_enum_names` take optional arguments.
 
 ## Where each fact comes from
 
@@ -145,16 +130,16 @@ format 1 key was removed; values changed as listed.
   `AnimationData.GetAnimationValueInternalMin/Max` 0x5aa588 / 0x5aa5c2; degrees
   for CHARACTER_PELVIS_ROTATION (measured −180..180).
 - **The export is true-handed** (`coordinate_frame: "right-handed-true"`, the
-  default since 1.4.0). The engine is left-handed; the GLBs and the numbers of
-  this table that are in their frame have x = −engine x. With a character facing
-  +Z its *left* hand is at +X, the bone names `L` / `R` are truthful, and nothing
-  has to be mirrored. Single characters and pairs are treated alike, so relative
+  default). The engine is left-handed; the GLBs and the numbers of this table
+  that are in their frame have x = −engine x. With a character facing +Z its
+  *left* hand is at +X, the bone names `L` / `R` are truthful, and nothing has
+  to be mirrored. Single characters and pairs are treated alike, so relative
   placement is what the game shows.
-- **A file without the `coordinate_frame` key is a mirror image.** That is every
-  file written by 1.3.0 (this format string, `watchmen-anim-meta/2`, existed
-  then) and everything written with `--frame mirrored`: the engine's numbers
-  verbatim in right-handed glTF, a character facing +Z has its left hand at −X.
-  For the real-world pose of such a file mirror X and swap L / R.
+- **A file without the `coordinate_frame` key is a mirror image.** That is
+  everything written with `--frame mirrored` (the layout of releases before
+  1.4.0, under the same format string `watchmen-anim-meta/2`): the engine's
+  numbers verbatim in right-handed glTF, a character facing +Z has its left
+  hand at −X. For the real-world pose of such a file mirror X and swap L / R.
 - **In the GLBs' frame** (they change sign of x, and of yaw, between the two
   frames): `clips[*].game_pivot` and `interact` (`pos_start`, `pos_end`,
   `yaw_start_deg`, `yaw_end_deg`) and `pairs[*].placement` (the `*_xz` pairs,
@@ -187,7 +172,9 @@ format 1 key was removed; values changed as listed.
   it, so a consumer applies the `GamePivot` node's translation and rotation to
   them. A clip whose `GamePivot` turns turns the body with it (data: with this
   rotation the `interact` marker is world-fixed to 1 cm on 67 of the 72 staged
-  clips that turn more than 2°, without it on none).
+  clips that turn more than 2°, without it on none). Only `GamePivot` carries
+  absolute scene tracks; `interact` is written relative to it like every other
+  joint, and the `joint_space` sentence of every skeleton record says so.
 - `interact` is keyed local to `GamePivot` and cancels its motion, so it is a
   world-fixed marker (data). A marker parked at the clip origin has raw local
   y = −1 (756 of 1,159 Part 2 clips). `EN2_COM_DMG_wpn_1H_disarm_NTO` is parked
@@ -195,9 +182,9 @@ format 1 key was removed; values changed as listed.
   every character GLB of the six sets: each `game_pivot` / `interact` yaw of
   the table that is not 0 or ±180 equals minus the right-handed yaw of the GLB
   node (0 off), and on clips that start turned `GP + R(−yaw)·interact`
-  reproduces the GLB node to 0.1 mm. In a paired clip the engine starts the partner on
-  the master's `interact`. The women's skeletons (`female`, `bs2`) have no
-  `interact`.
+  reproduces the GLB node to 0.1 mm. In a paired clip the engine starts the
+  partner on the master's `interact`. The women's skeletons (`female`, `bs2`)
+  have no `interact`.
 - In the skeleton file `Bip`, `GamePivot` and `interact` are siblings under one
   unnamed root; none is the parent of another.
 - A play position is a fraction 0..1 of the clip.
@@ -246,24 +233,22 @@ Read from `CheckPlayPosEvents` 0x5b51f3 and `SetupNewPage` 0x5b7788:
 what its `value` means, whether it moves the character that carries it
 (`moves_character`) or touches the partner (`affects_partner`), and the case
 address (`handler`). `evidence` is "read from code" for all 93 ids. Ten cases
-(6, 23, 29, 30, 31, 40, 59, 70, 76, 77) were only skimmed when the table was
-first written; each has since been read for a later table, and its string says
-which one (footsteps 6 / 40 / 76 / 77: the sound table; 23: the combat rules;
-29, 30, 31 and 70: the damage pass; 59: the effects table). No event writes a
-partner's position or orientation.
+(6, 23, 29, 30, 31, 40, 59, 70, 76, 77) are read in full for another table,
+and their string says which one (footsteps 6 / 40 / 76 / 77: the sound table;
+23: the combat rules; 29, 30, 31 and 70: the damage pass; 59: the effects
+table). No event writes a partner's position or orientation.
 
 An event's argument slots are in `payload` (see FX_META.md): the handler of an
 event id reads only the slots listed in `fx.event_fields[id]`; other set slots
-are stale editor leftovers and only named (`payload_stale`). For the feature
-round cases 56 (IMPACT_EFFECTS), 59 (CAMERA_CUT) and 61
-(CAMERA_CUT_TO_CHARACTER_CAM) were read instruction by instruction;
-`fx.event_fields` holds that reading.
+are stale editor leftovers and only named (`payload_stale`). Cases 56
+(IMPACT_EFFECTS), 59 (CAMERA_CUT) and 61 (CAMERA_CUT_TO_CHARACTER_CAM) are
+read instruction by instruction; `fx.event_fields` holds that reading.
 
 `event_name_check` compares the executable's names with the editor captions in
 the fragments: 73 ids agree, 2 conflict (id 6: `LEFT_FOOT_DOWN` against the
 caption `FOOTSTEP`, 13 uses; id 14: `UNUSED` against `WALK_CYCLE_POINT`,
-4 uses), 18 ids exist only in the executable. `event_names` is the
-caption-learned table of format 1, kept unchanged.
+4 uses), 18 ids exist only in the executable. `event_names` is the table of
+names learned from the editor captions, kept beside the executable's.
 
 Editor rules (`AnimationEvent.FilterExposedProperties` 0x5c4522, read from code):
 an event under a transition has trigger type and play position disabled and is
@@ -300,8 +285,8 @@ Read from `AnimationCriteriaMet` 0x5c5781 and `MathLib.InsideInterval`
 
 - An `ENUM` criterion tests only its variable (`m_ianimationenum`) and value
   (`m_ianimationenumvalue`). Enum variable 11 is `OPPONENT_MODEL_TYPE`, the
-  *other* character's model type. Format 1 read a stale editor slot as a
-  second selector and dropped real tests.
+  *other* character's model type. The node's other editor slots are not a
+  second selector.
 - Intervals: `INTERVAL` is min ≤ x < max; `LESS_THAN` is x < **max** (min is
   not read); `GREATER_THAN_OR_EQUAL` is x ≥ min. A shipped criterion captioned
   "SPEED less than 0.01" stores min 0.51, max 0.01.
@@ -548,8 +533,8 @@ the rest, 1.0 on 3); go-to by `TOTAL_PLAY_TIME` at 0.20–0.21 s on 234, by
 `PLAY_POS` on 3, entry flag on 3; blend 0.21 s on 237 and 0.13 s on 3; release
 between play position 0.26 and 0.91 on 230, none on 10.
 
-**The anchor swings with a turning master** (read from code, 2026-10-05).
-While anchored the partner is rigid in the master *node's* frame
+**The anchor swings with a turning master** (read from code). While anchored
+the partner is rigid in the master *node's* frame
 (`timeline.anchor_frame: "master node"`), and the master's node is its
 `GamePivot` frame: the node orientation is the heading quaternion of
 `m_nfaceheading`, set each frame (`CharacterVisual.UpdateAnimPoseAndCloth`
@@ -567,13 +552,13 @@ So the anchor cancels the master's own translation and turns with the
 master. `placement` is the fixed marker at t = 0 — what this rule gives while
 the master has not turned. Where the master's `GamePivot` turns more than 2°
 from its heading at t = 0 while the partner is anchored, the pair carries
-`anchor_rotation_unverified: true` (the key name is kept from earlier tables;
-the swing itself is no longer open), with `master_yaw_change_deg`,
-`master_yaw_window_s`, `master_yaw_window_playpos` and
-`anchor_drift_if_master_turns_m` = the engine's largest departure from the
-fixed marker, `|GP(u) + R(yaw(u)) · (I0 − (GP(u) − GP(0))) − (GP(0) +
-R(yaw(0)) · I0)|` (39 primary pairs, 14 master clips, 0.06–3.6 m; 60 of all
-413 candidates, 22 master clips).
+`anchor_rotation_unverified: true` (the swing itself is read from code; the
+key name says only that the fixed marker of `placement` is not exact there),
+with `master_yaw_change_deg`, `master_yaw_window_s`,
+`master_yaw_window_playpos` and `anchor_drift_if_master_turns_m` = the
+engine's largest departure from the fixed marker, `|GP(u) + R(yaw(u)) · (I0 −
+(GP(u) − GP(0))) − (GP(0) + R(yaw(0)) · I0)|` (39 primary pairs, 14 master
+clips, 0.06–3.6 m; 60 of all 413 candidates, 22 master clips).
 
 The clip data favour the fixed marker on most, not all, of those pairs: over
 the 30 flagged pair rows with at least 3 frames turned more than 20° inside
@@ -622,7 +607,7 @@ are reported equal to the PC formula.
 
 ### Where this is in the executable
 
-Read 2026-10-02 from `KapowMultiDEDRM.exe`.
+Read from `KapowMultiDEDRM.exe`.
 
 | What | Where |
 |---|---|
@@ -653,14 +638,14 @@ anchor does not follow the master's root motion.
 
 Not established: the parameters of the joint the engine creates between the
 two capsules once the partner is anchored. (How combat code decides that a
-pair may start is read and exported per pair as `trigger`: COMBAT_META.md.) The rule for a master whose GamePivot is turned at t = 0 is
-the engine's value at t = 0 — the master's node is its `GamePivot` frame
-(read on PC, see *Pair timeline*) — but no shipped pair exercises it
-(`yaw_start_deg` is 0 on all of them). It turns the `interact` offset the
-way the GLB hierarchy does (`GamePivot(0) · interact(0)`, checked on 32 turned
-solo clips to 0.1 mm), and turns the partner clip by `partner_yaw_deg` =
-180 + that yaw, which `partner_origin_shift_xz` and `check` now follow (they
-assumed exactly 180 before 2026-10-05). The research reports are
+pair may start is read and exported per pair as `trigger`: COMBAT_META.md.)
+The rule for a master whose GamePivot is turned at t = 0 is the engine's value
+at t = 0 — the master's node is its `GamePivot` frame (read on PC, see *Pair
+timeline*) — but no shipped pair exercises it (`yaw_start_deg` is 0 on all of
+them). It turns the `interact` offset the way the GLB hierarchy does
+(`GamePivot(0) · interact(0)`, checked on 32 turned solo clips to 0.1 mm), and
+turns the partner clip by `partner_yaw_deg` = 180 + that yaw, which
+`partner_origin_shift_xz` and `check` follow. The research reports are
 [`re/placement.md`](re/placement.md) and [`re/events.md`](re/events.md).
 
 ### Evidence from the data (Part 2 PC)
@@ -668,24 +653,21 @@ assumed exactly 180 before 2026-10-05). The research reports are
 - 141 unique equal-duration clip pairs. In 123 of them the partner clip's own
   `GamePivot` start is on the marker to under 5 cm.
 - Turning the partner 180° brings the two skeletons into contact: mean closest
-  approach 0.19 m, against 0.49–0.69 m for 0°, 90°, 270°. (Measured for format
-  1 on the 139 pairs it had; not re-run.)
+  approach 0.19 m, against 0.49–0.69 m for 0°, 90°, 270°. (Measured on 139
+  pairs.)
 - `EN1_COM_DMG_counter_RSH_A/X/Y` are each exactly 3.925 m from the marker by
   their own `GamePivot` reading, yet meet the master when started on it
   (closest 0.187 / 0.270 / 0.233 m with the bodies turned by their
   `GamePivot`, see below) — which is what the engine does.
 - `check.contact` measures both halves as `GamePivot(t) + R(q_GamePivot(t)) ·
-  joint` (since 2026-10-05; before, the `GamePivot` rotation was left out).
-  On the 238 primary pairs with a contact value this moved 11 rows by more
-  than 2 cm (largest: `NTO_COM_ATT_counter_EN4_E` 0.094 → 0.051,
-  `RSH_COM_ATT_counter_EN1_X` 0.248 → 0.270) and the four `_X` rows from
-  `plausible` to `unverified`.
+  joint`, with the `GamePivot` rotation applied. 238 primary pairs have a
+  contact value (e.g. `NTO_COM_ATT_counter_EN4_E` 0.051,
+  `RSH_COM_ATT_counter_EN1_X` 0.270); the four `_X` rows are `unverified`.
 - `RSH_COM_ATT_finish_EN1_B` + `EN1_COM_DMG_finish_RSH_B`: partner start
   (0.0, 0.856); the table's joint-to-joint check gives a closest approach of
   0.093 m at play position 0.424, next to the `IMPACT_EFFECTS` event at 0.41.
   Placed from the embedded `extras` of two exported GLBs, the closest
-  limb-to-body distance was 2.7 cm at play position 0.43 (measured for format
-  1; the inputs it depends on are unchanged).
+  limb-to-body distance was 2.7 cm at play position 0.43 (measured).
 
 ### `confidence`
 
@@ -735,19 +717,19 @@ stored strings and neither key. See "Asset strings in the JSON files" in the REA
 
 ```
 format       "watchmen-anim-meta/2"
-revision     6                   what the build puts into the layout (1.5.0); a resumed
+revision     6                   the layout revision the build writes; a resumed
                                  `characters` run builds a table of another revision again
 float_values "exact" | "rounded" how the fragment numbers were read ($WATCHMEN_JSON_FLOATS)
 skeleton_rig "hierarchy" | "flat"  the GLB layout `skeletons` describes (--rig)
 coordinate_frame       "right-handed-true"   absent in a mirrored-frame file
-coordinate_frame_note  one sentence          (--frame mirrored, toolkit 1.3.0)
+coordinate_frame_note  one sentence          (absent with --frame mirrored)
 conventions  { key: sentence }   units, up_axis, handedness, playpos, names,
                                  criteria, pair_weapons, pair_timeline,
                                  transition_start, evidence, body_space,
                                  motion_root, interact, pair_space,
                                  absolute_motion, frame_rate_scale,
                                  engine_values (true frame only)
-event_names  { event id: name learned from editor captions (format 1 table) }
+event_names  { event id: name learned from editor captions }
 event_name_check  { agree, conflicts: [ {event_id, exe, caption, uses} ], exe_only: [ids] }
 event_semantics   { event id: { name, effect, value, moves_character,
                                 affects_partner, handler, evidence } }
@@ -894,21 +876,21 @@ master_yaw_window_s, master_yaw_window_playpos
 given; a pair whose clips have no bind there (or no skeleton key) has a
 placement without `check.contact`, and `watchmen characters` says how many.
 A class whose state names an event-list fragment the data does not contain
-lists it in `classes.<Class>.missing_event_lists` (1 on Part 2, 5 on Part 1). A `clips` entry with no `file` is a clip a state names that does not
-ship (4 on Part 2 PC, Part 1 leftovers).
+lists it in `classes.<Class>.missing_event_lists` (1 on Part 2, 5 on Part 1). A
+`clips` entry with no `file` is a clip a state names that does not ship (4 on
+Part 2 PC, Part 1 leftovers).
 
 ## The face block (`face_format: "watchmen-face/2"`)
-
-*Format 2 (2026-10-04) adds speech: `face.talk_clips`, talk segments with a
-known length, and the speech categories. A table with `watchmen-face/1`
-found in an output folder is rebuilt by `characters`.*
 
 A character's head is a second character with its own animation class (the
 `AnimationClass*Face` fragments).  It is not keyframed and not driven by body
 states: the body feeds it four inputs and the face class turns them into
 one-frame poses.  `anim_meta.json` records that rule and what follows from it for
-every body state and pair.  The block is additive: tables without face fragments
-have neither `face` nor `face_format`, and no other key changes.
+every body state and pair, including speech: `face.talk_clips`, talk segments
+with a known length, and the speech categories.  The block is additive: tables
+without face fragments have neither `face` nor `face_format`, and no other key
+changes.  A table with another `face_format` string found in an output folder
+is rebuilt by `characters`.
 
 ### `face` (top level)
 
@@ -1037,20 +1019,21 @@ of the class's idle cycle (seed = CRC-32 of the clip name; off with
 `--no-face-idle`). Each idle segment starts in a seeded random member of the
 idle group, as the engine enters it (`idle_cycle.entry`; about half the
 Enemy01 / Enemy04 segments start in IdleB — the sneer, or closed eyes for at
-least 0.5 s); a table without `idle_cycle.entry` gives the first idle state,
-as before 2026-10-05. A change that could not return before the clip ends is
-left out: a clip whose track opens with an idle segment ends in the idle
-state it starts in, any other in the first idle state, and an entry draw that
-could not come back is replaced by the first idle state. Not baked, and listed in `not_baked`:
+least 0.5 s); a table without `idle_cycle.entry` gives the first idle state.
+A change that could not return before the clip ends is left out: a clip whose
+track opens with an idle segment ends in the idle state it starts in, any
+other in the first idle state, and an entry draw that could not come back is
+replaced by the first idle state. Not baked, and listed in `not_baked`:
 `TALK`, sound-dependent segments, `HIT_BY_POSE`. `--face-rule legacy` writes
-none of this (one pose per clip, chosen from the clip name, as in 1.3.0).
+none of this (one pose per clip, chosen from the clip name — the rule of
+releases before 1.4.0).
 
-**Talk (format 2).** A TALK segment is baked when an animation event of the
-state starts ONE fixed voice line: a SOUND event with the speak flag whose
-definition plays a single wave. The segment then has an end (`talk`: `wave`,
-`talk_s`, `ends_s`), the simulation gets `STOP_SPEAK` at that time, and the
-track holds a seeded instance of the class's talk cycle from the event to
-one frame before the end. In the shipped data these are four clips:
+**Talk.** A TALK segment is baked when an animation event of the state starts
+ONE fixed voice line: a SOUND event with the speak flag whose definition plays
+a single wave. The segment then has an end (`talk`: `wave`, `talk_s`,
+`ends_s`), the simulation gets `STOP_SPEAK` at that time, and the track holds
+a seeded instance of the class's talk cycle from the event to one frame
+before the end. In the shipped data these are four clips:
 `BS2_COM_ATT_cattleprod_counter_NTO_A`, `…_NTO_B`, `…_RSH_A`, `…_RSH_B`
 (2.45 / 5.23 / 2.81 / 2.02 s), on the Twilight Lady and — the clips are
 shared — the ten Dominatrix GLBs. Lines the AI requests (random voice, random
@@ -1070,12 +1053,12 @@ events.
 
 Which voice line and wave plays, hence how long a voice line or grunt lasts;
 the character mode of a body state whose criteria do not fix it (the rule is
-read — `face.drivers.CHARACTER_MODE.rule` — but it is game state); the runtime modifiers of an attack's damage pose (combo, direction,
-size, height: `inflicts` gives the state's own pose and marks it
-`pose_established: false`); whether the attacker stands behind the victim (the
-pose then becomes its `*_BACK` variant; X360 Part 2 `0x82be6858`: same −0.2
-threshold and the same pose map). `face.not_established` carries the
-same list.
+read — `face.drivers.CHARACTER_MODE.rule` — but it is game state); the runtime
+modifiers of an attack's damage pose (combo, direction, size, height:
+`inflicts` gives the state's own pose and marks it `pose_established: false`);
+whether the attacker stands behind the victim (the pose then becomes its
+`*_BACK` variant; X360 Part 2 `0x82be6858`: same −0.2 threshold and the same
+pose map). `face.not_established` carries the same list.
 
 ## In the GLB
 
@@ -1088,63 +1071,63 @@ same list.
 | `asset.extras.watchmen.fx_attachments` | the emitters and light flashes the game hangs on the character's joints (Rorschach, Nite Owl, Twilight Lady; FX_META.md) |
 
 The mesh pieces, their JOINTS_0 and WEIGHTS_0 come from `wlib/mesh_loader.py`
-(since 1.5.0 the one loader of `characters`, `char`, `charlibs`, `faces` and the
-weapon attachments): each piece is the render buffer the model header locates,
-its triangles read with the buffer's primitive type; a piece's joint index k
-names the model's k-th node in the rotate-by-one list of the nodes that have a
-slot in the bind, and that node's bind slot is the joint written. An influence
+(the one loader of `characters`, `char`, `charlibs`, `faces` and the weapon
+attachments): each piece is the render buffer the model header locates, its
+triangles read with the buffer's primitive type; a piece's joint index k names
+the model's k-th node in the rotate-by-one list of the nodes that have a slot
+in the bind, and that node's bind slot is the joint written. An influence
 whose index the list does not reach gets joint 0 and weight 0 and the vertex's
-other weights are renormalised (1.4.0 clamped it onto the last entry); a vertex
-left with no weight, or a triangle naming a vertex the buffer does not have,
-leaves its piece out (`not_decoded.pieces`, with the reason). A node without a
-bind slot is logged, and in a `characters` GLB listed under
+other weights are renormalised; a vertex left with no weight, or a triangle
+naming a vertex the buffer does not have, leaves its piece out
+(`not_decoded.pieces`, with the reason). A node without a bind slot is logged,
+and in a `characters` GLB listed under
 `asset.extras.watchmen.not_decoded.palette_names` when it moves a weighted
 index; on the six sets the only such node is `Interact` (the binds say
 `interact`), after every other node and moving none (measured).
 
-The joint order is the palette order, which is `joint_names`. Since 1.5.0 the
-joints are a hierarchy (`--rig hierarchy`, the default): joint node k is named
-after its bone (control characters removed; an empty name becomes `b<k>`, one
-another node of the file has gets ` #<k>`), it is a child of the joint of `joint_parents[k]`
-(a root bone: of `root`), and its rest transform and its animation keys are
-local to that parent — R_p^T R_k and R_p^T (t_k − t_p) of the world transforms
-the flat layout writes, so the product down the chain is that world transform.
-The inverse bind matrices are unchanged. The shown skinned mesh nodes (`mesh`,
-the shown outfit and weapon nodes, `face_mesh`) are scene roots. The face rig
-rides the skeleton: `f_anchor` is a child of the joint the head is attached to
-(`Head`), with the constant local transform inv(B_Head)·M (M places the face
-model on the body's bind), and each face proxy `face_proxy_b<k>_<i>` a child of
-body joint k with inv(B_k)·M_i; neither has a channel, so between two keys the
-face follows the head the viewer interpolates (1.4.0 drove both with world-space
-channels under a scene root `face_root`: on Dominatrix_1 the face then left the
-head between keys by up to 4.3 cm and 5.6°, measured). The face joints `f_<bone>`
-under `f_anchor` keep their local channels, byte for byte. The face skin's
-`skeleton` is `root`, and `skins[1].extras.watchmen.face.anchor_node` is
-`f_anchor` (with `anchor_parent`, the joint's node name); in a flat file it is
-`face_root`. A masked clip (`GRIP 1H` / `GRIP 2H`) keys its
-hand bones relative to their parents, from its own palette. Every other clip
-keys every joint (rotation and translation, one key per frame): Blender keeps
-the pose of the previous action on a bone that has no channel. `--rig flat`
-($WATCHMEN_RIG=flat) writes the 1.4.0 layout — joint nodes `b0…bN`, every one a
-child of `root` with the joint's world transform, the mesh nodes under `root`,
-the face rig under the scene root `face_root` with world channels on `f_anchor`
-and the proxies — for importers written against it. The validator's `NODE_SKINNED_MESH_NON_ROOT`
-warning stays on the hidden mesh nodes under `alternatives` and `ragdoll`
-(they are in no scene; grouping them is what hides them); see the README,
-"Skeleton". Synthetic animations (`GRIP 1H`, face poses) have no clip record
-[2026-10-04: the `FACE …` animations carry `extras.watchmen.face_pose`, and
-body clips of a character with a face rig carry `face`; see "The face block"].
+The joint order is the palette order, which is `joint_names`. The joints are a
+hierarchy (`--rig hierarchy`, the default): joint node k is named after its
+bone (control characters removed; an empty name becomes `b<k>`, one another
+node of the file has gets ` #<k>`), it is a child of the joint of
+`joint_parents[k]` (a root bone: of `root`), and its rest transform and its
+animation keys are local to that parent — R_p^T R_k and R_p^T (t_k − t_p) of
+the world transforms the flat layout writes, so the product down the chain is
+that world transform. The inverse bind matrices are the same in both layouts.
+The shown skinned mesh nodes (`mesh`, the shown outfit and weapon nodes,
+`face_mesh`) are scene roots. The face rig rides the skeleton: `f_anchor` is a
+child of the joint the head is attached to (`Head`), with the constant local
+transform inv(B_Head)·M (M places the face model on the body's bind), and each
+face proxy `face_proxy_b<k>_<i>` a child of body joint k with inv(B_k)·M_i;
+neither has a channel, so between two keys the face follows the head the
+viewer interpolates (in the flat layout, which drives both with world-space
+channels under a scene root `face_root`, the face leaves the head between
+keys by up to 4.3 cm and 5.6° on Dominatrix_1, measured). The face joints
+`f_<bone>` under `f_anchor` keep their local channels, byte for byte. The face
+skin's `skeleton` is `root`, and `skins[1].extras.watchmen.face.anchor_node`
+is `f_anchor` (with `anchor_parent`, the joint's node name); in a flat file it
+is `face_root`. A masked clip (`GRIP 1H` / `GRIP 2H`) keys its hand bones
+relative to their parents, from its own palette. Every other clip keys every
+joint (rotation and translation, one key per frame): Blender keeps the pose of
+the previous action on a bone that has no channel. `--rig flat`
+($WATCHMEN_RIG=flat) writes the layout of releases before 1.5.0 — joint nodes
+`b0…bN`, every one a child of `root` with the joint's world transform, the
+mesh nodes under `root`, the face rig under the scene root `face_root` with
+world channels on `f_anchor` and the proxies — for importers written against
+it. The validator's `NODE_SKINNED_MESH_NON_ROOT` warning stays on the hidden
+mesh nodes under `alternatives` and `ragdoll` (they are in no scene; grouping
+them is what hides them); see the README, "Skeleton". Synthetic animations
+(`GRIP 1H`, face poses) have no clip record; the `FACE …` animations carry
+`extras.watchmen.face_pose`, and body clips of a character with a face rig
+carry `face` (see "The face block").
 
-In 1.3.0 the `extras` path was exercised by the synthetic tests only;
-`watchmen characters` was not re-run on real data for it. [2026-10-04: for
-1.4.0 all 26 character GLBs were exported in full from the real game data and
-passed glTF-validator with 0 errors; the clip, pair and face extras were read
-back from them.]
+All 26 character GLBs export in full from the real game data and pass
+glTF-validator with 0 errors; the clip, pair and face extras read back from
+them.
 
 ## Outfits and weapons in the GLB
 
-*Added 2026-10-04.* A character GLB built with the default `--parts game`
-shows one outfit and no weapon (see the README). The scene is named `game`.
+A character GLB built with the default `--parts game` shows one outfit and no
+weapon (see the README). The scene is named `game`.
 `asset.extras.watchmen.parts`:
 
 | key | what |
@@ -1171,7 +1154,7 @@ animation's `extras.watchmen`: `{classes, basis}`. `classes` is a subset of
 `UNARMED`, `BASH_1H`, `BASH_2H`: the weapon class the clip is played with.
 `basis` says how it is known: `criteria WEAPON_ANIMATION_TYPE` (the state
 tests the class) or `blend on HAS_2H_WEAPON` / `HAS_WEAPON` (the clip is the
-high or low end of such a blend layer; each state clip row now carries its
+high or low end of such a blend layer; each state clip row carries its
 `blend_position`). 177 of the 1,159 Part 2 PC clips have it (BASH_2H 60,
 UNARMED + BASH_1H 52, UNARMED 39, BASH_1H 11, armed either way 11, all three
 4); a clip without it is not tied to a weapon by the data.

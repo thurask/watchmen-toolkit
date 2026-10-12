@@ -2,7 +2,7 @@
 """face_export.py -- cutscene-head glbs (face-POSE libraries) from the
 ENGINE-EXACT face binds.
 
-FINDING (2026-07-08j): every FACE clip is 100%% type-3 (constant) tracks --
+Every FACE clip is 100%% type-3 (constant) tracks --
 the game has NO keyframed facial animation; faces are a library of expression
 POSES (MouthTalk/MouthClosed/EyesAnger/...) blended procedurally at runtime
 (audio-driven talk, blinks).  Each glb therefore carries 24 named poses as
@@ -13,12 +13,11 @@ EyeLid/cheeks/eyes/mouth-sides under Bip01>Neck>Head) gets its bind built
 straight from its own ModelRes node array (build_bind_file recipe) and every
 FACE clip baked onto it (BS2/EN1/NTO FACE dirs; rig is shared, per-head node
 locals differ slightly so bakes are per-head).
-
-Replaces the old empirical face_glb.py (skin-cluster centroid bind + neutral
--clip rest).
 """
 
-import os, sys, glob
+import os
+import sys
+import glob
 from wutil import load_npz
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -26,14 +25,14 @@ if _HERE not in sys.path:
     sys.path.append(_HERE)  # append, never insert(0): flat module names must not shadow the stdlib
 
 
-from wutil import read_bytes as _read_bytes  # one copy, in wlib/wutil.py
+from wutil import read_bytes as _read_bytes  # one copy, in wlib/wutil.py  # noqa: E402
 
 
 def find_heads(extract_out):
     """Every Jaw-rigged model in the archive.  Full art/characters tree scan
-    (2026-07-09: the old common/models/head glob missed NiteOwl_Mask2/
-    NiteOwl_MaskDry2 -- NiteOwl's 'head' is his cowl, mouth-only rig, no
-    eye/brow bones -- plus GimpHead1-3 and Heavies_Head_1)."""
+    (a common/models/head glob misses NiteOwl_Mask2/NiteOwl_MaskDry2 --
+    NiteOwl's 'head' is his cowl, mouth-only rig, no eye/brow bones -- and
+    GimpHead1-3 and Heavies_Head_1)."""
     ex = os.path.join(extract_out, "extracted")
     from parse_model_nodes import parse
 
@@ -79,7 +78,10 @@ def export(extract_out, outdir, budget=None):
     kept when characters_export.glb_is_current finds it recorded (<outdir>/
     _glb_options.json) as written with this run's options (writer_options); files are
     written atomically.  The folders are made once a head is found."""
-    import bake_v4, char_lib, variant_glb as vg, build_bind_file as bbf
+    import bake_v4
+    import char_lib
+    import variant_glb as vg
+    import build_bind_file as bbf
     import characters_export as ce
     import extract_out as _xo
 

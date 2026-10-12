@@ -1,7 +1,8 @@
 """Interpreter v2: behaviour read from SetupNewPage 0x5b7788 / UpdatePagePlayPos
 0x5b56a9 / TransitionPlayPos 0x5ac1aa and friends.  Synthetic trees only."""
 
-import os, sys
+import os
+import sys
 
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wlib"))
 import anim_state_machine as asm

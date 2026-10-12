@@ -12,17 +12,16 @@
     text/<..>/Localize/Menu_uk_pc.txt.csv                index,key,text (UTF-8 with BOM)
 
 The `.csv` holds the rows that are not empty. A key or text that starts with `=`, `+`, `-`, `@`, a
-tab or a carriage return gets a leading `'` there (1.5.0), so that Excel or LibreOffice shows it as
+tab or a carriage return gets a leading `'` there, so that Excel or LibreOffice shows it as
 text and does not evaluate it as a formula; a plain number (`-5`, `+1.25`) is left as it is. The
 `.json` keeps every string verbatim. In the six game sets this touches 6 cells: `--huh?` and
-`--Huh?` in each Part 1 set (measured on the 450 CSVs of the 1.4.0 export).
+`--Huh?` in each Part 1 set (measured on the 450 CSVs of a six-set export).
 
 Languages are the block's slots 0 - 4: English, French, Italian, German, Spanish. Slot 5 (Danish)
 is a copy of the English slot in the shipped games and is not written; `index.json` says so
 (`identical_to_slot`). A table that is not localized is written into every folder.
 
 ### Language slots and how the game picks one
-*Added 2026-10-05.*
 
 | Slot | `LANGUAGE` enum (0x47ff8c) | Folder (`code`) | Engine code (`engine_code`) |
 |---|---|---|---|
@@ -91,8 +90,9 @@ and `0 <= end < start` the end is dropped; nothing is truncated.
 Only exclusive voice lines (speak category 1) have subtitles; grunts and shouts have none.
 
 ### When a line is asked for, and who owns it
-*Added 2026-10-05 (lifted scripts `SoundDef`, `SubtitleHUD`; `textmeta` carries this as
-`subtitles.rules`).*
+
+Read from the lifted scripts `SoundDef` and `SubtitleHUD`; `textmeta` carries this as
+`subtitles.rules`.
 
 - Only a `SoundDef` in state `Active` asks the HUD, and two routes lead there: **speech**
   (`command_sounddef_play_speak` 0x831bb8, the only play entry with `tSpeak = 1`; callers
@@ -137,11 +137,11 @@ Only exclusive voice lines (speak category 1) have subtitles; grunts and shouts 
   Whether a script starts one of the unreferenced waves by name is not established.
 - Data, Part 2 PC: 25 subtitled sounds have two or more rows in some language (22 real splits on
   sounds over 7 s, 3 duplicates never shown); 28 sounds are longer than 7 s (21 mission speak),
-  their line goes blank at 7 s. *(Counts from the wave B subtitle check, not
-  re-measured for this pass.)*
+  their line goes blank at 7 s.
 
 ### Cutscene subtitles
-*Added 2026-10-05 (`textmeta` section `movies`).*
+
+`textmeta` carries this as the section `movies`.
 
 Which table a movie uses is **data**: each `MoviePlayerCtrl` node of the movie database fragment
 (`MovieDbPart2.fragment`; Part 1 `MovieDb.fragment`) has `movie` (the `.bik`), `subtitleSlot`
@@ -240,11 +240,9 @@ for a row without an end time (none in the data).
     python3 watchmen.py text <game.naz or the extract's files/ folder> OUT
     python3 watchmen.py textmeta OUT OUT/text_meta.json
 
-Only `OUT/text/` (and the one JSON) is created. An extract made by 1.3.0 has a single text
-table under `extracted/Localize/` (`ControllerLayout_pc.txt`): 1.3.0 did not read the localized
-block records.
+Only `OUT/text/` (and the one JSON) is created.
 
-## Real data (2026-10-04)
+## Measured data
 
 All six sets (Parts 1 and 2; PC, X360, PS3): 15 text assets each, every table of every slot
 parses with 0 bytes left; Part 2 has 5,284 / 5,300 / 5,289 / 5,273 / 5,277 strings (en / fr / it
@@ -252,7 +250,7 @@ parses with 0 bytes left; Part 2 has 5,284 / 5,300 / 5,289 / 5,273 / 5,277 strin
 all six. Part 2 PC linkage: 1,205 waves have subtitle rows; all 1,664 speak lines of category 1
 have a subtitle and none of the 2,835 of category 2.
 
-Six-set export of 2026-10-05 (measured, the six `textmeta` logs). Part 1 (PC, Xbox 360 and PS3
+Six-set export (measured, the six `textmeta` logs). Part 1 (PC, Xbox 360 and PS3
 alike): 1,807 subtitled sounds, 4,618 of 12,972 speech waves have a subtitle, 16 movie players, 9
 with a table. Part 2 (all three alike): 1,205 subtitled sounds, 1,664 of 4,499.
 
@@ -355,7 +353,7 @@ units; `_` is 23 px wide in DaveGibbons40 and 30 px in TwCentMTCondExtra60; both
 have 211 glyphs, 58 of them icons, and `@`. Part 1 PC: the Menu table has no rows 267–271 and
 the Warnings table no row 39.
 
-## Not established
+## Details and open items
 
 - Read from code (substitution 0x4b6fb7, colour codes 0x43dd71 / 0x43d2e0): `%` + decimal digits
   reads parameter `atol(digits)` (0-based, at most 1000; set with `SetParameterFromString(index,
@@ -388,8 +386,8 @@ the Warnings table no row 39.
 - Whether the Part 1 rule (the subtitle of the SoundDef that entered `Active`, read from code on
   Xbox 360 Part 1 0x82b21808 and PS3 Part 1 0xb67090) changes an exported `mission_speak` on
   Part 1 was not measured. PC Part 1: not established (no executable).
-- Whether the subtitle option hides cutscene subtitles. *(Replaces "which movie uses which
-  slot": that is data, above.)*
+- Whether the subtitle option hides cutscene subtitles (which movie uses which slot is data,
+  above).
 - A subtitle request sent by a run-time name string (none is visible in the lifted scripts).
 - The Bink field order in memory behind "movie time = frame ÷ rate" (0x435a65) stays inferred.
   The file header is measured (all 12 `.bik` of each Part 2 set; the three platform copies are

@@ -1,24 +1,24 @@
 # WP3 - Combat rules of Watchmen: The End Is Nigh (Part 2 build, `KapowMultiDEDRM.exe`)
 
-Companion data: `findings/wp3_combat_tables.json` (attack states, combos, damage-pose rules, reaction tables, health/damage constants, weapons, pair triggers).
+Companion data: `findings/wp3_combat_tables.json` (attack states, combos, damage-pose rules, reaction tables, health/damage constants, weapons, pair triggers), kept outside this repository (section 6). The toolkit's export of the same material: `docs/COMBAT_META.md`.
 
 Evidence labels used throughout:
 
-- **[code]** read from the lifted script handler named (address = handler entry in the exe). Numeric constants were re-read from exe bytes with `rd`; the address is given.
-- **[data]** read from the binary `.fragment` files on the PC (parsed with `kapow_fragment`), not from the stale `*.fragment.json`.
-- **[default]** property default from the script-class registry (`tk160/wlib/reg_dump.json`); a fragment may override it.
+- **[code]** read from the lifted script handler named (address = handler entry in the exe). Numeric constants are re-read from exe bytes with `rd`; the address is given.
+- **[data]** read from the binary `.fragment` files (parsed with `kapow_fragment`), not from a `*.fragment.json`.
+- **[default]** property default from the script-class registry (`wlib/reg_dump.json`); a fragment may override it.
 - **[inferred]** follows from code + data but the connecting step was not read.
-- **[not established]** listed again in section 8.
+- **[not established]** listed again in section 7.
 
 Abbreviations: CRL = `CharacterRootLogic`, CR = `CharacterRoot`, PC = `PlayerCtrl`, CO = `CombatOrchestrator`. "dz" = `_nissuedattackdeadzonetime`. Times are game seconds unless "real time" is stated.
 
-## 0. Coverage
+## 0. Scope
 
-Lifted classes read for this report (lines of lifted text): CharacterRootLogic 12675 (every handler; of the animation-event dispatcher the cases BRANCH, CLEAR_DEADZONE, IMPACT, PRE_IMPACT, EXTEND_COMBO_TIME, KILL_ANIMATION_PARTNER, DIE, BULLMOVE_IMPACT were read, the rest skimmed), CharacterRoot 15441 (combat commands, give_damage, DecreaseHealth, UpdateHealth, StateActive combat parts, weapon commands; StateDead at call level only), PlayerCtrl 4907, ProjectAnimationLib 519 (all), CharacterComboDatabase 577, CharacterComboString (partly), CharacterAIComboManager 568, EnemyDef (DRS build, damage modifier), Enemy (react_to_attack, hit_by, is_attack_successful), BehaviorHandler (combat interface), CombatOrchestrator (attack_animation_stated, repel, force_lock_target), WeaponBase / WeaponLib (pickup, durability), CharacterSweepAttack (begin only), CharacterVisual.command_update_animation (TARGET_MODE part), AchievementCtrl / AchievementPart2Ctrl (handler list only).
+Lifted classes read (lines of lifted text): CharacterRootLogic 12675 (every handler; of the animation-event dispatcher the cases BRANCH, CLEAR_DEADZONE, IMPACT, PRE_IMPACT, EXTEND_COMBO_TIME, KILL_ANIMATION_PARTNER, DIE, BULLMOVE_IMPACT are read, the rest skimmed), CharacterRoot 15441 (combat commands, give_damage, DecreaseHealth, UpdateHealth, StateActive combat parts, weapon commands; StateDead at call level only), PlayerCtrl 4907, ProjectAnimationLib 519 (all), CharacterComboDatabase 577, CharacterComboString (partly), CharacterAIComboManager 568, EnemyDef (DRS build, damage modifier), Enemy (react_to_attack, hit_by, is_attack_successful), BehaviorHandler (combat interface), CombatOrchestrator (attack_animation_stated, repel, force_lock_target), WeaponBase / WeaponLib (pickup, durability), CharacterSweepAttack (begin only), CharacterVisual.command_update_animation (TARGET_MODE part), AchievementCtrl / AchievementPart2Ctrl (handler list only).
 
 Binary fragments parsed: `GameEssentials/CharacterDef.fragment` (12 combo databases, 77 combo strings, CharacterSpecialDef), 14 CharacterDefs and 31 AI definitions under `Enemy/*.fragment`, the 45 `GameEssentials/CharacterAnimation/*.fragment` files (1290 states over the five animation classes, all matched one-to-one to `anim_meta_v2.json`), `GameEssentials/WeaponDB/WeaponDB.fragment` (21 weapons), `GameEssentials/PlayerCtrl.fragment`, `GameEssentials/Debug.fragment`.
 
-Corrections to the earlier Dominatrix audit (`dominatrix_audit.md`):
+Four points where this note supersedes `dominatrix_audit.md`:
 
 1. The defender's reaction table (DRS) is evaluated when the attacker **enters** an attack state (`CombatOrchestrator.command_attack_animation_stated` 0x6e6495, called from `CRL.start_animation_state` 0x688961), not at PRE_IMPACT. [code]
 2. Tactical flag 0x400 is `PLACEMENT_REAR` (no reaction when the attacker is behind), 0x200 is `PLACEMENT_FRONT`. [code + enum]
@@ -306,7 +306,7 @@ Attack states are grouped; a state can be entered only if all criteria of its gr
 | Enemy/LightAttacks/Unarmed/DashAttacks | 12 | ACTION NORMAL_ATTACK [entry] ; ACTION PUNCH [entry] ; UNARMED ; ACTION AFTER_DASH_ATTACK [entry] ; ATTACK_MOVE_DIST < 2.2 [entry] | 0.12-0.35 | 1.20-1.61 |
 | Enemy/LightAttacks/Unarmed/GeneralAttacks | 12 | ACTION NORMAL_ATTACK [entry] ; ACTION PUNCH [entry] ; UNARMED ; ATTACK_MOVE_DIST < 1.8 [entry] | 0.45-0.98 | 1.20-1.61 |
 
-Notes on the table: Enemy01 and EnemyBig attack states have animation type NOTSET (only Enemy04, Rorschach and Nite Owl tag LIGHTATTACK / HEAVYATTACK); "reach" is `m_nimpactdistance + m_nimpactdistancemodification`, which `start_animation_state` copies to `CR.m_nimpactdist`. Per-state rows (clip, every event time, impact position/direction, damage pose, flags, sweep parameters) are in the JSON.
+Notes on the table: Enemy01 and EnemyBig attack states have animation type NOTSET (only Enemy04, Rorschach and Nite Owl tag LIGHTATTACK / HEAVYATTACK); "reach" is `m_nimpactdistance + m_nimpactdistancemodification`, which `start_animation_state` copies to `CR.m_nimpactdist`. Per-state rows (clip, every event time, impact position/direction, damage pose, flags, sweep parameters) are in the JSON; event times from state entry depend on the state's `m_nstartplaypos`, so the JSON carries them both as clip time and as time from entry. Interval criteria are rendered from the stored interval values, not from the node name: several node names are stale (e.g. a node named "less than 2.2" storing max 2.0).
 
 ### 1.7 Meters, specials, slow motion
 
@@ -348,7 +348,7 @@ So the hit reaction animation starts at PRE_IMPACT (0.07-0.09 s before IMPACT in
 
 ### 2.3 Dodge and counter windows
 
-- **Being in the dodge list.** `CR.command_i_will_hit_you` 0x693ebf adds the attacker to the victim's `m_eenemytododgelist` for 1.5 s (f64 0x9e8320). A dodge only counts as a combo item when that list is non-empty. `CR.command_i_will_dodge_you` 0x693fa1 makes the attacker lose its attack target, records `m_ehasjustdodgedme = dodger` and kills its combo. [code; the caller that sends `i_will_hit_you` at attack start was not pinned to an address - inferred to be the AI attack behaviour.]
+- **Being in the dodge list.** `CR.command_i_will_hit_you` 0x693ebf adds the attacker to the victim's `m_eenemytododgelist` for 1.5 s (f64 0x9e8320). A dodge only counts as a combo item when that list is non-empty. `CR.command_i_will_dodge_you` 0x693fa1 makes the attacker lose its attack target, records `m_ehasjustdodgedme = dodger` and kills its combo. The sender of `i_will_hit_you` is `CRL.command_start_animation_state` 0x688961, for all characters (not only AI), when a state with `m_tisattackstate` or special handling 4 starts and an attack target exists; the receiver keeps the entry 1.5 s. [code]
 - **Counter button** [`CRL.TestForCounterAttack` 0x68d36a]: refused in a slave state or while already master of pair 10. Target = the player's soft target, else the nearest character in the facing cone within 5.0 m; for AI the next target. The target must be attacking me (`m_eattacktarget == me`) or must have just been dodged by me. Unless the target is still in its rush state, the timing test is, with p = the target state's current playpos, p0 / p1 = previous / next IMPACT event playpos and D = clip duration:
   `(p1 - p) * D > 0.13 s` (0xa5ecc8) and `(p - p0) * D > 0.03 s` for a player (0x9e60e0) or `> -0.03 s` for AI (0xa5eccc).
   A 0.26 s variant (0xa5ecc4) exists for argument value 0, but both callers pass 1, so the window is always 0.13 s. On success: attack data cleared, target/lock/partner set, combo item 13 requested, actions 14 + 12 fired -> a counter pair (section 3.3).
@@ -356,10 +356,9 @@ So the hit reaction animation starts at PRE_IMPACT (0.07-0.09 s before IMPACT in
 - **Combo counter**: [DODGE or BLOCK] followed by a fast attack is a combo string with override COUNTER_ATTACK (ability 3) - no timing test, the target is taken from the list of characters just dodged/blocked.
 - **AI delayed counter**: `_ndelaycountertime`; on expiry, if not on a slope and at the same height (|dy| <= 0.1), the AI goes idle and sends `CRL.command_force_counter_attack` 0x6867b7 (no timing test).
 - **Breaking out of a pair**: while a slave state has FORCE_ALLOW_BREAKOUT active, a dodge or block (or force counter) by the slave ends the pair: partner forced idle + ATTACK_BLOCKED, rumble, combo list becomes [DODGE] or [BLOCK] with 0.5 s validity so that a following fast attack is the combo counter.
-
 ### 2.4 IMPACT: who gets hit [code: event case 4, `CRL.SetCloseCombatDamageToTarget` 0x6ae57f, `command_sweep_target_detected` 0x6879ed]
 
-Normal attacks are **single-target and unconditional**: if the attacker still has its attack target at IMPACT, that target takes the hit - there is no cone, range or collision test at impact (the range test for AI was at PRE_IMPACT; players have none). Area attacks are the states flagged `m_tallowsweepatt` (Rorschach Area_A and the 2H heavies, eight Nite Owl area/super states, Enemy04 Area_A): a `CharacterSweepAttack` volume is stepped at `m_nchecksprsec` 10 checks per second [default] between begin/impact/end playpos with an angle and length per phase (JSON `sweep`), and every character it detects other than the main target and not blocking gets `SetCloseCombatDamageToTarget` too. The stepping loop itself was not read.
+Normal attacks are **single-target and unconditional**: if the attacker still has its attack target at IMPACT, that target takes the hit - there is no cone, range or collision test at impact (the range test for AI was at PRE_IMPACT; players have none). Area attacks are the states flagged `m_tallowsweepatt` (Rorschach Area_A and the 2H heavies, eight Nite Owl area/super states, Enemy04 Area_A): a `CharacterSweepAttack` volume is stepped once per 0.05 of play position between begin/impact/end playpos with an angle and length per phase (JSON `sweep`), and every character it detects other than the main target and not blocking gets `SetCloseCombatDamageToTarget` too. The property `m_nchecksprsec` (10 [default]) is never read. The hit-test geometry of the stepping loop is not read here (`docs/COMBAT_META.md`, "Sweeps").
 
 Players additionally run `TestImpactOnDynamicObjects` (hitting props) at IMPACT.
 
@@ -367,7 +366,7 @@ Players additionally run `TestImpactOnDynamicObjects` (hitting props) at IMPACT.
 
 1. Pose chain (`ProjectAnimationLib`, table in JSON `damage_pose_rules`): state `m_idamagepose` -> combo conversion (`ComboManipulateDamage` 0x675ce6: STUN override -> STUN_UPPER / STUN_MIDDLE / *_BACK, HEAVY_DAM -> heavy) -> direction (`DirectionManipulateDamage` 0x802ae8: attacker behind the target, local z < -0.2 m, -> the *_BACK pose of the same strength) -> size (`SizeManipulateDamagePose` 0x7fca72: big target and attack not upper -> upper poses become MIDDLE_STRAIGHT) -> height (`HeightManipulateDamagePose` 0x7fcaee: target more than 0.1 m higher and hit height - dy < 0.4 -> low; more than 0.1 m lower and hit height - dy > 0.4 -> high).
 2. Hit direction = attacker visual orientation x state `m_vimpactdirection`; hit position from `m_vimpactpos` relative to the hit bone.
-3. Target wears electric armour -> the **attacker** receives {damage 10 x global x uber, stun 2 s, pose NO_POSE} and the outgoing damage is x 0.2.
+3. Target wears electric armour -> the **attacker** receives {damage 10 x global x uber, stun 2 s, pose LIGHT_UPPER_STRAIGHT; NO_POSE only for an Underboss attacker} and the outgoing damage is x 0.2.
 4. Underboss target hit from behind -> blocked (sound only).
 5. **Block test**: target state has special handling BLOCK (8) or IMMUNE_TO_BREAK_ATTACK (13), and the attacker's RELATIVE_HEAD_HEIGHT value > 0 -> blocked: attacker fires ONE_FRAME_ACTION + ATTACK_BLOCKED (its "AttackBlocked" recoil state), `target.give_block_damage(attacker, pos, dir)` 0x692c3f; no damage unless the attacker has electrified charges. Note this test does not look at the unblockable flag; unblockable is enforced earlier, by the defender refusing to react (section 4.2). [code]
 6. Damage:
@@ -382,11 +381,11 @@ Players additionally run `TestImpactOnDynamicObjects` (hitting props) at IMPACT.
    - stun = combo stun (+2 s if attacker electrified); push-back = hit direction x `m_npushbackvel` for `m_npushbacktime`.
 7. `target.command_give_damage(characterdamagestruct)`; a 0.3 light flash; `weapon.take_durability_damage` unless the state sets `m_tignoreweaponsound`.
 
-`characterdamagestruct` fields as used: inflictor, pose, damage, stun, position (vector), +0x1c "is rage damage" flag, direction/push vector, unique attack id (+0x38), ignore-weapon flag (+0x3c). `takeahitstruct` did not appear in any handler read [not established].
+`characterdamagestruct` fields as used: inflictor, pose, damage, stun, position (vector), +0x1c push-back time, direction/push vector, unique attack id (+0x38), +0x3c "is rage damage" flag, +0x40 ignore-weapon flag. `takeahitstruct` does not appear in any handler read [not established].
 
 ### 2.6 `CR.command_give_damage` 0x691b10 and `DecreaseHealth` 0x695632 [code]
 
-- Every hit carries a unique attack id (`characterlib.GetUniqueAttackId`); its use to reject a second hit from the same swing is inferred, the check was not located.
+- Every hit carries a unique attack id (`characterlib.GetUniqueAttackId`). Nothing rejects a second hit by the same id: `give_damage` passes it to `DecreaseHealth` and from there only into game events 0xcb and 0xc9; no handler compares it.
 - Pose is reset to NO_POSE if the victim is in a reaction that is reversing its heading (playpos 0.5-0.8).
 - Underboss takes x 0.2 from AI inflictors and is immune to stun.
 - Applied damage = `m_nincomingdamagefactor` x damage. That factor is 1.0 [default] and is only changed by level scripting (`TriggerActionCharacter` -> `command_set_incoming_damage_factor` 0x691a62). No reader of a difficulty setting was found in the damage path.
@@ -394,7 +393,6 @@ Players additionally run `TestImpactOnDynamicObjects` (hitting props) at IMPACT.
 - Rage: inflictor += 0.0033 x damage (uber: -0.003 x damage, clamped), victim += 0.007 x damage.
 - Survivor: camera recoil by pose class (light 0.5, heavy 1.0, knock-down 2.1 (0xa5ed38), stun 1.4, else 0.2); slow motion for knock-down poses; stun timer set if longer than the current one (`set_stun_time` 0x691389: AI full, player max 1.0 s, 2.5 s in PvP); push-back if time > 0 (`set_push_back_data` 0x691325: velocity decays linearly to 0 over T, so displacement = v x T / 2: 4 m/s for 0.3 s = 0.6 m; 8 m/s for 0.5 s = 2 m).
 - Game event 203 DAMAGE_RECEIVED for survivors, 201 CHARACTER_DEAD on death; achievement hooks `damage_by_signed_in_player`, `player_received_damage`, `enemy_killed_by_signed_in_player`, `combo_string_ended` are sent from here.
-
 ### 2.7 Reaction thresholds
 
 There is **no damage threshold** for stagger, knock-down or launch. The reaction is purely the DAMAGE_POSE the attack state carries (after the conversions of 2.5) matched against the victim's `HitTakenGroup` criteria:
@@ -409,10 +407,9 @@ There is **no damage threshold** for stagger, knock-down or launch. The reaction
 Stunned (`_nstuntimeleft > 0`) is separate: it is the timer set from combo stun / specials and keeps the victim in the Stunned movement states. Prone = RELATIVE_HEAD_HEIGHT < 0 or ragdoll physics state (`CR.command_is_prone` 0x6936ff; never for Underboss / Twilight Lady). A pending dodge can interrupt a stun-lock state after 0.1 s (`StateCharacterRootLogic`).
 
 Hit-stop: none found. The only time effects are the slow motion of section 1.7.
-
 ### 2.8 Throws [code: `CRL.FireAttackBasedOnAttackID` 0x68d870, `do_special_state_handling` 0x687bc5; control flow read from lifted text only]
 
-Fails (action THROW_GRAB_FAILED) when the target's RELATIVE_HEAD_HEIGHT < -0.35 (0xa5ec78), it is ragdolled, animation-immune or in an absolute animation; when the attacker is on a slope or not at the same height the target blocks. An electrified or unblockable attacker always succeeds. Otherwise, if the target is neither stunned nor prone and has the attacker in front (0x200): `rand <= m_nprobblockthrow` -> target blocks; else `rand2 <= m_nprobdodgethrow` -> target dodges; else success. Underboss and Twilight Lady cannot be thrown (she dodges). The throw master state (THROWN_BY_RORSCHACH, pair id 1, both heroes use Rorschach's clip) requires ATTACK_MOVE_DIST in [0.1, 2). The thrown body damages others through ragdoll collision (`give_ragdoll_damage_increment` 0x6914f2). Where the combo database's throw damage (15) is applied was not read.
+Fails (action THROW_GRAB_FAILED) when the target's RELATIVE_HEAD_HEIGHT < -0.35 (0xa5ec78), it is ragdolled, animation-immune or in an absolute animation; when the attacker is on a slope or not at the same height the target blocks. An electrified or unblockable attacker always succeeds. Otherwise, if the target is neither stunned nor prone and has the attacker in front (0x200): `rand <= m_nprobblockthrow` -> target blocks; else `rand2 <= m_nprobdodgethrow` -> target dodges; else success. Underboss and Twilight Lady cannot be thrown (she dodges). The throw master state (THROWN_BY_RORSCHACH, pair id 1, both heroes use Rorschach's clip) requires ATTACK_MOVE_DIST in [0.1, 2). The thrown body damages others through ragdoll collision (`give_ragdoll_damage_increment` 0x6914f2). The combo database's throw damage (15) is never read; a throw's damage is ragdoll contact damage (`docs/COMBAT_META.md`, "Throws and ragdoll contact damage").
 
 ## 3. Health and death
 
@@ -731,8 +728,9 @@ Hit reactions (HitTakenGroup of Enemy04) [data]:
 | KnockdownMiddleBack | EN4_COM_DMG_knockdown_body_back | None | KNOCKDOWN_MIDDLE_BACK | - | - | disallow attack, immune, stun-lock ; events REVERSE_HEADING |
 
 Paired moves in which she is the partner (victim), primary pairs only [data]: counters by Rorschach `Countered_by_Rorshack_A..G, X, Y, 1H, 2H` and `Disarmed_by_Rorshack` (pair ids 10, 27-32, 55, 57, 71, 72, 81); by Nite Owl `Countered_by_Nite_Owl_A..G, X, Y` and `Disarmed_by_Nite_Owl` (10, 27-32, 55, 71, 72); finishers `Finished_by_Rorshack_A..J, 1H, 2H` (8, 33-38, 56, 79, 80, 82, 83) and `Finished_by_NiteOwl_A..J` (8, 33-38, 56, 79, 80); throw (1); bull-rush impact (11). The master picks by its own weapon class; the Disarm masters require **her** to hold a weapon. Full list with clips: JSON `pair_triggers` filtered on `partner_class == "Enemy04"`.
-
 ## 6. JSON tables (`findings/wp3_combat_tables.json`)
+
+Kept with the decompilation outside this repository (`ghidra_kapow_out/engine/engine_notes/`, see `README.md`).
 
 | Key | Content |
 |---|---|
@@ -747,34 +745,24 @@ Paired moves in which she is the partner (victim), primary pairs only [data]: co
 | `damage_pose_rules` | the five pose conversions as explicit maps, upper-pose set, recoil and slow-motion classes |
 | `pair_trigger_rules`, `pair_triggers` | the five trigger rules and the rule for each of the 413 pairs |
 
-## 7. Proposals for the animation metadata export (not implemented)
+## 7. Not established, and what each would take
 
-1. **Per-state `combat` block** (all values are in the fragments already parsed here):
-   `is_attack`, `button` (light / heavy from the PUNCH / HEAVY_PUNCH group criterion), `weapon_class`, `entry` (initial / after_dash / general), `combo_override_required`, `damage_pose`, `impact {time_from_entry_s, pre_impact_s, branch_s, clear_deadzone_s, can_move_s, distance_m, distance_modification_m, pos, dir, bone}`, `flags {disallow_attack, immune_to_attacks, keep_combo_alive, stun_lock, sweep, ignore_weapon_sound, get_away_from_me, immune_to_combo_speedup, ignore_target_lock}`, `sweep {within_speed, begin/impact/end angle, length, playpos}`, `idle_time_s [min, max]` for SET_IDLE_TIME states, `allow_attacks_s` for reactions.
-2. **Inherited group criteria on every state**, not only on pair masters: `group_criteria` (ordered outermost to innermost, each with `entry_only`) and `group_random_pick`. Without them a consumer cannot tell Initial / Dash / General or Armed / Unarmed variants of the same clip apart. Interval criteria should be rendered from the stored interval values, not from the node name (several names are stale, e.g. a node named "less than 2.2" storing max 2.0).
-3. **Per-pair `trigger` block**: `rule` (counter / finisher / throw / bull_rush / enemy_counter), `action` (control action id), `opponent_models`, `master_weapon_class`, `partner_weapon_required`, `distance_m [min, max]`, `specific_model`, `damage {source: counter_base | kill | bull_rush | none, at_event: IMPACT | KILL_ANIMATION_PARTNER | BULLMOVE_IMPACT, time_from_entry_s}`, `breakout {from_s, to_s}` from the FORCE_ALLOW_BREAKOUT / ..._NO_MORE events.
-4. **Class-level `combat` block** linking the animation class to its data: CharacterDef(s), combo database, base damages, damage modifier, reaction rows - so a viewer can show "this attack does N damage" without a second file.
-5. Event times should be exported both as clip time and as time from state entry (the latter depends on `m_nstartplaypos`); the combo speed-up start position (CLEAR_DEADZONE time minus 0.15 / 0.2 s) can be precomputed per attack state as `combo_entry_playpos`.
-6. Add enum 7 TARGET_MODE value names (2 dead, 3 stunned/knee, 4 prone) to the enum table; they are currently null.
-
-## 8. Not established, and what each would take
+Several of these are covered by `docs/COMBAT_META.md` (sweeps, bull rush, who may attack when, Twilight Lady reaction, Underboss, achievements) and `docs/ENGINE_CONSTANTS.md` (combo speed-up by animation type, kick damage, the damage-modifier inputs, the counter margin as clip time).
 
 | Item | What is missing | What it would take |
 |---|---|---|
-| Who may attack when (orchestrator grant loop, `AttackEnemy.command_may_attack`, `FindUsableCombo`, `Enemy.Evaluate`) | treated as given | WP4; read `AttackEnemy` and CO request/register handlers |
-| Sender of `i_will_hit_you` (what fills the dodge list) | handler read, caller not located | grep the lifted corpus for the command id and read the caller |
-| Sweep volume stepping (`CharacterSweepAttack` loop, hit test geometry) | only `begin` read | read the remaining ~3 handlers of the class |
+| Who may attack when (orchestrator grant loop, `AttackEnemy.command_may_attack`, `FindUsableCombo`, `Enemy.Evaluate`) | treated as given | wp4_ai.md; read `AttackEnemy` and CO request/register handlers |
+| Sweep volume hit test geometry (`CharacterSweepAttack` loop) | only `begin` read; the stepping (one check per 0.05 playpos) is read | read the remaining ~3 handlers of the class |
 | Target selection filter (`brain.get_target_empty_ignore`), i.e. whether allies can be soft-targeted | not read | read the AIBrain/Perception native or script handler |
-| Throw: control flow of the block/dodge branch and where throw damage (15) is applied; THROW_MODE_STORE_TARGET / THROW_BRANCH_POINT event cases | lifted text only, events 38 and 70 skimmed | disassembly of 0x68d870 around the two RNG calls; read event cases 0x26, 0x46 |
+| Throw: control flow of the block/dodge branch; THROW_MODE_STORE_TARGET / THROW_BRANCH_POINT event cases | lifted text only, events 38 and 70 skimmed | disassembly of 0x68d870 around the two RNG calls; read event cases 0x26, 0x46 |
 | Bull rush contact (CHARGE physics state -> BullmoveImpact pair), secondary victims | BULLMOVE_IMPACT read, contact not | read the physics-state-4 collision callback in CharacterRoot |
 | Nite Owl grenade and electric blast resolution (events 29-31), electrify charge bookkeeping | data known, handlers not read | read event cases 0x1d-0x1f and `CharacterEffectDef` |
 | Weapon steal on disarm (event 32) | not read | read event case 0x20 |
 | Twilight Lady reaction routine (`command_react_to_attack_twilight_lady`), Underboss `is_attack_successful` | not read | read those two handlers |
-| Unique attack id de-duplication | id creation seen, check not located | search readers of damage struct +0x38 in `give_damage` |
 | `takeahitstruct` | no use found in the handlers read | grep corpus for the struct type |
 | RELATIVE_HEAD_HEIGHT source (used for prone, block test and throw fail) | setter not read | read `CR.UpdateAnimationValues` value 14 |
 | Difficulty | no reader in the damage path; `g_nglobaldamagefactor` has no script writer | search native code for writers of the global and for the settings value |
-| Property defaults marked [default] | registry defaults; the instance fragments of CharacterRoot / CharacterRootLogic templates were not diffed | parse `CharacterRootTemplate_*.fragment` for overrides of `_nslomotimemultiplier`, `_ncleardeadzoneoverride`, `_thitinvsmodedefenddeadzonetime` |
-| Hit sounds / impact effects | out of scope here | WP6 / WP7 |
-| Dead-state details (ragdoll freeze, corpse removal, event id broadcast at the end) | call level only | WP2 |
+| Property defaults marked [default] | registry defaults; the instance fragments of CharacterRoot / CharacterRootLogic templates not diffed | parse `CharacterRootTemplate_*.fragment` for overrides of `_nslomotimemultiplier`, `_ncleardeadzoneoverride`, `_thitinvsmodedefenddeadzonetime` |
+| Hit sounds / impact effects | out of scope here | wp6_audio.md / wp7_fx_camera_hud.md |
+| Dead-state details (ragdoll freeze, corpse removal, event id broadcast at the end) | call level only | wp2_physics.md |
 | Achievement conditions | hooks listed only | read the two Achievement classes (about 2250 lines) |

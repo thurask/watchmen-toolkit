@@ -40,7 +40,7 @@ DEFAULT_MODE = "true"
 MARKER_KEY = "coordinate_frame"
 NOTE_KEY = "coordinate_frame_note"
 TRUE = "right-handed-true"
-#: what a file WITHOUT the marker is in (1.3.0 files and --frame mirrored)
+#: what a file WITHOUT the marker is in (--frame mirrored; see the module docstring)
 MIRRORED = "engine-mirrored"
 NOTES = {
     "true": (
@@ -80,7 +80,7 @@ def marker(value=None):
 
 def frame_of(doc):
     """ "true" / "mirrored" for a JSON document (or any dict holding the marker):
-    no marker means mirrored (1.3.0 and --frame mirrored)."""
+    no marker means mirrored (--frame mirrored)."""
     return "true" if isinstance(doc, dict) and doc.get(MARKER_KEY) == TRUE else "mirrored"
 
 

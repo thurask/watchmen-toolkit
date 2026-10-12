@@ -403,7 +403,7 @@ _STD = frozenset(
     "name UseRealTime recordInSavepoints runScript Open enabled Visible runFrameUpdate "
     "smartSelectable logicalParent siblingOrder parentLink spatialTreeStrategy localPos "
     "localOrient Locked UserType includeInAO includeInReflections castShadow "
-    # the same five as the executable registers them (key table from 1.4.0 on)
+    # the same five as the executable registers them (letter case of the key table)
     "useRealtime open visible locked userType".split()
 )
 
@@ -2090,7 +2090,7 @@ TERRAIN_RULE = (
 
 def _visible(n):
     """The node's `visible` flag (true when not stored), whatever letter case the key
-    table that read the node spells it in (`Visible` up to 1.3.0)."""
+    table that read the node spells it in (`visible` or `Visible`)."""
     v = n.p("visible")
     if v is None:
         v = n.p("Visible", True)
@@ -3092,7 +3092,7 @@ def _section_scene_ctrl(lv):
 
 def _prop_any_case(n, key):
     """Property `key` of a node whatever letter case the key table spells it in
-    (`textRes` as SubtitleSlot registers it; `textres` in key tables before 1.4.0)."""
+    (`textRes` as SubtitleSlot registers it; `textres` in some key tables)."""
     v = n.p(key)
     if v is not None:
         return v
@@ -3748,8 +3748,9 @@ def parse_save(data):
         }
     if isinstance(vals.get("m_blevelcompletelist"), list):
         dec["completed_scenes"] = {
-            enum_name("SAVE_GAME_TYPE", i)
-            or str(i): [{"id": s, "name": enum_name("SCENE_ID", s)} for s in v]
+            enum_name("SAVE_GAME_TYPE", i) or str(i): [
+                {"id": s, "name": enum_name("SCENE_ID", s)} for s in v
+            ]
             for i, v in enumerate(vals["m_blevelcompletelist"])
             if isinstance(v, list)
         }

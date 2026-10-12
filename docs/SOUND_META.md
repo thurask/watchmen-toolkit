@@ -70,7 +70,7 @@ has nothing to include there. Means are rounded to 4 decimals from an exactly ro
 
 The body class is read from the fragments (`CharacterDef` -> its CharVisual fragment -> the
 `AnimationCtrlWM` class id), not from a table: Gimp and GimpGagBall are `EnemyBig` (EN2), like
-ThugBig; an earlier research table had them as `Enemy01`.
+ThugBig, not `Enemy01`.
 
 Per character definition: `character_type`, `body_class` (+ `body_class_basis`),
 `face_class_id`, `speak_group`, `n_voices`, `attack_start_effects` (light / heavy / weapon),
@@ -108,9 +108,8 @@ defaults resolves in general is not established.
 its `sounds` (definition + `placement`) and `speaks` (speak id). `damage_rule` and
 `attack_start_rule` say which slot a hit or an attack start uses. A weapon hit goes by the
 weapon's effect type: wood, steel, sharp = the one `sharpweapon` slot, taser = effect id 1
-first, then the steel slot (the sentence said "sharp adds sharpweapon" before 2026-10-04; no
-table changed). The same rule as data, with the particle side of each effect, is the `fx` block
-of `anim_meta.json` (FX_META.md).
+first, then the steel slot. The same rule as data, with the particle side of each effect, is the
+`fx` block of `anim_meta.json` (FX_META.md).
 
 ## `face_talk` and the face rule
 
@@ -178,7 +177,7 @@ table carry the first four; the rest is documentation only.
   speaker is a player. The flags are those of the PLAYING line (`blocks_while_playing` on every
   speak: `all` / `nonplayers` / `players` / `none`; Part 2: 47 / 40 / 1 / 247). Category 2 is
   never dropped, category 0 always. `m_ipriority` is copied into the request and never read.
-- **Senders of speak ids**: `speak_triggers` now lists 8 (SPEAK animation events and
+- **Senders of speak ids**: `speak_triggers` lists 8 (SPEAK animation events and
   `UnderbossPhase1.command_hit_by`), 9 and 36 (SPEAK events of Part 1 only), 37 (none), the
   `EffectSpeak` ids 26, 27, 29, 30, 31 and the Underboss ids 33, 34.
 - **Attack start effect**: fired once per animation state by
@@ -224,7 +223,7 @@ table carry the first four; the rest is documentation only.
   nearest of the six faces, 0 outside (1 when fadeDepth ≤ 0 and inside); a zone with weight f
   passes scale × f to its children and keeps (1 − Σ children f) × f × scale; a child is entered
   only inside its x / z half-extents (0x44cf1b, 0x44ff51). `_nfadedepth` is a distance, not a
-  time (read by the researcher, not rechecked).
+  time (read from code, not re-verified).
   Blend (0x44ee15): weights are summed per effect type and the type with the largest sum W is
   instantiated (W < 1e-5 → 1). Per parameter over the entries of that type: float = Σ(w·p)/W;
   integer = trunc(Σ(w·p)/W); truth = (number of true entries)/W > 0.5; choice = the value of

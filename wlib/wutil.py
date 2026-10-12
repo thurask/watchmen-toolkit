@@ -1,6 +1,6 @@
 """Small helpers shared by the wlib modules.
 
-One copy of what used to be repeated in many modules: reading a file's bytes,
+One copy of what many modules need: reading a file's bytes,
 loading the toolkit's ``.npz`` files without pickle, loading the shipped
 ``.pkl`` tables without letting them name a class or function, the
 quaternion -> matrix conventions, and the GLB buffer packer.
@@ -177,7 +177,7 @@ def platform_name(plat, order):
 
 # ---- quaternion -> rotation matrix ------------------------------------------------
 #
-# Conventions (one place for what used to be six copies):
+# Conventions (one place for every module):
 #   * quaternions are (x, y, z, w) as the files store them, unless a name says wxyz;
 #   * qmat_xyzw / qmats_xyzw give the matrix M of the rotation v -> q v q* (the
 #     "standard" one: M @ v rotates the column vector v);
@@ -240,8 +240,8 @@ def qrows_conj_xyzw(q):
 
 
 class GlbPacker:
-    """The binary buffer of a glTF document and its bufferViews / accessors (one
-    copy of what rig_glb, variant_glb, nav_data and terrain_asset each wrote).
+    """The binary buffer of a glTF document and its bufferViews / accessors (the
+    one packer of rig_glb, variant_glb, nav_data and terrain_asset).
 
     ``views`` and ``accessors`` are the document's own lists (appended to);
     ``bin`` is the bytearray of the BIN chunk.  Every view starts on a 4-byte

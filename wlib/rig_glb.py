@@ -10,7 +10,7 @@ stride-56 vertices, this builds a single .glb containing:
     the MODEL's own embedded skeleton header (names, parents, rest transforms built
     as build_bind_file builds a bind), real inverse bind matrices -- no animation.
     rig "flat" (--rig flat, or a header whose node table does not cover the joints)
-    writes the 1.4.0 armature instead: joints without a transform, all children of
+    writes the flat armature instead: joints without a transform, all children of
     `Armature`, identity inverse binds.  The mesh renders the same in both.
   - Y-up orientation so it stands in Blender on import
 Engine-exact ANIMATED per-character glbs are produced by the `watchmen.py characters`
@@ -18,8 +18,7 @@ pipeline (file-only binds + baked clips), not here.
 
 Skin channel (verified): BLENDINDICES = D3DCOLOR ubyte4 @ +44 read BGRA (bytes 2,1,0,3);
 BLENDWEIGHT = float16 x4 @ +48.  Clips are not decoded here: engine-exact clips come
-from bake_v4 (the caller-less 1.4.0 template loader, clip decoder and bundled-clip
-loader of this module were removed in 1.5.0).
+from bake_v4; this module has no clip decoder.
 """
 
 import io
@@ -63,14 +62,12 @@ def decode_skin(stream, vbo, nv, stride, order="<"):
 
 
 # ---------------- coordinate convention (engine <-> glb) ----------------
-# 2026-07-24 AXIS: the Kapow engine is already Y-up, so glTF needs no axis
-# conversion.  This module used to rotate POSITION (and conjugate the FK world
-# matrices) by a Z-up->Y-up matrix.  Unlike variant_glb -- where an exact
-# inverse was folded into the skin matrices and cancelled -- nothing here
-# cancelled it, so every model this writes came out rotated 90 degrees about X
-# (static props/heads flat on their back; rigged bodies likewise).  Measured on
-# shipped character output: skinned frame-0 bbox 1.75 m tall along Y, while raw
-# POSITION measured 1.80 m along Z.  See variant_glb.py for the full evidence.
+# AXIS: the Kapow engine is already Y-up, so glTF needs no axis conversion.
+# This module applies no Z-up->Y-up rotation to POSITION or to the FK world
+# matrices; such a rotation would turn every model 90 degrees about X (static
+# props/heads flat on their back; rigged bodies likewise).  Measured on shipped
+# character output: skinned frame-0 bbox 1.75 m tall along Y.  See variant_glb.py
+# for the full evidence.
 
 
 # ---------------- optional vertex attributes ----------------
@@ -179,10 +176,10 @@ def material_alpha(sheet, tex_has_alpha, vertex_alpha, legacy=False):
     95) or 0.5 when the sheet is unknown; otherwise opaque.  Vertex alpha
     multiplies the texture alpha but does not choose the list, so on its own it
     never gives BLEND (materials.alpha is the same rule, with the opacity factor)
-    -- except for SkyBox / Sprite sheets and where no sheet is known, which keep
-    the earlier rule.
+    -- except for SkyBox / Sprite sheets and where no sheet is known, which use
+    the `legacy` rule below.
 
-    legacy=True is the rule of the `legacy` materials mode, unchanged: BLEND when
+    legacy=True is the rule of the `legacy` materials mode: BLEND when
     the vertex alpha varies, or for renderType 1 with a diffuse that has alpha."""
     sheet = sheet or {}
     if legacy:
@@ -225,7 +222,8 @@ def mesh_vertex_attributes(header, stream, subs, lod=0):
     try:
         import watchmen_extract as we
     except ImportError:
-        import os, sys
+        import os
+        import sys
 
         here = os.path.dirname(os.path.abspath(__file__))
         if here not in sys.path:
@@ -367,7 +365,7 @@ def build_rigged_glb(
     for textures.
 
     tex_size: None (default) embeds every texture at the size of its PNG; N
-    shrinks each to fit N x N (aspect kept; 512 = what 1.4.0 always did).
+    shrinks each to fit N x N (aspect kept; 512 = the size of the 1.4.0 files).
 
     nodes: the model header's node table, (names, pos, quat xyzw, parent) as
     parse_model_nodes.parse gives it, joint k = node k.  rig: "hierarchy" / "flat"
@@ -378,10 +376,10 @@ def build_rigged_glb(
     rest pose is the mesh as stored.  Without `nodes`, when the table has fewer
     nodes than the joints the skin uses, or when its parents are not a tree, the
     file gets the flat rig and asset.extras.watchmen.rig says why; "flat" asked
-    for writes the 1.4.0 armature with no record.
+    for writes the flat armature with no record.
 
-    `N` is accepted and ignored, as in 1.2.0 (callers that passed normals there
-    got none written, and still get the same file).
+    `N` is accepted and ignored (callers that pass normals there get none
+    written).
 
     Optional per-vertex attributes, each written per primitive only when its data
     is present and well-formed (mesh_vertex_attributes supplies all three):
@@ -400,7 +398,7 @@ def build_rigged_glb(
     `legacy` materials mode.  engine_materials=True also takes the
     material switches from the texture's sheet.json (doubleSided = twoSided,
     alpha test / blend, see material_alpha) and adds the normal map when the
-    primitive carries NORMAL; without it every material is the 1.3.0 one
+    primitive carries NORMAL; without it every material is the `legacy` one
     (diffuse only, opaque, doubleSided).
     A primitive that gets NORMAL is written with its triangle winding flipped when
     the triangles wind against the normals (winding_reversed; fix_winding=False

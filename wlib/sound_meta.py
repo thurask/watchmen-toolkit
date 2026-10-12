@@ -193,7 +193,7 @@ def _prop_any_case(n, key):
 def _mean(ds):
     """Mean to 4 decimals.  math.fsum, not sum(): sum() of floats is a plain fold up to
     Python 3.11 and compensated from 3.12 on, and the last bit decides a rounding now
-    and then, so the same extract gave 3.0259 on one Python and 3.0258 on another."""
+    and then, so the same extract can give 3.0259 on one Python and 3.0258 on another."""
     import math
 
     return round(math.fsum(ds) / len(ds), 4)

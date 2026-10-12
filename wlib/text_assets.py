@@ -927,7 +927,7 @@ def load_text(extract_out):
 
 def _prop(n, key, default=None):
     """Property `key` of a node, whatever letter case the name table spells it
-    in (`textRes` as the engine registers it; `textres` in key tables before 1.4.0)."""
+    in (`textRes` as the engine registers it; `textres` in some key tables)."""
     v = n.p(key)
     if v is not None:
         return v

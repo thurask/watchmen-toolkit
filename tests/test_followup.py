@@ -10,7 +10,9 @@ criteria        MathLib.InsideInterval 0x77aa25, AnimationCriteriaMet 0x5c5781,
 events          CheckPlayPosEvents 0x5b55c4 / 0x5b52c1, SetupNewPage 0x5b8f16
 Synthetic trees only."""
 
-import json, os, sys
+import json
+import os
+import sys
 
 import pytest
 
@@ -401,12 +403,12 @@ def test_transition_records_use_the_shared_reference_rule(corpus):
 
 
 # ------------------------------------------------------------------ GLB attributes
-import numpy as np
+import numpy as np  # noqa: E402
 
-import rig_glb
-import test_formats_v2 as tf
-import watchmen_extract as we
-from conftest import parse_glb
+import rig_glb  # noqa: E402
+import test_formats_v2 as tf  # noqa: E402
+import watchmen_extract as we  # noqa: E402
+from conftest import parse_glb  # noqa: E402
 
 _PAL = {"bone_count": 5, "bones": [{"name": "b%d" % i} for i in range(5)]}
 
@@ -866,7 +868,7 @@ def test_entry_alternatives_list_transitions_that_set_the_start():
 
 
 # ------------------------------------------------------------------ review M1 / M2: jiggle
-import jiggle_d6
+import jiggle_d6  # noqa: E402
 
 
 def test_jiggle_cache_directory_names_the_model_and_its_constants(monkeypatch):
@@ -936,7 +938,7 @@ def test_sync_flag_without_markers_has_no_opinion():
 
 
 # ------------------------------------------------------------------ review m6 - m8, m10
-import decode_sequence as ds
+import decode_sequence as ds  # noqa: E402
 
 
 def test_toc_old_attribute_names_can_be_written_too():

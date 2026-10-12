@@ -361,9 +361,9 @@ def test_clip_extras_scales_event_times_to_the_written_animation(extract):
     assert x["clip"] == "RSH_COM_ATT_finish_EN1_A"
     kill = [e for e in x["events"] if e["name"] == "KILL_ANIMATION_PARTNER"][0]
     assert kill["time_s"] == pytest.approx(1.4) and kill["written_time_s"] == pytest.approx(0.7)
-    assert [p["other_class"] for p in x["pairs"]] == [
-        "Enemy01"
-    ], "non-primary candidates are dropped"
+    assert [p["other_class"] for p in x["pairs"]] == ["Enemy01"], (
+        "non-primary candidates are dropped"
+    )
     assert am.clip_extras(m, "GRIP 1H") is None
 
 

@@ -36,9 +36,9 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.append(_HERE)
 
-import anim_state_machine as asm
-import kapow_json as _kj
-import engine_enums as ee
+import anim_state_machine as asm  # noqa: E402
+import kapow_json as _kj  # noqa: E402
+import engine_enums as ee  # noqa: E402
 
 FACE_FORMAT = "watchmen-face/2"  # 2: speech categories, fixed-wave talk segments, talk_clips
 
@@ -1200,8 +1200,7 @@ def character_mode(modes, attack, dead):
         )
     return (
         MODE_NONCOMBAT,
-        "assumed: the criteria do not fix the mode; it only matters to the face of "
-        "attack states",
+        "assumed: the criteria do not fix the mode; it only matters to the face of attack states",
     )
 
 
@@ -1433,7 +1432,7 @@ def idle_entry(cycle, first_segment):
     """The `entry` argument of idle_plan() for an IDLE segment of a class whose
     record is `cycle` (classes[*].idle_cycle): its `entry` block says how the
     first segment of a track and a segment entered by a transition start.  A
-    table written before the block existed gives 0, the first idle state."""
+    table without the block gives 0, the first idle state."""
     ent = cycle.get("entry") or {}
     e = ent.get("first_segment" if first_segment else "after_transition")
     return 0 if e is None else e
@@ -1474,7 +1473,7 @@ def pose_schedule(chosen, fclass, clip, clip_time, idle=True, duration=None):
     slot (clip_mix: first_child_only).  idle: also schedule the seeded idle
     cycle; each IDLE segment then starts in the state idle_entry() gives (a
     seeded random member when the class's record says so, as the engine enters
-    the idle group; the first idle state for an older table).
+    the idle group; the first idle state for a table without the `entry` block).
     duration: length of the written animation; an idle-cycle change that could
     not come back before the end is left out (the clip would end, and loop, on
     a half-finished blink): a track that opens with an IDLE segment has to end
@@ -1549,7 +1548,7 @@ def pose_schedule(chosen, fclass, clip, clip_time, idle=True, duration=None):
                     (plan[-1][1] if plan else k0) != home or (first and not plan and k0 != 0)
                 ):
                     # the drawn entry cannot come back before the clip ends: start in
-                    # the first idle state, as an older table does
+                    # the first idle state, as a table without the `entry` block does
                     k0, home, plan = planned(0)
                 if k0 != 0 and idle_states[k0].get("clips"):
                     st = idle_states[k0]

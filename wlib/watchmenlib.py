@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """watchmenlib -- one import for everything this project has reverse-engineered.
 
-Facade over the battle-tested modules in wlib/ (each remains the
+Facade over the modules in wlib/ (each remains the
 authority for its domain; this module only organizes access). Works from a
 fresh install: only game files + these modules + the solved-constant npz/pkl
 files shipped next to them are needed.
@@ -14,25 +14,26 @@ Quick start:
     wl.build_variant_glb('Gimp.fragment.json','Gimp2','out.glb')
 """
 
-import os, sys
+import os
+import sys
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.append(_HERE)  # append, never insert: must not shadow stdlib
 
-import watchmen_extract as _we  # naz walk, block extract, model decode
-import export_female_anims as _efa  # grab_blocks + clip helpers
-import extract_skeletons as _es  # skeleton .model record parsing
-import rig_glb as _rig  # skin indices/weights decode
-import kapow_props as _kp  # property hash + prop-bag JSON
-import kapow_json as _kj  # per-asset-type JSON emitters
-import kapow_fragment as _kf  # LOSSLESS fragment parser (2026-07-07)
+import watchmen_extract as _we  # naz walk, block extract, model decode  # noqa: E402
+import export_female_anims as _efa  # grab_blocks + clip helpers  # noqa: E402
+import extract_skeletons as _es  # skeleton .model record parsing  # noqa: E402
+import rig_glb as _rig  # skin indices/weights decode  # noqa: E402
+import kapow_props as _kp  # property hash + prop-bag JSON  # noqa: E402
+import kapow_json as _kj  # per-asset-type JSON emitters  # noqa: E402
+import kapow_fragment as _kf  # LOSSLESS fragment parser  # noqa: E402
 
-import bake_v4 as _bake_mod  # engine-exact clip -> palette baker
-import variant_glb as _vg  # character-variant GLB builder
+import bake_v4 as _bake_mod  # engine-exact clip -> palette baker  # noqa: E402
+import variant_glb as _vg  # character-variant GLB builder  # noqa: E402
 
 # ---- data: solved constants ------------------------------------------------
-# 2026-07-08: binds are now FILE-ONLY + engine-exact, built straight from each
+# Binds are FILE-ONLY + engine-exact, built straight from each
 # skeleton's ModelRes node array (wlib/build_bind_file.py):
 #   Rb = FK of the node quats CONJUGATED (palette gauge; == capture-solved v14b
 #        to 0.00deg on all non-twist bones, and engine-exact on twists too),
@@ -40,20 +41,19 @@ import variant_glb as _vg  # character-variant GLB builder
 #   med 0.0000 on female + gimp captures; rsh == v10 quality).
 # Capture-solved binds (bind_v14b_final / bind_gimp_v9 / bind_rsh_v10) are kept
 # as validation references only -- see docs/ENGINE_CONSTANTS.md.
-# 2026-07-24: the old module-level BINDS table pointed at a developer-machine
-# sibling directory that never shipped; post-install every entry resolved to a
-# nonexistent path inside site-packages.  Build the binds instead -- one call,
+# There is no module-level table of bind paths: the binds are built -- one call,
 # from the game files, engine-exact:
 #     binds = wl.ensure_binds('game.naz', 'OUT/binds')   # {'female': path, ...}
 
 
-from wutil import default_naz, read_bytes as _read_bytes  # one copy, in wlib/wutil.py
+from wutil import default_naz, read_bytes as _read_bytes  # one copy, in wlib/wutil.py  # noqa: E402
 
 
 def bind_from_skeleton_header(header_bytes_or_path, template_npz=None, out_npz="bind_file.npz"):
     """ENGINE-EXACT file-only bind from any skeleton/mesh ModelRes header (bytes or a
     path), written to `out_npz` (default: bind_file.npz in the current directory)."""
-    import build_bind_file as _bbf, tempfile
+    import build_bind_file as _bbf
+    import tempfile
 
     if not isinstance(header_bytes_or_path, (bytes, bytearray)):
         return _bbf.build(header_bytes_or_path, template_npz, out_npz)
@@ -91,7 +91,7 @@ _SKEL_ASSETS = {  # skeleton source per bind (block asset name endswith)
 def ensure_binds(naz=None, outdir=None, required=None, extract_dir=None):
     """FILE-ONLY bind bootstrap: build engine-exact binds straight from the naz
     (or a loose Part 1 directory) for whatever skeletons are present, and return
-    ``{key: npz_path}`` for the binds that now exist on disk.
+    ``{key: npz_path}`` for the binds that then exist on disk.
 
     ``extract_dir``: a watchmen.py-extract output dir. When given, binds are
     built from the skeleton .model headers already sitting in
@@ -106,7 +106,10 @@ def ensure_binds(naz=None, outdir=None, required=None, extract_dir=None):
     truly needs 'female')."""
     if naz is None:
         naz = default_naz()  # 01_game.naz, else game.naz
-    import build_bind_file as _bbf, tempfile, sys as _sys, glob as _glob
+    import build_bind_file as _bbf
+    import tempfile
+    import sys as _sys
+    import glob as _glob
 
     if not outdir:
         raise ValueError(

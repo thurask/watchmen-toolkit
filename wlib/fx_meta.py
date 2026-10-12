@@ -580,7 +580,7 @@ def _impact(e, a, resolve=None):
         # the event deals close-combat damage itself (SetCloseCombatDamageToTarget 0x6ae57f)
         out["deals_damage"] = True
         out["override_damage"] = a.get("override_damage")
-        out["truth1"] = True  # the two names of 1.4.0's first tables, kept
+        out["truth1"] = True  # `truth1` / `value`: the same two facts under their other names
         out["value"] = a.get("override_damage")
     if a.get("fire_extra_effect") and a.get("extra_effect"):
         ref = a["extra_effect"]
@@ -612,7 +612,9 @@ def _cut(e, a):
     out["placement"] = (
         "previous_position"
         if a.get("keep_previous_position")
-        else "side_of_pair" if not a.get("angle_deg") else "angle"
+        else "side_of_pair"
+        if not a.get("angle_deg")
+        else "angle"
     )
     if a.get("shake_time_s"):
         out["shake"] = {
@@ -973,7 +975,7 @@ def particle_facts(path):
         if lives:
             out["particle_life_s_max"] = _f(max(lives))
         return out
-    try:  # not a complete tree: the generic property-bag walk, as before
+    try:  # not a complete tree: the generic property-bag walk
         doc = kapow_props.parse(data)
     except Exception:
         return None
@@ -1336,7 +1338,7 @@ class FxDB:
         "name logicalParent siblingOrder uniqueID UseRealTime recordInSavepoints runScript Open "
         "enabled Visible runFrameUpdate smartSelectable parentLink spatialTreeStrategy Locked "
         "UserType includeInAO includeInReflections castShadow localPos localOrient "
-        # the same five as the executable registers them (key table from 1.4.0 on)
+        # the same five as the executable registers them
         "useRealtime open visible locked userType".split()
     )
 
@@ -1654,8 +1656,8 @@ _NOT_ESTABLISHED = [
     "gameplay cameras: nothing was checked in the running game",
 ]
 
-# settled in the final sweep, kept as a statement (was a not-established item); exported
-# as fx.fake_twilight_lady_weapon and, beside the rule it qualifies, as
+# a settled statement (not a not-established item); exported as
+# fx.fake_twilight_lady_weapon and, beside the rule it qualifies, as
 # fx.damage_rule.twilight_lady_fake_weapon
 _FAKE_WEAPON = (
     "g_efaketwilightladyweapon is null in shipped data: "
@@ -1692,8 +1694,7 @@ def damage_rule():
         "knockdown_poses": sorted(KNOCKDOWN_POSES),
         "stun_poses": sorted(STUN_POSES),
         "weapon_effect_types": {str(k): v for k, v in WEAPON_EFFECT_TYPES.items()},
-        "slot_entry": "a slot name of effect_defs[*].slots, or 'effect_id:<n>' = "
-        "effects_by_id[n]",
+        "slot_entry": "a slot name of effect_defs[*].slots, or 'effect_id:<n>' = effects_by_id[n]",
         "by_pose": by_pose,
     }
 
@@ -1789,8 +1790,7 @@ _GAMEPLAY_CAMERAS = {
         "pull_factor_max_add": 1.2,
         "pull_time_s": 0.1,
         "quarantine_stick": 0.1,
-        "quarantine_note": "left clears on x <= 0.1 or move intensity > 0.01; right on"
-        " x >= -0.1",
+        "quarantine_note": "left clears on x <= 0.1 or move intensity > 0.01; right on x >= -0.1",
         "move_intensity_gate": 0.01,
         "collision_b_actual_gate": 0.01,
         "collision_b_move_gate": 0.1,
@@ -1929,8 +1929,7 @@ _GAMEPLAY_CAMERAS = {
             "rule": "if |v| > 1 and dot(camFwdFlat, vFlat) > m_nfallinstart: per step c = c *"
             " conv + m * (1 - conv); yaw = heading(c)",
         },
-        "catch_up": "f = t^2 / m_ndistanceoutcatchuppower; lerp to state distance, snap when"
-        " f > 1",
+        "catch_up": "f = t^2 / m_ndistanceoutcatchuppower; lerp to state distance, snap when f > 1",
         "catch_up_gate": {"dist_m": 0.2, "heading_rad": 0.5},
         "convolution_snap": 0.001,
         "offset_x_check_factor": 1.1,
@@ -2210,7 +2209,9 @@ def pair_fx(am, pair, mrec, prec, args):
                 "ends_with": (
                     "cut"
                     if i < len(marks) and to == marks[i]
-                    else "return" if rets and to == rets[0]["time_s"] else "state_end"
+                    else "return"
+                    if rets and to == rets[0]["time_s"]
+                    else "state_end"
                 ),
             }
         )

@@ -4,37 +4,40 @@
 #       [--bind BIND.npz] [--bank CLIPBANK.pkl]
 # Uses: engine-exact bind (bind_v14b/gimp...), bake_v4 math (conjugate convention,
 # absolute root), real IBMs + joint-space TRS (interpolation-safe), real-time rates.
-import os, sys, json, struct, zlib
+import os
+import sys
+import json
+import struct
+import zlib
 import numpy as np
 from wutil import GlbPacker, glb_bytes, load_npz, order_name, platform_name, restricted_load
 
 _D = os.path.dirname(os.path.abspath(__file__))
 if _D not in sys.path:
     sys.path.append(_D)  # append, never insert(0): flat module names must not shadow the stdlib
-import watchmen_extract as we, export_female_anims as efa, rig_glb
+import watchmen_extract as we  # noqa: E402
+import export_female_anims as efa  # noqa: E402
+import rig_glb  # noqa: E402
 
-# 2026-07-24 AXIS: the Kapow engine is ALREADY Y-up, so no axis conversion is
-# needed for glTF.  This module used to carry a Z-up->Y-up rotation C (applied
-# to POSITION) together with its exact inverse Ry (folded into the joint world
-# matrices), i.e. Ry @ C4 == I.  The pair cancelled in the *animated* result but
-# left the raw POSITION accessor -- and therefore the bind pose -- rotated 90
-# degrees about X.  Both are gone; animated output is bit-identical, the bind
-# pose is now upright.
+# AXIS: the Kapow engine is ALREADY Y-up, so no axis conversion is needed for
+# glTF.  This module applies no Z-up->Y-up rotation C to POSITION and no inverse
+# Ry to the joint world matrices: such a pair (Ry @ C4 == I) cancels in the
+# *animated* result but leaves the raw POSITION accessor -- and therefore the
+# bind pose -- rotated 90 degrees about X.  Without it the bind pose is upright.
 #
 # Evidence: on CHAR_Rorschach_v10_walk_cycle.glb the skinned frame-0 bbox is
-# (0.519, 1.751, 0.662) -- 1.75 m tall along Y, feet down -- while POSITION
-# alone measured (1.276, 0.426, 1.802), i.e. lying on its back.  The old Z-up
-# reading came from decode_skeleton_model.py, which is superseded for an
-# off-by-one node/name attribution bug (it also reported a 1.4 m character).
-# Independent confirmation: GameEssentials.fragment gravity is (0, -14.82, 0)
-# == World -Y (jiggle_d6.py).
+# (0.519, 1.751, 0.662) -- 1.75 m tall along Y, feet down; a rotated POSITION
+# measures (1.276, 0.426, 1.802), i.e. lying on its back.  A Z-up reading with
+# an off-by-one node/name attribution reports a 1.4 m character.  Independent
+# confirmation: GameEssentials.fragment gravity is (0, -14.82, 0) == World -Y
+# (jiggle_d6.py).
 
 
 # Clip timing: every clip is written at its header-exact rate (bake_v4.fps_for).  The engine
 # plays a page at ctrl.speed x slot speedFactor x weight / duration (SetAllSlotBlends
 # 0x5b5175, GetGameSpecificSpeedFactor 0x5ab837; docs/ENGINE_CONSTANTS.md "Rate"): no
-# velocity term (read from code).  The walk / run multipliers 2.3 / 2.6 of 1.3.0 are
-# retired; each clip's slot speed factors are in its extras (`speeds`).
+# velocity term (read from code).  No walk / run multiplier is applied; each clip's
+# slot speed factors are in its extras (`speeds`).
 
 
 def batch_m2q(M):
@@ -75,7 +78,7 @@ def batch_m2q(M):
 #:       the joint of the bone's parent (roots: children of `root`); its rest TRS and
 #:       every animation channel are LOCAL to that parent; the skinned mesh nodes are
 #:       scene roots.  Requires the bind's names and parents (else "flat").
-#:   "flat" -- the 1.4.0 layout: nodes `b<k>`, all children of `root`, each carrying
+#:   "flat" -- the layout of the 1.4.0 files: nodes `b<k>`, all children of `root`, each carrying
 #:       the joint's world transform, the mesh nodes under `root`.
 #: The skinning (IBMs, JOINTS_0, WEIGHTS_0) and every world pose are the same in both.
 RIG_MODES = ("hierarchy", "flat")
@@ -201,7 +204,7 @@ def used_joints(SI, SW):
 
 #: per-vertex attributes (NORMAL / TANGENT / COLOR_0, winding, vertex-alpha
 #: blend) in the character GLBs; False (or WATCHMEN_VERTEX_ATTRS=0) writes the
-#: 1.3.0 attribute set.
+#: attribute set of releases before 1.4.0 (--no-vertex-attrs).
 VERTEX_ATTRS = True
 
 
@@ -249,7 +252,7 @@ _LAYOUT_CACHE = {}
 
 
 def buffer_vertex_attrs(mh, ms, order, vbo, nv, stride, platform=None):
-    """Per-vertex attributes for the vertex buffer the legacy scan located at
+    """Per-vertex attributes for the vertex buffer the descriptor scan located at
     stream offset `vbo` -- taken from the header-driven decode
     (watchmen_extract.parse_model_header + model_stream_layout), so nothing is
     guessed: the buffer must be a format 5/6 render buffer whose computed
@@ -478,7 +481,7 @@ def write_glb(
 
     face_rule: "engine" (default; $WATCHMEN_FACE_RULE) bakes into every body
     clip the face track the game plays with it (face_rule.choose_track, from
-    meta["face"]); "legacy" = the rule of 1.3.0: a pose picked from the clip NAME
+    meta["face"]); "legacy" = the rule of releases before 1.4.0: a pose picked from the clip NAME
     plus synthetic blink keys.  face_idle: also bake the seeded idle cycle (default
     on; $WATCHMEN_FACE_IDLE=0 turns it off).
 
@@ -512,7 +515,7 @@ def write_glb(
     each face proxy under its joint, constant local transforms, no channels; no
     face_root) and puts the skinned mesh nodes the scene shows at the scene root; a bind
     without names and parents, or with a parent table that is not a tree, is
-    written flat.  "flat" is the 1.4.0 layout (see RIG_MODES).  The mode written,
+    written flat.  "flat" is the flat layout (see RIG_MODES).  The mode written,
     and why a requested hierarchy was not, is in asset.extras.watchmen.rig."""
     import face_rule as _fr
 
@@ -706,9 +709,9 @@ def write_glb(
                     if cutoff is not None:
                         m2["alphaCutoff"] = cutoff
                     if sheet.get("renderType") is not None:
-                        m2.setdefault("extras", {}).setdefault("watchmen", {})[
-                            "vertex_alpha"
-                        ] = True
+                        m2.setdefault("extras", {}).setdefault("watchmen", {})["vertex_alpha"] = (
+                            True
+                        )
                     j["materials"].append(m2)
                     _vamat[mi] = len(j["materials"]) - 1
             return _vamat[mi]
@@ -1058,7 +1061,7 @@ def write_glb(
             q = batch_m2q(L[:3, :3][None])[0]
             return {"rotation": [float(x) for x in q], "translation": [float(x) for x in L[:3, 3]]}
 
-        # Flat rig (1.4.0): `face_root` is a scene root; f_anchor and the proxies
+        # Flat rig: `face_root` is a scene root; f_anchor and the proxies
         # under it carry WORLD channels, A4[Head]·M4 and A4[bs]·Mk, on every body
         # clip.  Hierarchy: no face_root; f_anchor is a child of the attach
         # joint (Head) and each proxy a child of its body joint bs, with the
@@ -1078,7 +1081,7 @@ def write_glb(
         if _hier:
             j["nodes"][bnode[ai]].setdefault("children", []).append(anchor)
         proxynodes = []
-        _palign = face.get("proxy_align") or None  # per-proxy 4x4 (giraffe fix)
+        _palign = face.get("proxy_align") or None  # per-proxy 4x4 alignment
         for pi, bs in enumerate(face.get("proxy_slots", [])):
             _Mk = _palign[pi] if _palign is not None else M4
             Lp = np.linalg.inv(B4[bs]) @ _Mk if _hier else _Mk
@@ -1165,8 +1168,8 @@ def write_glb(
                     mat["alphaMode"] = "MASK"
                     mat["alphaCutoff"] = 0.5
                 _sheet_material(mat, layers)
-                # 2026-08-17: spec layer was silently dropped on face-first
-                # materials -- mirror the body-prim block above.
+                # spec layer of face-first materials: the same as the body-prim
+                # block above.
                 if "spec" in layers and layers.get("materials") != "engine":
                     mat.setdefault("extensions", {})["KHR_materials_specular"] = {
                         "specularColorTexture": {"index": _tex2(layers["spec"], "spec")}
@@ -1301,9 +1304,9 @@ def write_glb(
         _cand = [a for a in face["anims"] if "MouthClosed_EyesOpen" in a[0]] or list(face["anims"])
         _fneut = _locals_for(_cand[0][1][0])
         # per-category pose locals (AUTO-PAIRING: ATT face on attack clips etc.)
-        # 2026-08-17: guard ONLY the import -- the old blanket except also
-        # swallowed _locals_for errors and silently disabled ALL auto-pairing
-        # (and blink categorization) on the first bad pose.
+        # guard ONLY the import: a blanket except would also swallow
+        # _locals_for errors and silently disable ALL auto-pairing (and blink
+        # categorization) on the first bad pose.
         _fpose = {}
         try:
             import face_synth as _fs
@@ -1442,7 +1445,7 @@ def write_glb(
             flip = np.einsum("kc,kc->k", Q[f], Q[f - 1]) < 0
             Q[f, flip] *= -1
         Tt = W[:, :, :3, 3]
-        for k in (range(NB) if bmask is None else bmask):
+        for k in range(NB) if bmask is None else bmask:
             vo = ac(av(np.ascontiguousarray(Q[:, k].astype(np.float32)).tobytes()), 5126, F, "VEC4")
             to = ac(
                 av(np.ascontiguousarray(Tt[:, k].astype(np.float32)).tobytes()), 5126, F, "VEC3"
@@ -1485,7 +1488,7 @@ def write_glb(
             _eng = _engine and _fpose and _fs is not None
             if _eng:
                 _finfo = _face_track_channels(animname, F, fps, sm, chn)
-            # LEGACY (up to 1.3.0) AUTO-PAIRED face: category pose for combat/damage/dance
+            # LEGACY AUTO-PAIRED face: category pose for combat/damage/dance
             # clips, neutral otherwise
             _base = _fneut
             if not _eng and _fs is not None and _fpose:
@@ -1521,7 +1524,7 @@ def write_glb(
                 # sparse blink keys on the lid bones: neutral->closed->neutral
                 # every ~3s (deterministic per clip), 0.24s per blink
                 _dur = max(float(times[-1]), 0.5)
-                import zlib as _z  # 2026-07-13: hash() is per-process random
+                import zlib as _z  # hash() is per-process random
 
                 _per = 2.7 + ((_z.crc32(animname.encode()) % 100) / 100.0) * 0.9
                 _keys = [0.0]
@@ -1532,8 +1535,7 @@ def write_glb(
                 _keys.append(_dur)
                 _kt = np.array(_keys, np.float32)
                 # weights per blink group [start, closed, closed, open] ->
-                # w=[0,1,1,0]  (2026-08-17: removed a dead first computation
-                # this one immediately overwrote)
+                # w=[0,1,1,0]
                 _wts = np.zeros(len(_kt))
                 for _i in range(1, len(_kt) - 4, 4):
                     _wts[_i + 1] = 1.0
@@ -1647,7 +1649,7 @@ def write_glb(
         # parts hang under a node "alternatives" that is in NO scene: viewers
         # draw scenes, so they never show it, and Blender's importer puts such
         # nodes in a switched-off collection ("Orphan Nodes"), still bound to the
-        # armature.  (A second scene sharing the skeleton root was tried: valid,
+        # armature.  (Ruled out: a second scene sharing the skeleton root is valid,
         # but three.js clones a node used by two scenes and the animations then
         # drive the copy that is not displayed.)
         j["scenes"][0]["name"] = "game"
@@ -1769,8 +1771,7 @@ def write_glb(
 
 
 # Skeleton asset name -> the bind npz built for it.  Populated from a binds
-# directory (watchmenlib.ensure_binds / `watchmen binds`); the old hardcoded
-# table pointed at a developer-machine directory that never shipped.
+# directory (watchmenlib.ensure_binds / `watchmen binds`); no path is hardcoded.
 _BIND_KEY = {
     "Female_Skeleton": "female",
     "Large_Gimp_Skeleton": "gimp",
@@ -1800,9 +1801,7 @@ CLIP_PREFIX = {"Female_Skeleton": ("EN4", "BS2"), "Large_Gimp_Skeleton": ("EN2",
 def clip_families(skel, fragjson=None):
     """Clip name prefixes of skeleton `skel`, as `characters` bakes them
     (characters_export.CLIP_PREFIX; a fragment under a Part 1 extract takes
-    CLIP_PREFIX_P1, which adds a family to the big and the fast enemies).  1.3.0 looked
-    for EN4 clips on every skeleton but the female and the gimp one and wrote the other
-    GLBs without a clip."""
+    CLIP_PREFIX_P1, which adds a family to the big and the fast enemies)."""
     import characters_export as _ce
 
     key = _BIND_KEY.get(skel)
@@ -1874,7 +1873,7 @@ def build(
     jiggle_d6.DEFAULT_MODEL, 'solver').
     meta: the animation metadata table (anim_meta.build / `watchmen animmeta`).  With
     it the clips get the same `extras` as in the `characters` export and the solver
-    bakes looping clips as closed laps; without it (None, the 1.3.0 behaviour) there
+    bakes looping clips as closed laps; without it (None) there
     are no clip extras and every clip is baked as non-looping.  No head is attached
     here, so there are no face channels in either case.
 
@@ -1909,9 +1908,9 @@ def build(
     manifest = []
     import glob as _g
 
-    # 2026-07-12e capture verdict (ENGINE_CONSTANTS.md): jiggle_d6 'engine' is at
-    # capture parity (dance capture 3.1-3.8deg vs d6 2.65 / AR2+gain 4.4) and is
-    # file-only -> promoted to the bake default.  AR2: from jiggle_pass import apply_jiggle
+    # jiggle_d6 'engine' is the bake default: it is at capture parity (dance
+    # capture 3.1-3.8deg vs d6 2.65 / AR2+gain 4.4; ENGINE_CONSTANTS.md) and
+    # file-only.  AR2 alternative: from jiggle_pass import apply_jiggle
     from jiggle_d6 import apply_jiggle, load_world_props
 
     world = load_world_props(extract_root) if jiggle else None
@@ -1926,9 +1925,9 @@ def build(
         fps = 30.0
         timed = False
         if bank:
-            # 2026-08-17: tolerant lookup -- bake_v4 banks key by BARE clip
-            # name ({clipname: header_bytes_or_path}, bake_v4.py:155); the old
-            # nm+".animation"-only lookup silently missed on those and left
+            # tolerant lookup: bake_v4 banks key by BARE clip name
+            # ({clipname: header_bytes_or_path}, bake_v4.py:155); an
+            # nm+".animation"-only lookup would miss on those and leave
             # every clip at the 30fps fallback (2x slow on FULL-rate clips).
             h = bank.get(nm + ".animation")
             if h is None:

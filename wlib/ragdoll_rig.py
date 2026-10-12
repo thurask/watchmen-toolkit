@@ -21,7 +21,11 @@ conj(q) v q, so the matrix that takes frame coordinates to the parent is
 R(conj(q)) -- the same conjugate the skeleton rest pose needs.
 """
 
-import math, os, pickle, struct, sys
+import math
+import os
+import pickle
+import struct
+import sys
 from itertools import batched
 from wutil import order_name, restricted_load
 
@@ -30,10 +34,10 @@ import numpy as np
 _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.append(_HERE)  # append, never insert(0)
-import frame as _frame
-import kapow_props
-import parse_model_nodes as _pmn
-import skeleton_records as _sr
+import frame as _frame  # noqa: E402
+import kapow_props  # noqa: E402
+import parse_model_nodes as _pmn  # noqa: E402
+import skeleton_records as _sr  # noqa: E402
 
 FORMAT = "watchmen_ragdoll/1"
 SKIN_WIDTH = 0.025  # shape inflation and skinWidth: 0xa23760 (double), 0x9e600c
@@ -136,7 +140,7 @@ _PROP_NAMES = (
 _names_cache = {}
 
 
-from wutil import read_bytes as _read_bytes  # one copy, in wlib/wutil.py
+from wutil import read_bytes as _read_bytes  # one copy, in wlib/wutil.py  # noqa: E402
 
 
 def property_names():

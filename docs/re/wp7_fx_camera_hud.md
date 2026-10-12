@@ -91,7 +91,7 @@ an enum (`GENERIC_PARTICLE_SYSTEMS`) with only `NONE` [R] - dead.
 
 ### 1.2 Who triggers effects [R]
 
-(caller list produced with `work/wp7/who.py` over the lifted corpus, then read)
+(callers found with `work/wp7/who.py` over the lifted corpus and read)
 
 | Trigger | Code | What is fired |
 |---|---|---|
@@ -129,14 +129,14 @@ poses when hit from behind) [R that they are called; their bodies not read].
    4 `LIGHT_MIDDLE_LEFT` therefore take the *heavy* effect - as coded.)
 3. Extra: pose in {17,18,27,28} -> `_eknockdown`; pose in {19,20,21,22} -> `_estun`.
 
-**Correction to `dominatrix_audit.md` (i1) and wp6_audio.md 2.4:** "a sharp weapon also fires its own
-effect" is wrong. Type 2 SHARP simply selects `_esharpweapon` from the weapon list; the extra effect
-belongs to type **3 TASER** and is effect id 1.
+Not the case: "a sharp weapon also fires its own effect" (`dominatrix_audit.md` i1). Type 2 SHARP
+only selects `_esharpweapon` from the weapon list; the extra effect belongs to type **3 TASER** and is
+effect id 1.
 
 The weapon passed is the inflictor's `m_eweapon`, none when `tIgnoreWeapon`, and
 `ProjectLib.g_efaketwilightladyweapon` when the inflictor's character type is 0x23 (Twilight Lady;
 set in `CharacterRoot.command_set_weapon` 0x694378 from her `m_emodelcollbash1h` collection) [R]. The
-node of that fake weapon was not located in the staged fragments; that it carries effect type 3 is
+node of that fake weapon is not located in the staged fragments; that it carries effect type 3 is
 [I] from the TASER branch.
 
 ### 1.4 The complete Dominatrix table [D + R]
@@ -234,19 +234,27 @@ record = [u32 id][u32 keyHash][u32 typeHash][u32 k][k dwords]
 - The save order (`vfunc_23` 0x558a29) and the XML element names ("Spawner", "Initializer",
   "Affector", `vfunc_22` 0x558b39) confirm which list is which.
 
-**Toolkit vs engine** (`tk160/wlib/kapow_props.py`, FORMATS_MISC.md):
+**Reader notes** (`wlib/particle_asset.py` implements the grammar; `tk160/wlib/kapow_props.py`,
+FORMATS_MISC.md):
 
-| Toolkit says | Engine | Consequence |
-|---|---|---|
-| `[0-4 stray u32s]` before a block (`pre`) | the list counts `nTypes`, `nAffectors`, `nSpawners`, `nInitializers` | the tree structure (which module belongs to which type, and its role) is in these counts; the flat block list loses it when a count is 0 or a list is empty |
-| `schemaCount` | payload length in dwords | the parser can jump instead of walking with the "same owner id" heuristic |
-| `ownerId` anchors a block | ignored by the loader | - |
-| key names from the hash dictionary: `Texture`, `Duration`, `Position`, `Speed`, `Force`, `Ambient`, `Factor` | registered names are `texture`, `duration`, `position`, `speed`, `force`, `ambient`, `factor` (hash is case-blind) | cosmetic |
-| unresolved `329262a2`, `72aab21a`, `72aab29a`, `2282b20a`, `f20aa272` | `life` (VarianceInitializer), `numX`, `numY` (UVArrayInitializer / UVArrayAffector), `damp` (DampeningAffector), `open` (Node) - hashes reproduced | add to `prop_hash_dict.pkl` |
-| value `enum`-less integers | dropdown items are in the registration strings (below) | emit names |
+- The u32s between blocks (the `[0-4 stray u32s]` / `pre` of a flat block view) are the list counts
+  `nTypes`, `nAffectors`, `nSpawners`, `nInitializers`. They carry the tree structure (which module
+  belongs to which type, and its role); a flat block list loses it when a count is 0 or a list is
+  empty.
+- An object's payload length is given in dwords (`schemaCount` in the flat view); a reader can jump
+  instead of walking records with a "same owner id" heuristic.
+- The first dword of a record (`ownerId`) is ignored by the loader.
+- Registered property names are `texture`, `duration`, `position`, `speed`, `force`, `ambient`,
+  `factor`; the hash is case-blind, so the dictionary spellings `Texture`, `Duration`, `Position`,
+  `Speed`, `Force`, `Ambient`, `Factor` hash the same (cosmetic).
+- Hashes `329262a2`, `72aab21a`, `72aab29a`, `2282b20a`, `f20aa272` are `life`
+  (VarianceInitializer), `numX`, `numY` (UVArrayInitializer / UVArrayAffector), `damp`
+  (DampeningAffector), `open` (Node) - hashes reproduced; they belong in `prop_hash_dict.pkl`.
+- Integer values of dropdown properties have their item names in the registration strings (2.2);
+  an export emits the names.
 
-All 89 files parse to the last byte with the existing parser (0 warnings) [D]; the proposal is a
-structural reader, not a repair.
+All 89 files parse to the last byte (0 warnings) [D]; the structural reader reproduces the same
+records and counts.
 
 ### 2.2 Properties (registration strings; units from the UI text) [R]
 
@@ -400,7 +408,7 @@ corpus is unused content.
   script `GFXDecalEffectType` (`m_ndecalscale`; `CheckDecalValidity` 0x75af1f does line checks at
   the corners before `SetDecalEx`) exist, but **no fragment instantiates either**. All "decals" in
   the levels are ordinary meshes. Nothing projects onto characters. How `DecalManager` builds its
-  geometry (0x4c4a8c, 3 kB) was not read.
+  geometry (0x4c4a8c, 3 kB) is not read (section 7).
 - **Weapon / fist trails** [D + R]: `RorschachCharVisual.fragment` and `NiteOwnCharVisual.fragment`
   hold `BoneAttacher "AttackEffectAttacher"` (bone 11) -> `EmitterNode` with
   `/Art/Effects/MotionTrails/Rorschach_Hands.particle` (looping, `autoStart`, `EmitterTrailSpawner`
@@ -706,9 +714,9 @@ Format (`TextRes::vfunc_24` 0x5387ae; verified on `Localize/ControllerLayout_pc.
 
 A text slot index is the entry index. Button glyphs are single characters of the font's icon page
 (`GAMEPAD_LOWER` = U+00A2, `GAMEPAD_DPAD_UP` = U+00AD ...). **Of these assets only
-`ControllerLayout_pc.txt` is in the extraction**; the `_uk` text assets and the subtitle tables are
-not on disk (they are language-dependent NAZ entries), so their contents and the key convention of
-the subtitle tables are [N].
+`ControllerLayout_pc.txt` is in the `20260708` extraction**; the `_uk` text assets and the subtitle
+tables are language-dependent NAZ entries (localized directory; `TEXT_ASSETS.md`), so their contents
+and the key convention of the subtitle tables are [N] here.
 
 ### 4.4 Menus (high level; handler lists read, bodies not)
 
@@ -807,43 +815,40 @@ Every `CAMERA_CUT` is skipped when its capsule test fails (3.4).
 
 ---
 
-## 6. Extractor consequences
+## 6. Extractor requirements
 
-1. **Particle reader.** Replace the heuristic block walk by the engine grammar (2.1): return
-   `{asset, types:[{type, affectors:[], spawners:[], initializers:[]}]}`, use the payload dword
-   count, add the five missing names, lower-case the seven mis-cased ones, and attach the dropdown
-   names (`simulationMode`, `blendMode`, `src/dstBlend`, `blendOp`, `renderStyle`, `alignment`,
-   `eventChannel`, `animationMode`) from `wp7_tables.json` `particle.classes`. Parse gradient
-   strings into key lists. Validation: all 89 files already tile; the new reader must reproduce
-   the same records and the counts.
-2. **`fx` section in the animation metadata.** Today an event exports `name, playpos, on_enter,
-   event_id, value`. Export the whole payload (`m_ivalue00`, `m_nvalue02..10`, `m_ttruth1..3`,
-   `m_vvalue1/2`, `_etarget00..02`, `m_ieventtype` with its four trigger types) and add decoded
-   records per state: `impact_effects` (pose, local position / direction, ignore-weapon),
-   `camera_cuts` (the `combatcutdata` mapping of 3.4), `rumble`, `look_at`, `sound` / `speak`. A
-   ready decoder is `work/wp7/evdec.py`; the decoded set (273 states, 1,328 events) is in
-   `wp7_tables.json` `animation_fx_events`.
-3. **Effect tables.** Export `EffectDb.fragment` as `effects[name] = {id, particles[{asset,
-   placement, local transform}], sounds, speak}` and the three `CharacterEffectDef`s with the rule
-   of 1.3, so that a consumer can resolve "pose + weapon + victim" to particle files. Carry the
-   weapon `m_ieffecttype` in the weapon export (`weapons` table).
-4. **Finisher camera with pairs.** For each pair, attach the master's `camera_cuts` and
-   `CAMERA_CUT_TO_CHARACTER_CAM` to the pair record (time in seconds = playpos x master duration).
-   A previewer can place the camera from look-at bone + distance + height + angle.
-5. **Level grade metadata.** Per level, export the `FXGfxEffectCtrl(GFXEffect)` node of
-   `Art.fragment` (`level_grade_nodes`): fog, bloom, brightness, saturation, contrast, tint, gamma -
-   the inputs of the post-process formula in wp1_renderer.md section 6.
+1. **Particle reader** (`wlib/particle_asset.py`): the engine grammar (2.1), returning
+   `{asset, types:[{type, affectors:[], spawners:[], initializers:[]}]}`, using the payload dword
+   count, the five names of 2.1, the lower-case spellings, and the dropdown names
+   (`simulationMode`, `blendMode`, `src/dstBlend`, `blendOp`, `renderStyle`, `alignment`,
+   `eventChannel`, `animationMode`) from `wp7_tables.json` `particle.classes`. Gradient strings
+   parse into key lists. Validation: all 89 files tile; the reader reproduces the same records and
+   counts as the flat block walk.
+2. **`fx` section in the animation metadata.** An event exports its whole payload (`m_ivalue00`,
+   `m_nvalue02..10`, `m_ttruth1..3`, `m_vvalue1/2`, `_etarget00..02`, `m_ieventtype` with its four
+   trigger types) besides `name, playpos, on_enter, event_id, value`, plus decoded records per
+   state: `impact_effects` (pose, local position / direction, ignore-weapon), `camera_cuts` (the
+   `combatcutdata` mapping of 3.4), `rumble`, `look_at`, `sound` / `speak`. A reference decoder is
+   `work/wp7/evdec.py`; the decoded set (273 states, 1,328 events) is in `wp7_tables.json`
+   `animation_fx_events`.
+3. **Effect tables.** `EffectDb.fragment` as `effects[name] = {id, particles[{asset, placement,
+   local transform}], sounds, speak}` and the three `CharacterEffectDef`s with the rule of 1.3, so
+   that a consumer can resolve "pose + weapon + victim" to particle files. The weapon
+   `m_ieffecttype` goes into the weapon export (`weapons` table).
+4. **Finisher camera with pairs.** For each pair, the master's `camera_cuts` and
+   `CAMERA_CUT_TO_CHARACTER_CAM` are attached to the pair record (time in seconds = playpos x
+   master duration). A previewer can place the camera from look-at bone + distance + height + angle.
+5. **Level grade metadata.** Per level, the `FXGfxEffectCtrl(GFXEffect)` node of `Art.fragment`
+   (`level_grade_nodes`): fog, bloom, brightness, saturation, contrast, tint, gamma - the inputs of
+   the post-process formula in wp1_renderer.md section 6.
 6. **Camera rig metadata** (optional): `camera.per_player_ctrl` (state table, transitions,
    springs) and the modifier constants.
-7. **Text.** Add a `TextRes` decoder (4.3) and extract the localized text assets
-   (`Menu_uk_pc`, `TutorialRS/NO_uk_pc`, `Warnings_uk_pc`, `KeyboardLayout_uk`, `Cutscene*_uk`,
-   `SubtitlesPrison_uk`) - they are named by the fragments but absent from the extraction. With
-   them, HUD prompts (text slot indices) and subtitles become exportable.
-8. **Motion trail / emitters on characters**: the character export can list `EmitterNode`s and
+7. **Text.** A `TextRes` decoder (4.3) and the localized text assets (`Menu_uk_pc`,
+   `TutorialRS/NO_uk_pc`, `Warnings_uk_pc`, `KeyboardLayout_uk`, `Cutscene*_uk`,
+   `SubtitlesPrison_uk`), which the fragments name; with them, HUD prompts (text slot indices) and
+   subtitles are exportable.
+8. **Motion trail / emitters on characters**: the character export lists the `EmitterNode`s and
    `LightFlash` of the `CharVisual` fragments (bone, asset) as attachments.
-9. Documentation corrections: FORMATS_MISC.md "third list ... particle-emission surface is
-   inferred" -> read (2.4); the `.particle` paragraph (2.1); `dominatrix_audit.md` i1 / wp6 2.4
-   "sharp weapon fires its own effect" -> TASER.
 
 ## 7. Not established
 
@@ -856,9 +861,9 @@ Every `CAMERA_CUT` is skipped when its capsule test fails (3.4).
 | Lens flare update / occlusion maths | read lensflare.cpp 0x4bd024 area (7.7 kB) |
 | Value of `CharacterRoot._nslomotimemultiplier`; who plays `RageMaterialPulse.sequence` | property default in the game database or the level root fragments (`Bordello.fragment` etc., not staged); callers of `PropertySequenceNode.Play` in `CharacterRootLogic` rage handlers |
 | TASER weapon node (`g_efaketwilightladyweapon`) and its `m_ieffecttype` | parse the Twilight Lady's `m_emodelcollbash1h` collection |
-| Combat camera maths in full (0x64cee1: pull timers, min-dist blending, predicted turn, avoid-character lift), exploration camera (0x651b3d), transition yaw options | done: FX_META.md "Gameplay cameras"; the exploration collision helpers (`LineChecks`, `CapsuleCheck`, `OffsetXCheck`) are in FX_META.md |
+| Combat camera maths in full (0x64cee1: pull timers, min-dist blending, predicted turn, avoid-character lift), exploration camera (0x651b3d), transition yaw options | not here: FX_META.md "Gameplay cameras"; the exploration collision helpers (`LineChecks`, `CapsuleCheck`, `OffsetXCheck`) are in FX_META.md |
 | `CameraCombatSpecialCuts` angle convention (sign, reference heading) and `HasValidTransition` | read 0x6341f7 / 0x634f62 fully; check against one finisher in game |
-| PvP framing formula | done: FX_META.md "Gameplay cameras" |
+| PvP framing formula | 3.5 and FX_META.md "Gameplay cameras" |
 | Sine argument of the shake | disassemble 0x643d95 |
 | `ScreenFadeCtrl`, `SpriteWobbler`, `SpriteBar`, `ComboTextShaker`, `PlayerTutotialHUD`, `BossHUD` bodies; menu controllers | lifted classes, not read |
 | Sprite / TextBox draw path (layout from anchors, text wrapping, font kerning), `Font` asset use | `ui.text` natives 0x4b39d2.. (36 kB) |
@@ -901,7 +906,7 @@ fragments.
 
 ## 9. Files
 
-- `findings/wp7_fx_camera_hud.md` (this report), `findings/wp7_tables.json` (enums; effects and
+- `findings/wp7_fx_camera_hud.md` (this), `findings/wp7_tables.json` (enums; effects and
   defs; weapons; Dominatrix per-pose tables and attack states; particle grammar, classes,
   properties, census; native node property tables; level grade nodes; camera tables and constants;
   rumble; player damage feedback; 1,328 decoded fx / camera / rumble animation events; HUD text).

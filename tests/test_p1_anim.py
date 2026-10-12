@@ -126,8 +126,9 @@ def test_face_texts_carry_the_confirmed_rules():
     assert "mix of the two slots" not in text and len(fr.NOT_ESTABLISHED) == 4
     assert "m_tforcecombat" in text and "m_istateofmind" in text
     d = fr.DRIVERS
-    assert "never cleared" in d["HITTAKEN"]["lifetime"] and "initial value 0" in (
-        d["HITTAKEN"]["lifetime"]
+    assert (
+        "never cleared" in d["HITTAKEN"]["lifetime"]
+        and "initial value 0" in (d["HITTAKEN"]["lifetime"])
     )
     assert "no voice has the character root as pivot" in d["STOP_SPEAK"]["sent"]
     assert "footsteps on a surface that has a footstep sound" in d["STOP_SPEAK"]["sent"]

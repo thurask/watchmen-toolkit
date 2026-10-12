@@ -79,7 +79,7 @@ time. In Bordello the list is in the order of the nodes in the level tree; in Ni
 StreetsOfRiot it is not (the nodes of the level's own `Collision.fragment` come last instead of
 first).
 
-Part 2 PC (2026-10-05, staged fragments of Bordello / NightClub / StreetsOfRiot): 62 + 48 + 18
+Part 2 PC (the fragments of Bordello / NightClub / StreetsOfRiot): 62 + 48 + 18
 path objects; 127 join by id, each within 0.16 m of its node's vertex nodes (126 within
 0.00002 m; NightClub id 16, a door of `Door_HoneyPot_Right_UseTrigger.fragment`, is 0.1558 m off,
 its node probably moved after generation). The one
@@ -88,10 +88,11 @@ left over is Bordello id 45 (on the PC extract Tutorial's 2 and PlayerVsPlayer's
 offset 0x2026 of Bordello's `gameplay.fragment`; the list starts at 0x1cb6 with the property hash
 `88 cd 01 5b` and the count 0x3e). The engine cannot bind that path object ("Could not match a
 Kynapse static path object ... please generate new PathData"); the position rule gives it to the
-path-object node of `Door_TwillightMansion_DoubleDoor_UseTriggerB.fragment` at 0.1196 m. The position join alone (end points of a path object's
-edges against the vertex nodes, the next-nearest node at least 3.9 m away) gave the same 128
-pairs on 2026-10-04, and 131 of 131 with Tutorial (2) and PlayerVsPlayer (1) on the full PC data.
-The id join, measured on all 39 `level.json` of the six sets (2026-10-06): Part 2, identical on PC,
+path-object node of `Door_TwillightMansion_DoubleDoor_UseTriggerB.fragment` at 0.1196 m. The
+position join alone (end points of a path object's edges against the vertex nodes, the
+next-nearest node at least 3.9 m away) gives the same 128 pairs, and 131 of 131 with Tutorial (2)
+and PlayerVsPlayer (1) on the full PC data.
+The id join, measured on all 39 `level.json` of the six sets: Part 2, identical on PC,
 PS3 and Xbox 360: Bordello list 62 with entry 45 null, 61 joined by id and 1 by position (worst
 distance 0.1196 m); NightClub 48 of 48 by id; StreetsOfRiot 18 of 18; Tutorial 2 of 2;
 PlayerVsPlayer 1 of 1; no id / position disagreement, nothing unlinked. Part 1, identical on the

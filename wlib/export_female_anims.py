@@ -8,11 +8,9 @@ kept for callers of 1.4.0.
   mesh_arrays(header, stream) a skinned model's pieces as one buffer, read
                               through mesh_loader like every character loader
 
-Up to 1.4.0 this module was also a standalone exporter (``python
-export_female_anims.py game.naz out.glb``: the Dominatrix body with female
-clips).  Its clip decoder repeated bake_v4.walk with the same GamePivot scan, and
-its GLB writer repeated variant_glb's; both were removed in 1.5.0 -- the character
-GLBs with every clip are `watchmen characters` / `watchmen char`.
+This module is not an exporter: the character GLBs with every clip are written
+by `watchmen characters` / `watchmen char` (clips decoded by bake_v4.walk, GLBs
+written by variant_glb).
 """
 
 import sys
@@ -24,8 +22,8 @@ import watchmen_extract as we
 
 def grab_blocks(naz):
     """{stem: {"h": header bytes, "s": stream bytes}} of every block of the
-    archive, all in memory at once (kept for callers of 1.4.0; the toolkit's own
-    walks use watchmen_extract.iter_blocks, which reads one block at a time)."""
+    archive, all in memory at once (the toolkit's own walks use
+    watchmen_extract.iter_blocks, which reads one block at a time)."""
     return dict(iter_blocks(naz))
 
 
@@ -39,8 +37,7 @@ def mesh_arrays(mh, ms, name="body"):
     indices, SW (n,4) float32, T [(a, b, c)] whole-mesh indices, subs [(vertex base,
     vertex count, first triangle, triangle count)]).  The pieces come from
     mesh_loader.load_submeshes (the model header; the descriptor scan only as a
-    logged fallback), as in every character loader; 1.4.0 had a scan of its own
-    here, without the clean-index-buffer test and little-endian only."""
+    logged fallback), as in every character loader."""
     import mesh_loader as ml
 
     pieces, _rep = ml.load_submeshes(mh, ms, name, attrs=False)

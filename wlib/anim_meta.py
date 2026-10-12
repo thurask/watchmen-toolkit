@@ -19,8 +19,8 @@ What it recovers
            clip keys an absolute `GamePivot` root track, and a paired clip's
            two halves are authored in one shared scene.  See PLACEMENT below.
 
-PLACEMENT (engine rule read from the executable 2026-10-02, and measured)
-------------------------------------------------------------------------
+PLACEMENT (engine rule read from the executable, and measured)
+--------------------------------------------------------------
   * The body joints are keyed RELATIVE to GamePivot (GamePivot sits 1.0 m above
     the ground in every skeleton; lowest body joint + GamePivot.y == 0.00).
   * In absolute mode every actor moves as
@@ -36,8 +36,8 @@ PLACEMENT (engine rule read from the executable 2026-10-02, and measured)
     degrees), and in 123 the partner clip's own GamePivot start is on the
     marker to under 5 cm.  Each pair carries its `check` and a `confidence`.
 
-FORMAT 2 (2026-10-02, findings/sync.md, enums.md, events.md, placement.md)
---------------------------------------------------------------------------
+FORMAT 2 (findings/sync.md, enums.md, events.md, placement.md)
+--------------------------------------------------------------
   * names come from the executable's own enum tables (engine_enums.json):
     events, criteria kinds and variables, model/weapon types, special handling.
   * criteria: enum variable 11 is OPPONENT_MODEL_TYPE; an ENUM criterion reads
@@ -69,7 +69,7 @@ FORMAT = "watchmen-anim-meta/2"
 # export rebuilds a cached anim_meta.json whose revision is missing or different
 # (characters_export.anim_meta_is_current), so a table from before a rule was
 # added or corrected is never reused.  Raise it with every change of content.
-# 6 (1.5.0): fragment floats exact by default; the table records `float_values`
+# 6: fragment floats exact by default; the table records `float_values`
 # (f32json.mode()), and a table written in the other mode is rebuilt.
 REVISION = 6
 
@@ -902,7 +902,7 @@ def placement(m, v):
     Returns None when either clip has no positional GamePivot track.
 
     This is the engine's rule (CharacterRoot.StateActive 0x6b9035-0x6b94e9,
-    read 2026-10-02; see docs/ANIMATION_META.md):
+    read from code; see docs/ANIMATION_META.md):
 
         partner start pos    = master node * (interact(0) - (GP_m(t) - GP_m(0)))
         partner start orient = yaw(180 deg) * master node orientation
@@ -934,10 +934,10 @@ def placement(m, v):
         # The offset is in the master node's frame.  A root quaternion whose
         # _yaw_deg is a turns a vector by -a in the right-handed sense (engine
         # vectors rotate as conj(q) v q), so the turn is _yaw_rot(-a): this is
-        # GamePivot(0) * interact(0) of the GLB hierarchy (data, 2026-10-05: 32
-        # turned solo clips agree to 0.1 mm, the other sign is off by up to
-        # 1.66 m).  That the master's node is the GamePivot frame is READ on PC
-        # (2026-10-05): the node orientation is the heading quaternion of
+        # GamePivot(0) * interact(0) of the GLB hierarchy (data: 32 turned solo
+        # clips agree to 0.1 mm, the other sign is off by up to 1.66 m).  That
+        # the master's node is the GamePivot frame is read from the PC code:
+        # the node orientation is the heading quaternion of
         # m_nfaceheading, set inline each frame (CharacterVisual
         # .UpdateAnimPoseAndCloth 0x6b015d); the heading integrates minus the
         # GamePivot twist rate and the velocity is GamePivot-local
@@ -1054,7 +1054,7 @@ def _master_turn(mf, pl, t0, t1, t_ref=0.0):
 
     with I0 the UNTURNED interact offset and R(a) = _yaw_rot(-a).  Both the
     turn and the drift are measured from t = 0, where the offset is defined;
-    t_ref (where the master's state starts) is accepted for older callers and
+    t_ref (where the master's state starts) is accepted for compatibility and
     not used."""
     yaw, pos, dur = mf.get("_gp_yaw_deg"), mf.get("_gp_pos"), mf.get("duration_s")
     if not yaw or not dur or t1 < t0:
@@ -1347,9 +1347,10 @@ def _build(extract_out, binds, log, frame):
             if n.parent is None or n.parent.name != "SlaveStates":
                 continue
             if n.cls == asm.CLS_GROUP:
-                sid, kids = n.p("m_istategroupid"), [
-                    k for k in n.children if k.cls == asm.CLS_STATE
-                ]
+                sid, kids = (
+                    n.p("m_istategroupid"),
+                    [k for k in n.children if k.cls == asm.CLS_STATE],
+                )
             elif n.cls == asm.CLS_STATE:
                 sid, kids = n.p("m_istateid"), [n]
             else:
@@ -1727,7 +1728,7 @@ def apply_frame(meta, frame=None):
 def to_frame(meta, frame=None):
     """`meta` in the frame `frame` (default frame.mode()): the table itself when
     it already is, else a converted deep copy.  A table without the marker is
-    in the mirrored frame (1.3.0 tables, --frame mirrored)."""
+    in the mirrored frame (tables of releases before 1.4.0, --frame mirrored)."""
     if not isinstance(meta, dict):
         return meta
     mode = _frame.mode(frame)
@@ -2082,7 +2083,7 @@ def conventions(frame=None):
 def skeleton_extras(names, parents, rig="flat", joint_nodes=None):
     """glTF `extras` for a skin: the real bone names and hierarchy.
 
-    rig "flat" (the 1.4.0 layout, `--rig flat`): the joints are written flat
+    rig "flat" (`--rig flat`): the joints are written flat
     (every joint a child of one identity root, transforms in GamePivot-relative
     world space), so this is what lets an importer rebuild the hierarchy without
     a hand-made table per skeleton.  rig "hierarchy" (variant_glb.write_glb's
@@ -2210,7 +2211,7 @@ def clip_extras(meta, name, fps=None, frames=None):
         )
         # blocks other modules add to a pair (fx_meta: the procedural camera of a
         # finisher / counter, on the pair clock; combat_meta: what starts the pair).
-        # Copied only when the table has them: older tables give the same extras.
+        # Copied only when the table has them: a table without them gives the same extras.
         for k in CLIP_PAIR_EXTRA_KEYS:
             if p.get(k):
                 prs[-1][k] = p[k]
@@ -2366,5 +2367,4 @@ def main(argv):
 
 
 if __name__ == "__main__":
-
     sys.exit(main(sys.argv))

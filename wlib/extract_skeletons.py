@@ -7,16 +7,18 @@ table (name + parent + rest local pos + rest local quat, read from the file head
 docs/ENGINE_CONSTANTS.md), and writes skeleton_<family>.json. Run BEFORE rigging so
 each character binds to its base skeleton.
 
-Hierarchy (2026-08-17 docstring sync -- the code moved to parse_model_nodes in
-v1.1.0): each node record carries its own parent field, read verbatim by
-parse_model_nodes.parse(); node 0 is the file's unnamed root (the GamePivot
-slot) and every parent is an index into the file's own node list.  Out-of-range
-or self-referencing parents publish as -1 (root); there is no biped-name
-guessing anywhere in this path.  (The older engine-ID parent-name mapping,
-_explicit_parent_names, went with export_female_anims' exporter in 1.5.0.)
+Hierarchy (parse_model_nodes): each node record carries its own parent field,
+read verbatim by parse_model_nodes.parse(); node 0 is the file's unnamed root
+(the GamePivot slot) and every parent is an index into the file's own node
+list.  Out-of-range or self-referencing parents publish as -1 (root); there is
+no biped-name guessing anywhere in this path.
 """
 
-import sys, os, json, struct, argparse
+import sys
+import os
+import json
+import struct
+import argparse
 import watchmen_extract as we
 import parse_model_nodes as pmn
 import skeleton_records as _sr
@@ -119,19 +121,17 @@ def collision_volumes(header, names):
 def skeleton_from_header(header, family):
     """ModelRes header -> rest-pose table, engine-exact.
 
-    2026-07-24: rebuilt on parse_model_nodes.parse().  This used to call
-    decode_skeleton_model.decode(), which that module's own docstring marks
-    SUPERSEDED for an off-by-one: the 28-byte [pos][quat] transform PRECEDES the
-    name in a node record, so every bone was published carrying its SUCCESSOR's
-    rest transform, the last bone of every skeleton was dropped entirely (the
-    decoder needs a following name record to locate the tail), and `bone_count`
-    was short by one.  Parents were also guessed from biped names instead of
-    read from the record's own parent field.
+    Built on parse_model_nodes.parse(): the 28-byte [pos][quat] transform PRECEDES
+    the name in a node record, and parse() reads the transform before the CURRENT
+    name and takes the parent index from the record, so index 0 is the file's
+    unnamed root (the GamePivot slot) and every `parent` is the file's own node
+    index.  Byte order is auto-detected, so console (X360/PS3) headers work too.
 
-    parse() reads the transform before the CURRENT name and takes the parent
-    index from the record, so index 0 is the file's unnamed root (the GamePivot
-    slot) and every `parent` is the file's own node index.  Byte order is
-    auto-detected, so console (X360/PS3) headers work too.
+    Ruled out: a decoder that attributes the transform to the FOLLOWING name is
+    off by one -- every bone gets its SUCCESSOR's rest transform, the last bone
+    of every skeleton is dropped (a following name record is needed to locate
+    the tail) and `bone_count` is short by one; parents guessed from biped names
+    differ from the record's own parent field.
     """
     try:
         names, pos, quat, parent = pmn.parse(header)
@@ -150,7 +150,7 @@ def skeleton_from_header(header, family):
                 "name": nm,
                 "parent": pa if (0 <= pa < len(names) and pa != i) else -1,
                 "rest_pos": [round(float(x), 6) for x in pos[i]],
-                # file order is XYZW; published as WXYZ for backwards compatibility
+                # file order is XYZW; published as WXYZ for compatibility
                 "rest_quat_wxyz": [
                     round(float(q[3]), 6),
                     round(float(q[0]), 6),
@@ -160,7 +160,7 @@ def skeleton_from_header(header, family):
             }
         )
         if i in vols:
-            # optional (2026-10): present only on bones that carry volumes
+            # optional: present only on bones that carry volumes
             bones[-1]["collision_volumes"] = vols[i]
     return {
         "family": family,
@@ -197,8 +197,7 @@ def _tree_stats(sk):
 def collect(naz):
     """{family: skeleton} of the `*Skeleton.model` headers of an archive, the
     first of a family in (case-sensitive) block order.  Reads the header half
-    of one block at a time (a skeleton is all header); 1.4.0 held every block
-    of the archive, both halves, until it was done."""
+    of one block at a time (a skeleton is all header)."""
     plan = we.block_plan(naz)
     out = {}
     for stem in sorted(plan):

@@ -6,7 +6,7 @@ Target: `KapowMultiDEDRM.exe` (Watchmen: The End Is Nigh Part 2, PC). Companion 
 
 Evidence marks: **[R]** read from code or bytes (address given), **[D]** read from game data (fragment or
 sound header; path given), **[I]** inferred (reason given), **[N]** not established. Fragment paths are
-relative to `E:\Claude\HeyClaude_WatchmenPart2\20260708\extracted\`; they were parsed with
+relative to the extracted game folder (`20260708/extracted/`); they are parsed with
 `tk150/wlib/kapow_fragment.py` (all 28 sound-relevant fragments plus the 302 `SoundEvents` files parse
 to EOF). Script-object member offsets follow the registration order in `reg_dump.json`, 4 bytes each.
 
@@ -31,11 +31,12 @@ to EOF). Script-object member offsets follow the registration order in `reg_dump
    Her animation states carry 166 `SOUND` events on 16 sound definitions (65 states use `swish_08`), 30
    `SPEAK` events and 1179 foot events; 4 `SOUND` events have the speak flag and all 4 are Twilight Lady
    lines (the two share the animation class).
-4. **Extractor.** Three defects were found in today's audio export: (a) 10 of the 13 PC music `.ogg`
-   files are multi-track streams whose tracks were appended chunk by chunk into one stream (length =
-   tracks x real length); (b) all 35 stereo sounds are written at 44100 Hz although their header says
-   about 48000 Hz; (c) PCM sounds are read 4 bytes late. Loop flags (55 sounds), cue points (music
-   only), track names and the 14 localised `_uk` text assets are not exported.
+4. **Extractor.** Facts an audio export has to respect (section 6): (a) 10 of the 13 PC music
+   streams are multi-track; the tracks are interleaved chunk by chunk and must be de-interleaved
+   (appended into one stream they give length = tracks x real length); (b) the 35 stereo sounds play
+   at the rate in their header (about 48000 Hz), only the mono sounds are 44100 Hz; (c) PCM sample
+   data starts at `pe+26`, directly after its byte count. Loop flags (55 sounds), cue points (music
+   only), track names and the 14 localised `_uk` text assets are data an export must carry.
 
 ## 1. Data model
 
@@ -114,7 +115,7 @@ resident while their block is loaded. Bordello's block lists 843 `sound` assets
 (`KAPOW_NAZ_FORMAT.md` line 254) [D]. `SoundPackageCtrl` is **not** a bank loader: it is one row of
 the collision-sound matrix (its `initialize_local` 0x83304e builds a lookup list of its
 `SoundEffectType` children) [R]. Music is streamed from loose `derived_pc/sounds/music/**.mediastream_s`
-files (13) [D]. Which block holds which character's voice files was not tabulated [N].
+files (13) [D]. Which block holds which character's voice files is not tabulated [N].
 
 ### 1.5 Mix groups and global values [D]
 
@@ -153,9 +154,9 @@ Dominatrix voice definitions are in `VoiceEnemies`; her combat sounds in `Player
 
 Sound events come from two places [D]: `AnimationEventWM` nodes inside the state, and the
 `SoundEvents/SE_<clip>.fragment` list that the state includes (a `FragmentNode` under the state's
-`Events` folder; all 302 `SE_*` files are referenced by at least one state). The exporter's
-`anim_meta` already lists both with times but drops `_etarget00`, `m_ivalue00` and `m_ttruth1`;
-`wp6_sound_tables.json` `state_sound_events` adds them for all five body classes.
+`Events` folder; all 302 `SE_*` files are referenced by at least one state). `wp6_sound_tables.json`
+`state_sound_events` lists both kinds with times and the event fields `_etarget00`, `m_ivalue00` and
+`m_ttruth1` for all five body classes (`anim_meta` carries the same fields).
 
 ### 2.2 Footsteps (0x6a533a; decompile of 0x6a525e lines 1545-1775) [R]
 
@@ -238,7 +239,7 @@ M = `m_tallowmultipleevents`, P = `m_tignoreplayerspeakevents`, N = `m_tignoreno
 
 So **one exclusive line at a time per conflict class, one line of any kind per speaker, and grunts
 from different speakers in parallel** - not a single global speaker. Priorities (`m_ipriority`,
-`SPEAK_PRIORITY` A..E) are copied into the record but no comparison on them was found in `Active` [R
+`SPEAK_PRIORITY` A..E) are copied into the record but `Active` makes no comparison on them [R
 for the copy, N for any use elsewhere].
 
 **Interruptions** [R]: `command_stop_speak_and_quarantine(character)` 0x83ca38 stops the voice and
@@ -262,11 +263,11 @@ is Rorschach (type 0), B = Nite Owl (type 1) [R: `AttackEnemy.command_may_attack
 | 32 `DEATH` | `CharacterRoot.StateDead` 0x6bb1c1 | death, unless `m_tnodeathscream` |
 | 2 `TAUNT_TARGET_KILLED` | `CharacterRoot.command_you_killed_me` 0x690077 | sent to the killer |
 | 40, 43, 44 `SPECIAL_GROUP_3 / 6 / 7` | `SPEAK` events: jump and get-up states (40), thrown (43), one more (44) | animation |
-| 8 / 9 `TAUNT_COUNTER_ATTACK_A/B` | only `UnderbossPhase1.command_hit_by` 0x888e62 sends 8 | no sender for the Dominatrix was found: [N] |
+| 8 / 9 `TAUNT_COUNTER_ATTACK_A/B` | only `UnderbossPhase1.command_hit_by` 0x888e62 sends 8 | no sender for the Dominatrix is known: [N] |
 | 1 `TAUNT`, 3 `TARGET_SPOTTED`, 5 `ENGAGEMENT`, 6 `MELEE`, 10 / 11 / 15 | `AttackEnemy.command_taunt` 0x6006d8, `AttackEnemy.StateActive` 0x5ffab0, `Enemy.SetState` 0x715404, `Enemy.StateActive` 0x725535, partner classes | **not defined for the Dominatrix, Gimp, Knot-Top or Twilight Lady groups** (their definitions start at id 8); these requests end at step (1). Only the Rorschach and Heavies groups define ids 0 - 7 [D] |
 
-`36 DAMAGED_GRENADE` and `37 DAMAGED_ELECTRIFY` have definitions and waves but no sender was located
-(the flash-grenade / electrify cases of the event handler were not searched) [N].
+`36 DAMAGED_GRENADE` and `37 DAMAGED_ELECTRIFY` have definitions and waves but no sender is located
+(the flash-grenade / electrify cases of the event handler are not searched) [N].
 
 ### 2.4 Combat: attack start and hits
 
@@ -274,7 +275,7 @@ is Rorschach (type 0), B = Nite Owl (type 1) [R: `AttackEnemy.command_may_attack
 `CharacterSoundDef.command_play_attack_start_pos(root, index)` 0x679525: if the character holds a
 weapon (`root+0xd4`) the weapon effect, else list[index] (list built in `initialize_local` 0x6764ff:
 0 = heavy, 1 = light) -> `EffectCtrl.command_fire_effect` at the character's centre. The caller of
-`PlayAttackStartEffects` (it is invoked through the class method table) was not located [N].
+`PlayAttackStartEffects` (it is invoked through the class method table) is not located [N].
 Dominatrix [D: `EffectDb.fragment` folder `EnemyCombatEffects`]:
 
 | Effect | Sound | Speak |
@@ -287,7 +288,8 @@ The whoosh itself is an animation `SOUND` event (`swish_08` etc., table 2.6), no
 
 **Hits** - `CharacterEffectDef.command_play_damage_effect` 0x6673d0 (rule read in
 `dominatrix_audit.md` section i: rage hit -> uber list; killing hit -> kill list; weapon hit -> list by
-the weapon's effect type (wood, steel; sharp adds its own effect); else light poses 1, 2, 5, 6, 23, 24
+the weapon's effect type (wood, steel, sharp; taser first fires effect id 1, wp7_fx_camera_hud.md
+1.3); else light poses 1, 2, 5, 6, 23, 24
 -> fast list, other poses -> heavy list; upper-body pose -> head list, else body list; knockdown poses
 17, 18, 27, 28 add `Knockdown`; stun poses 19 - 22 add `Stun`). Each effect fires its children:
 `EffectSound.Fire` 0x714d1f (placement 1 `POS_AND_ORIENT` -> `PlayPos`, 0 `ENTITY` -> `PlayPivot`) and
@@ -316,7 +318,7 @@ attached to the character and do not count as "the character is playing a sound"
 **Ragdoll contacts** - `CharacterVisual.ModelCollisionContactAdded` 0x69d00a [R, skimmed]: surface from
 model or texture as for footsteps, `get_sound_in_package_based_on_enum`, volume from
 `WorldLib.GetVolumeBasedOnContactForce`, then `apply_effect`. The effect-type constants per body part
-(`RAGDOLL_HEAD/BODY/ARM/FOOT`, 2 - 5, which all default to row `GENERIC_RAGDOLL`) were not read out [N].
+(`RAGDOLL_HEAD/BODY/ARM/FOOT`, 2 - 5, which all default to row `GENERIC_RAGDOLL`) are not read [N].
 
 **Other sources** [R, callers of the play commands]: `LoudSpeaker.PlaySound` 0x779ded (ambience
 emitters), `TriggerActionSound.TriggerSoundPlay` 0x853e88 (level script; on an entity with
@@ -417,7 +419,8 @@ priority; then the voice object is created. A hardware voice is started only whi
 playing count is below `+0x10`, or else if `FUN_0044857d` finds a playing voice with priority <= the new one to stop (a looping
 3D victim is only made virtual); if neither, a looping 3D sound stays virtual and anything else is
 discarded. Priority 0 sounds are never victims. All 3845 shipped definitions have `Priority` 1 [D], so any
-playing sound can be the victim: the first one in the voice list (whether that list is oldest-first was not checked [N]). The numeric limits are not set in the constructors
+playing sound can be the victim: the first one in the voice list (whether that list is oldest-first is
+not established [N]). The numeric limits are not set in the constructors
 (0x44a22d, 0x44a7d7) and the `maxVoices` property setter is an empty stub; their run-time values are
 [N]. There is no per-definition "max instances" property.
 
@@ -592,7 +595,7 @@ Durations are sample count / sample rate from the sound asset headers; all speec
 | death (32) | 32 | 7 | 0.66 | 0.97 | 1.46 |
 | special groups (38-49) | 39, 40, 41, 42, 43, 44, 45, 46 | 16 | 0.50 | 1.26 | 3.28 |
 Body classes of Gimp, Thug, ThugFast, Heavies (`Enemy01`) and ThugBig (`EnemyBig`) are [I] (not checked
-against the character fragments here); Dominatrix / Twilight Lady = `Enemy04` is [D]
+against the character fragments); Dominatrix / Twilight Lady = `Enemy04` is [D]
 (`dominatrix_audit.md`, `face_map.json`).
 
 ### 4.3 What the JSON gives the face rule
@@ -632,8 +635,7 @@ Property bag of the asset class (`SoundAsset` registration 0x552716): `looping`,
 
 Counts [D]: 2687 MS-ADPCM, 40 PCM16; 55 looping (ambience loops, heart beats, trash-can roll, menu
 music, four `PornoMusic` loops); 47 non-3D. 192 speech headers (Rorschach, Twilight Lady, some Nite
-Owl) could not be read in the scan (the PC folder walk skipped them) and are covered only by the
-decoded lengths.
+Owl) are not in the header scan and are covered only by the decoded lengths.
 
 **Decode** [R, 0x40271b]: the engine does not decode. It fills a `WAVEFORMATEX` - tag 1, 16 bit, or
 tag 2 (`WAVE_FORMAT_ADPCM`) with `wBitsPerSample` 4, `cbSize` 32, 7 coefficient pairs copied from the
@@ -645,7 +647,7 @@ infinite over `LoopLength` = the asset's sample count, from sample 0: there are 
 
 Voices flagged at `+0x10c` are created at the device rate with a frequency ratio of asset rate /
 device rate (`+0x110`), and taken from a pool of pre-created voices when one is available
-(0x4026dc); others are created at the asset rate. Which sounds get the flag was not traced [N]; the
+(0x4026dc); others are created at the asset rate. Which sounds get the flag is not traced [N]; the
 data pattern (every mono sound resampled to 44100 at bake time, stereo ones left at their own rate)
 suggests the pooled path is the mono one [I].
 
@@ -707,7 +709,7 @@ max(a) / (a_0 + a_1). Each listener's pan x a_i x g0 / (1 + `multiListenerGenera
 left and listener 1 towards the right; with `multiListenerDisableOrientationPanning` the pan is
 replaced by L / R = 0.5 (1 +- s), surrounds 0.4 (1 +- s). Doppler = sqrt of the product of both ratios
 unless `multiListenerDisableDoppler`. So there is no "chosen" listener: both players hear a mix. Who
-places the listeners (camera or character) was not read [N].
+places the listeners (camera or character) is not read [N].
 
 ### 5.4 The four XAPO effects (Process = vtable slot 10)
 
@@ -732,7 +734,7 @@ Per frame per 3D voice with `enableObstructionAndOcclusion` (0x447546) [R]:
   the listener set changed.
 - **Obstruction** `+0xd8` = `obstructionFactor` (0.5) x `FUN_0044d949`: the segment listener ->
   source is tested against the obstructor boxes (`_tobstructor`), only when there is exactly one
-  listener; accumulation details and the worker job were not read [N beyond that].
+  listener; accumulation details and the worker job are not read [N beyond that].
 - **Reverb**: each zone names a `SoundEffectDefinitionNode`; applying a definition of type
   `xaudio2_i3dl2_reverb` converts the 12 I3DL2 values to the native reverb parameters (0x402c18),
   `SetEffectParameters`, enables the effect and sets the reverb voice volume to the definition's
@@ -795,28 +797,28 @@ longer than `m_nmaxplaytime`, p restarts at 1. If L = 0, p = 0 at once. p = 0 pl
 default state (or the "next default" set by a trigger, once); p > 0 plays the definition's level p
 via `command_set_music_track_state_from_reference` 0x830810 -> `MusicPlayer.track_switch` 0x7cf77c,
 which fades each track to its volume over `fade_time`, at once or at the next cue point when
-`change_on_cue` is set (`cue_point_event` 0x7cfb52; the queueing code was not read [N]).
+`change_on_cue` is set (`cue_point_event` 0x7cfb52; the queueing code is not read [N]).
 Level script can override with `TriggerActionSound` actions 8 - 12.
 
 **Stream decode** [I]: `MediaStream*` / `PcmStreamTrack` / `SoundStreamSink` classes
 (0x44bb26 - 0x450bc7) and the embedded Vorbis decoder feed stream voices; a stream voice (no asset)
-allocates a 0x12000-byte PCM buffer (0x40271b) [R for the buffer]. The packet path was not read.
+allocates a 0x12000-byte PCM buffer (0x40271b) [R for the buffer]. The packet path is not read [N].
 
-## 6. Extractor consequences
+## 6. Extractor requirements
 
-### 6.1 Defects in today's audio export
+### 6.1 Facts the audio export has to respect
 
-| # | Finding | Evidence | Fix |
+| # | Fact | Evidence | Rule for the export |
 |---|---|---|---|
-| E1 | **Multi-track music is flattened.** A PC `.mediastream_s` is a sequence of groups; each group holds one chunk per track, and every track's first chunk starts with its own three Vorbis header packets. `_audio_packets()` (`watchmen_extract.py` 3199) walks all packets in file order, keeps the first header triplet and appends every other packet, so the `.ogg` contains chunk 0 of track 0, chunk 0 of track 1, ... then chunk 1 of track 0 ... 10 of the 13 streams have 2 - 7 tracks | [D] `files/derived_pc/sounds/music/04_underground/underground_part1/underground_track0.mediastream_s`: header triplets (first bytes 1, 3, 5) at offsets 0, 51158, 94502, 145159, 192100 = cumulative chunk sizes 51158, 43344, 50657, 46941, 51002 listed in the descriptor `extracted/sounds/Music/04_Underground/underground_part1/Underground_track0.wav` (class `mediastream`: track count 5, per track source name, 2304001 samples, 2 ch, 48000 Hz). Decoded lengths: Underground 239.8 s = 5 x 48.0; `l4_a` 74.7 s = 7 x 10.67; `str_p2` 153.7 s = 7 x 21.94 | De-interleave: the descriptor gives, after the stream path, [u32 m][u32 chunk size x tracks] for group 0; each group is followed by a link record of the same shape for the next group, m = sum(sizes) + 4 x (tracks + 1) - seen at offset 243102: m = 227488, sizes 47960, 39138, 47359, 42291, 50716. This is the link format `WATCHMEN_EXTRACTION_MASTER.md` already documents for the console streams. Write one `.ogg` per track, named from `MusicStreamSlot.track0..9`, with a sidecar of cue points |
-| E2 | **Stereo sounds have the wrong rate.** `decode_sfx()` (line 3873) writes 44100 Hz for every sound. The real rate is the u32 at `pe+14`; `pe+6` is the original rate. All 2692 mono sounds are 44100, but all 35 stereo sounds are 43937 ... 48016 (25 of them about 48000): music stingers (`Music/*fx*`, `SpecialMoves/ComboEffect_*`, `main_volumen_music`), `ExplosionCar_0n_st`, `ExplosionAndFire` | [R] loader 0x449e40 field order; voice creation 0x40271b uses asset `+0x18` as rate. [D] `work/wp6/rawhdr.tsv` | read the rate at `pe+14` |
-| E3 | **PCM data is read 4 bytes late.** PCM layout is samples `pe+18`, byte count `pe+22`, data `pe+26`; the extractor slices from `pe+30`, losing the first two samples and running 4 bytes into the cue count (40 PCM files) | [R] 0x449e40; [D] `Character/Footstep/Medium_stepsdirt_L_01.wav`: `pe+22` = 0x8220 = 2 x samples 0x4110, data follows at once | slice `pe+26 .. pe+26+bytes` |
-| E4 | The comment "the engine resamples every PC sound to 44100" is true for mono sounds only (bake-time `pcSampleRate`), see E2 | same | reword |
+| E1 | **Music streams are multi-track.** A PC `.mediastream_s` is a sequence of groups; each group holds one chunk per track, and every track's first chunk starts with its own three Vorbis header packets. Walking all packets in file order, keeping the first header triplet and appending every other packet yields an `.ogg` holding chunk 0 of track 0, chunk 0 of track 1, ... then chunk 1 of track 0 ..., with length = tracks x real length. 10 of the 13 streams have 2 - 7 tracks | [D] `files/derived_pc/sounds/music/04_underground/underground_part1/underground_track0.mediastream_s`: header triplets (first bytes 1, 3, 5) at offsets 0, 51158, 94502, 145159, 192100 = cumulative chunk sizes 51158, 43344, 50657, 46941, 51002 listed in the descriptor `extracted/sounds/Music/04_Underground/underground_part1/Underground_track0.wav` (class `mediastream`: track count 5, per track source name, 2304001 samples, 2 ch, 48000 Hz). Decoded lengths of the flattened form: Underground 239.8 s = 5 x 48.0; `l4_a` 74.7 s = 7 x 10.67; `str_p2` 153.7 s = 7 x 21.94 | De-interleave: the descriptor gives, after the stream path, [u32 m][u32 chunk size x tracks] for group 0; each group is followed by a link record of the same shape for the next group, m = sum(sizes) + 4 x (tracks + 1) - seen at offset 243102: m = 227488, sizes 47960, 39138, 47359, 42291, 50716. This is the link format `WATCHMEN_EXTRACTION_MASTER.md` documents for the console streams. Write one `.ogg` per track, named from `MusicStreamSlot.track0..9`, with a sidecar of cue points (`_audio_packets()` in `watchmen_extract.py` is the packet reader) |
+| E2 | **Stereo sounds have their own rate.** The playback rate is the u32 at `pe+14`; `pe+6` is the original rate. All 2692 mono sounds are 44100, but all 35 stereo sounds are 43937 ... 48016 (25 of them about 48000): music stingers (`Music/*fx*`, `SpecialMoves/ComboEffect_*`, `main_volumen_music`), `ExplosionCar_0n_st`, `ExplosionAndFire`. Writing 44100 Hz for every sound is wrong for the stereo ones | [R] loader 0x449e40 field order; voice creation 0x40271b uses asset `+0x18` as rate. [D] `work/wp6/rawhdr.tsv` | read the rate at `pe+14` (`decode_sfx()` in `watchmen_extract.py`) |
+| E3 | **PCM data starts at `pe+26`.** PCM layout is samples `pe+18`, byte count `pe+22`, data `pe+26`; slicing from `pe+30` loses the first two samples and runs 4 bytes into the cue count (40 PCM files) | [R] 0x449e40; [D] `Character/Footstep/Medium_stepsdirt_L_01.wav`: `pe+22` = 0x8220 = 2 x samples 0x4110, data follows at once | slice `pe+26 .. pe+26+bytes` |
+| E4 | "The engine resamples every PC sound to 44100" holds for mono sounds only (bake-time `pcSampleRate`), see E2 | same | - |
 
 Speech durations are not affected by E1 - E3 (all speech is mono ADPCM at 44100; the decoded frame
 counts equal the header sample counts for all 2727 headers compared).
 
-### 6.2 Present in the data, not exported
+### 6.2 Data the export has to carry
 
 - **Loop flag** (`pe+0`): 55 sounds. Loops are whole-sample; no loop points exist. Export as
   `"loop": true` in a sidecar or a `smpl` chunk covering the file.
@@ -825,9 +827,9 @@ counts equal the header sample counts for all 2727 headers compared).
   position, e.g. 17 x `click1` in Underground track 0, `Perc_01` / `LongMelody` in `str_p2`). They are
   what `MusicTrackCtrl.change_on_cue` refers to.
 - **Track names and track states** of the music (`MusicStreamSlot.track0..9`, `MusicTrigger`,
-  `MusicTrackCtrl`): in the fragments, not attached to the audio output.
-- **Sound definitions**: everything in section 1.2 is in the fragments (already parsed to
-  `.fragment.json`), but nothing joins a wave to its definitions, group, variations or events.
+  `MusicTrackCtrl`): in the fragments, not in the audio data.
+- **Sound definitions**: everything in section 1.2 is in the fragments (parsed to `.fragment.json`);
+  the join of a wave to its definitions, group, variations and events is the `sounds` table of 6.3.
 - **Language variants**: audio is not switched by the six language slots. 2125 of 2934 waves end in
   `_uk.wav` and no other language suffix exists in the PC data [D]; the slots matter only for the 14
   localised `_uk` text assets of the main block (`KAPOW_NAZ_FORMAT.md` 2.1). Those text assets -
@@ -838,14 +840,14 @@ counts equal the header sample counts for all 2727 headers compared).
   `SubtitleHUD.command_get_subtitle_slot_for_sound_slot` 0x8492fa (native
   `SubtitleSlot::HasSubtitleForSoundSlot` 0x4d91bf, `GetIndexFromSoundSlotAndTime` 0x4da3e7) and shows it,
   which also triggers the damping of 5.6 [R]. The text-resource format and the key that links a line to
-  a sound were not read [N].
-- **Naming**: wave names are the asset paths and are correct. The music files are named
-  `<x>_track0.mediastream_s.ogg` although they hold all tracks (E1). Three voice folders are shared
+  a sound are not read [N].
+- **Naming**: wave names are the asset paths and are correct. Music files are named after the
+  `<x>_track0.mediastream_s` stream; one output per track (E1). Three voice folders are shared
   across characters by the definitions (the Dominatrix voices Dom2 and Dom3 point at the same
   `EN4_DOM2_*` damage waves; her death line uses Dom1 files for all voices) - that is data, not a
   labelling error.
 
-### 6.3 Proposed `sounds` section of the character metadata
+### 6.3 `sounds` section of the character metadata (reference shape)
 
 ```json
 "sounds": {
@@ -871,10 +873,10 @@ counts equal the header sample counts for all 2727 headers compared).
 
 All of it can be produced from the fragments alone with the rules of sections 1 - 3
 (`work/wp6/lib.py` `tree()` / `res()` are a reference implementation; durations need the wave headers).
-`wp6_sound_tables.json` already holds these tables for the ten character definitions. Glue needed in
-the toolkit: resolve `[instance id, node id]` references per fragment (1.3), keep the event fields
-`_etarget00`, `m_ivalue00`, `m_ttruth1` in `anim_meta`, and add the speak category to the face rule so
-that only category 1 lines and speak-flag `SOUND` events create talk segments.
+`wp6_sound_tables.json` holds these tables for the ten character definitions. The toolkit side needs:
+resolve `[instance id, node id]` references per fragment (1.3), keep the event fields `_etarget00`,
+`m_ivalue00`, `m_ttruth1` in `anim_meta`, and use the speak category in the face rule so that only
+category 1 lines and speak-flag `SOUND` events create talk segments.
 
 ## 7. Not established
 
@@ -889,11 +891,11 @@ that only category 1 lines and speak-flag `SOUND` events create talk segments.
 | Numeric voice limits (sound system +0x0c / +0x10 / +0x14) and which voices are pooled (`+0x10c`) | find the writers (not in the constructors; probably the platform init or `SoundSystemNode` start-up) |
 | Listener placement (camera or character) and update | read `SoundSystemNode` listener setters and their script callers |
 | Obstruction geometry and its worker job; zone weights and reverb cross-fade (`_nfadedepth`) | `FUN_0044d949` (3.1 kB), the "sound obstruction" job, `SoundCtrl.command_get_environment_effect` 0x82fd34 and its caller |
-| Equalizer coefficient formulas and the parameters of the shipped `equalizer` / `compressor` definitions (none found in `EffectDefinitions`: only reverbs) | 0x4038d3 (714 bytes); search fragments for definitions named `equalizer` / `compressor` |
+| Equalizer coefficient formulas and the parameters of the shipped `equalizer` / `compressor` definitions (`EffectDefinitions` holds only reverbs) | 0x4038d3 (714 bytes); search fragments for definitions named `equalizer` / `compressor` |
 | Slow-motion and pause effect on pitch (stated as "none" by absence) | check `SceneNode.SetTimeMultiplier` consumers in the sound nodes |
 | Music cue queueing (`MusicPlayer.cue_point_event` 0x7cfb52, `track_switch` 0x7cf77c), exact nesting of the intensity thresholds | read both handlers and re-read 0x7ce905 in disassembly |
 | PC stream decode path (Vorbis packets -> PCM -> stream voice), link-record format of `.mediastream_s` | `MediaStreamTrack` / `PcmStreamSink` (0x44bd20 ...), and parse two more streams against their descriptors |
 | Subtitle text-resource format and its sound key; extraction of the 14 localised text assets | parse a `textRes` header blob from the block's localized directory |
 | `m_tmissionspeak` (97 definitions) and `SoundDef.command_play_activator` 0x831e22 (sound controller request, fades) | read 0x831e22 (737 bytes) and `SoundDef.Active` subtitle branch |
-| 192 speech headers not scanned (Rorschach, Twilight Lady, part of Nite Owl) | rerun `rawhdr` scan on those folders; their durations currently come from the decoded files (mono, so correct) |
+| 192 speech headers not scanned (Rorschach, Twilight Lady, part of Nite Owl) | rerun the `rawhdr` scan on those folders; their durations come from the decoded files (mono, so correct) |
 | Body class of Gimp / Thug / Heavies entries in the JSON | read `m_eanimationdata` of the ten character fragments |

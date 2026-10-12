@@ -1,6 +1,6 @@
 # Exported materials beside captured game frames
 
-One measurement, made on 2026-10-07 on the PC Part 2 export
+One measurement on the PC Part 2 export
 (`characters_v1.4.0/*.glb`, `--materials engine`) and three frames of the
 Bordello capture `KapowMulti.1.trace` (see `tools/apitrace/README.md`). The
 scripts and pictures are not part of the toolkit.

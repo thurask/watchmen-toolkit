@@ -1,8 +1,8 @@
-# File formats — closing the documented unknowns from the engine's loaders
+# File formats — what the engine's loaders establish
 
 Target: `KapowMultiDEDRM.exe` (PC, image base 0x400000). Evidence levels: **read from code** (traced in
-disassembly/decompilation, address given), **validated** (additionally reproduced on real files through the
-read-only device share), **inferred**, **not established**.
+disassembly/decompilation, address given), **validated** (additionally reproduced on real files, read-only),
+**inferred**, **not established**.
 
 Companion files:
 
@@ -19,18 +19,23 @@ Companion files:
 report is one of them (`FUN_00545927`, `FUN_00542541`, `FUN_004a36d8`, `FUN_004a3525`, `FUN_005382aa`,
 `FUN_005415bf`, `FUN_0047e126` …). They were read from disassembly (`work/formats/d.py VA`).
 
-**Doc corrections that fall out of this (details below):**
+**Summary (details below):**
 
-| Doc statement | What the code says |
+| Item | What the code says |
 |---|---|
-| `ReadVec4 = 0x4354a8` | It reads **12 bytes** (vec3). 16-byte reads are `0x4354d1` / `0x43553c`. `0x4353e9` is ReadBool (`==1`), `0x435403` ReadU8. |
-| `kapow_hash` uppercases | Engine `FUN_00423ce8` ANDs **every** byte with `0xDF`. Identical for letters, different for digits and punctuation — which is exactly why the two type hashes never resolved. |
-| u32 after the type name is "classId/version" (0x2D, 0x5B) | It is the **dword count of the property bag** (`FUN_00511f96`). Body starts at `4 + nameLen + 4 + 4*N`. |
-| Six copies per TOC entry are per **platform** | Slot index is the current **language** (`FUN_0045c762`, same index the loader logs as "language: %s"). |
-| Directory starts at 399 with a sentinel flag; stream binding is a "+1 trailer shift" | Fixed header is exactly **400 bytes**; the stream pair is the **tail of its own record**. |
-| Texture image descriptor is ~30 bytes with "drift" | 29-byte descriptor + **1 presence byte per optional slot** (8 slots per frame). |
-| `.sequence` first float is a version (1.0/6.0/20.0) | It is **durationSec**. |
-| Stride-16 "baked env mesh, int16 positions" | No vertex declaration in the exe has a SHORT element; format 3 (stride 16) is `FLOAT2 pos + FLOAT2 uv`. |
+| Stream readers | `0x4354a8` reads **12 bytes** (vec3). 16-byte reads are `0x4354d1` / `0x43553c`. `0x4353e9` is ReadBool (`==1`), `0x435403` ReadU8. |
+| Name hash | Engine `FUN_00423ce8` ANDs **every** byte with `0xDF`. Identical to upper-casing for letters, different for digits and punctuation. |
+| u32 after the type name (0x2D, 0x5B) | The **dword count of the property bag** (`FUN_00511f96`). Body starts at `4 + nameLen + 4 + 4*N`. |
+| Six copies per TOC entry | Slot index is the current **language** (`FUN_0045c762`, same index the loader logs as "language: %s"). |
+| Block directory | Fixed header is exactly **400 bytes**; the directory starts at 400; the stream pair is the **tail of its own record**. |
+| Texture image descriptor | 29-byte descriptor + **1 presence byte per optional slot** (8 slots per frame). |
+| `.sequence` first float | **durationSec**. |
+| Stride 16 | No vertex declaration in the exe has a SHORT element; format 3 (stride 16) is `FLOAT2 pos + FLOAT2 uv`. |
+
+Ruled out (readings that older descriptions used): `ReadVec4 = 0x4354a8`; a `kapow_hash` that uppercases; "classId/version"
+for the bag dword count; six copies per **platform**; a directory starting at 399 with a sentinel flag and a "+1 trailer
+shift" for the stream binding; a texture descriptor of ~30 bytes with "drift"; a `.sequence` version float (1.0/6.0/20.0);
+a stride-16 "baked env mesh, int16 positions".
 
 ---
 
@@ -46,11 +51,11 @@ Loader: state machine `FUN_004a36d8` (loadblock.cpp), started by `FUN_004ae0fd`;
 | file off | type | field | what the engine does | evidence |
 |---|---|---|---|---|
 | 0x000 | f32[8] | bounds (2 × vec4) | copied to `LoadBlock+0x180` (`FUN_0042af16`, call at 0x4a3cad) | read from code |
-| 0x020 | u32 | ? (0x79D3E0DA in bordello) | no reader found | not established |
+| 0x020 | u32 | version signature (0x79D3E0DA in bordello) | CRC over `"8"` and each asset class's version, `FUN_0049db60`; the computed value is discarded at 0x4a3b63 (see 0x148) | read from code |
 | 0x024 | char[36] | GUID text | no reader found | not established |
 | 0x048 | char[255] | **fingerprint**, encrypted C string | `FUN_0049dd0e` decrypts in place with a 3-LFSR stream cipher (`FUN_00405a31/00405a8b/00405b1e`), key `"1E564E3B-D243-4ec5-AFB7"`, stores at `LoadBlock+0x1d4` | read from code + **validated**: bordello decrypts to `THIS IS THE DEFAULT FINGERPRINT KEY, PLEASE CHANGE IT!` |
 | 0x147 (327) | u8 | `2` | copied to `LoadBlock+0x1e4` (0x49dd59) | store read from code; meaning not established |
-| 0x148 (328) | 4 bytes | `0a 88 3f 59` | never read by the loader; the same bytes on the big-endian consoles, so not a platform-order integer | bytes read from data; meaning not established. **Not** the version signature (this row said so until 2026-10-05, as an inference): that CRC over `"8"` ("Block version: 8") and each asset class's version (`FUN_0049db60`, result discarded at 0x4a3b63) is the u32 at 0x020 (`0x79D3E0DA` in Part 2 and PS3 Part 1, `0xEE1FB0A3` in PC / X360 Part 1) |
+| 0x148 (328) | 4 bytes | `0a 88 3f 59` | never read by the loader; the same bytes on the big-endian consoles, so not a platform-order integer | bytes read from data; meaning not established. Not the version signature: that CRC over `"8"` ("Block version: 8") and each asset class's version (`FUN_0049db60`, result discarded at 0x4a3b63) is the u32 at 0x020 (`0x79D3E0DA` in Part 2 and PS3 Part 1, `0xEE1FB0A3` in PC / X360 Part 1) |
 | 0x14C (332) | u32 | tablesSize | size of read #2 | read from code |
 | 0x150 (336) | u32 | **unk1** = header-blob size of entry 0 | size of read #3 (0x4a3b20) | read from code + validated (2903 = entry 0) |
 | 0x154 (340) | u32 | **unk2** = I/O buffer size | both ping-pong buffers are allocated with it (0x4a3be7, 0x4a3c2d); the directory is read into the same buffer | read from code + validated: `max(tablesSize, largest blob)` |
@@ -81,11 +86,11 @@ if hasStream: 6 x { u32 offset, u32 size }    -> stream entry: offset[6] at +0x1
   and the per-language offset table). On Part 2 PC data all six are equal (validated: 0 differing entries in
   bordello). Which slot the *stream* reader uses was not traced (inferred: the same language index).
 
-**Proposed toolkit change:** `parse_block_toc`: start at 400, read `[6 sizes][hash][name][u8 hasStream][6 pairs]`,
-bind the pair to its own entry, drop the +1 shift; rename `unknown` → `type_hash`; pick slot by language when
-slots differ (localized entries, e.g. `watchmenpart2` `_uk` text and the `mainmenu` logo). Expose
-`entry0Size / bufSize / trailerOff / trailerSize / numLocalized / langHeaderOff`. Reference:
-`parse_block_header()`.
+**Toolkit:** `watchmen_extract.parse_block_toc` starts at 400 (`BLOCK_HEADER_SIZE`), reads
+`[6 sizes][hash][name][u8 hasStream][6 pairs]`, binds the pair to its own entry, exposes `type_hash` and picks the
+slot by `language` when slots differ (localized entries, e.g. `watchmenpart2` `_uk` text and the `mainmenu` logo).
+`parse_block_header()` returns the fixed header (`tables_size`, `num_localized`, `num_streams`,
+`language_header_offset`, …). Reference: `formats_ref_parsers.parse_block_header()`.
 
 ---
 
@@ -99,8 +104,9 @@ slots differ (localized entries, e.g. `watchmenpart2` `_uk` text and the `mainme
 | `0xd8c06967` | `pivotbook` | hash match (bonus) |
 | `0x48d86c33` | `aipathdata` | hash match (bonus) |
 
-Why earlier brute force failed: `FUN_00423ce8` masks every byte with `0xDF`, so `(` and `)` hash as 0x08/0x09.
-`kh.py` and `kapow_props.kapow_hash(name.upper())` are only correct for names made of letters and `_`.
+`FUN_00423ce8` masks every byte with `0xDF`, so `(` and `)` hash as 0x08/0x09; a brute force built on
+`name.upper()` (the old `kh.py`, `kapow_props.kapow_hash(name.upper())`) is only correct for names made of letters
+and `_` and cannot find these.
 
 **Loader.** These are script (TNT) classes derived from a native asset class. Registration:
 `FUN_007b0053` → `FUN_0047e126(desc, "ModelEffects", 0x26, "ModelRes", …)` and `FUN_00848a1b` →
@@ -116,8 +122,8 @@ and 28 `TextureEffects` textures):
 - `TextureEffects(Texture)`: bag is 55 dwords vs 45 → two extra records, `0x4d10a1c1` (Collision Effect Type)
   and `0x2a1529e3` (Special Collision Effect Type). Then the Texture body of §5.1.
 
-**Proposed toolkit change:** add the two names (and the three bonus ones) to the type table; make the hash
-`byte & 0xDF`; compute the body offset from the bag dword count instead of assuming 196 for textures.
+**Toolkit:** the five names are in the asset-type table (`watchmen_extract.asset_type_name`); `kapow_props.kapow_hash`
+folds with `byte & 0xDF`; the body offset comes from the bag dword count (not a fixed 196 for textures).
 
 ---
 
@@ -130,8 +136,8 @@ Declarations are created in `FUN_0045544e` (11 × `CreateVertexDeclaration` into
 selected with `SetVertexDeclaration(device[0x79c + fmt*4])` (part_0002.c:13373). All read from code; element
 tables dumped from exe bytes into `formats_vertex_decls.json`.
 
-The **format id is stored in the file**: it is the third u32 of the vertex-buffer descriptor (the field the
-docs call `G`). `G=5/6` were never "element counts".
+The **format id is stored in the file**: it is the third u32 of the vertex-buffer descriptor (the field older
+descriptions call `G`); it is not an element count.
 
 | fmt | stride | elements (offset: type usage) | used by |
 |---|---|---|---|
@@ -183,10 +189,10 @@ u32 nParts { Part }                            FUN_00545927, 0x74-byte objects
 ```
 vec3 pos · 16 bytes quat · string name · u32 u2c · u32 u70
 u32 nLods { u32 nSub { Submesh } }
-u32 nGroups { u32 n { bool b; u32 v; MeshBufferHeader } }     shadow hulls (fmt 9 / 10)
-bool has; if has: MeshBufferHeader                            extra fmt-5 buffer (79 parts)
-2 x [ u32 n { Volume; vec3; vec4; u32 size; size bytes } ]    collision volumes + cooked blob
-u32 n { u32 k; k x 20 B; u32 nV; nV x 12 B; u32 nI; nI x 4 B }   FUN_00561d1c
+u32 nGroups { u32 n { bool b; u32 v; MeshBufferHeader } }     shadow hulls (fmt 9 / 10); (0, -1) merged hull, (1, i) hull of cloth submesh i (0x544ae4)
+bool has; if has: MeshBufferHeader                            occluder mesh, fmt 5 (79 parts; FUN_0053f9a5)
+2 x [ u32 n { Volume; vec3; vec4; u32 size; size bytes } ]    collision volumes + cooked blob (skeleton_blobs.md)
+u32 n { u32 k; k x 20 B; u32 nV; nV x 12 B; u32 nI; nI x 4 B }   particle emission surfaces, FUN_00561d1c
 ```
 
 `Submesh` = `FUN_00542541` (0x2c-byte record):
@@ -215,7 +221,8 @@ IB: u32 flags · u32 indexBytes  · u32 ix                (FUN_00429f21)
 Flags (read from code): VB/IB `flags` bit 3 = bulk data deferred to the stream blob (forced from the load mode,
 `FUN_00429e11`); bits 0/1 = dynamic (`D3DUSAGE_DYNAMIC`, `FUN_00454159`). In files: 8 on static rigid meshes,
 0 on skinned ones — the data is in the stream blob either way.
-Not established: `b24`, `u28` (0–10 observed), `ix` (1; 0 on 12 vegetation submeshes), `u2c`, `u70`, `b4`, `e4`.
+`ix` is the primitive type: 0 triangle strip, 1 triangle list (table 0xc7f398; 0 on 12 vegetation submeshes).
+Not established: `b24`, `u28` (0–10 observed), `u2c`, `u70`, `b4`, `e4`.
 
 ### 3.4 Stream-blob layout
 
@@ -236,32 +243,32 @@ and the buffer order are **validated**: the sum reproduces the stream length exa
 Not established: how the engine routes these bytes at load time (`FUN_004341f5` consumes a pointer table
 whose producer was not traced), and the unit of the cluster ranges `a, b` (0,150 / 150,303 / …).
 
-### 3.5 What `watchmen_extract.py` gets wrong or skips
+### 3.5 Toolkit (`watchmen_extract.py`, `mesh_loader.py`)
 
-1. **Finds buffers by scanning** (`find_descriptors` pattern match, then a byte-by-byte search for a "sane" VB
-   offset with `_vb_ok` / `_ib_ok`). All offsets are computable; the scan is only needed because shadow hulls
-   and cluster tables sit between render buffers.
-2. **Requires the third IB field == 1** → silently drops the 12 `ix == 0` submeshes (e.g. `Palm_Banana_01`).
-3. **Requires format ∈ {5, 6}** — correct for render meshes, but it then cannot account for the fmt 9/10 bytes
-   it has to skip.
-4. **Merges every LOD** into one mesh (250 parts have 2–3 LODs) and also emits the per-part extra fmt-5 buffer
-   (79 parts) as if it were a render submesh. Whether that extra buffer is a render or a proxy mesh is not
-   established.
-5. **Material binding is guessed** (`submesh_materials` / `extract_materials` regex). The submesh record carries
-   the texture-list index directly.
-6. **Skips** vertex colour (@20), tangent (@28), bitangent (@36), `hasColor`/`hasAlpha`, submesh and part names,
-   per-part pivot `pos`/`quat`. Whether vertices are part-local was not established — check multi-part rigid
-   models before relying on the merged output.
-7. Drops degenerate triangles and reads normals/UVs under `try/except` — unnecessary once offsets are exact.
-8. **Already correct:** positions, normal `half3 @12`, UV `half2 @24`, u16 triangle list, and
-   `rig_glb.decode_skin` on PC (`[46,45,44,47]`, weights `half4 @48`) matches the engine byte for byte.
-9. The docs' "stride-16 baked env mesh with int16 positions" has no counterpart in the exe (§ corrections table).
-   Whatever those bytes are, they are not a vertex format; the 40-byte cluster table and cooked collision blobs
-   are the likeliest misreads (inferred).
+1. **Buffers are located from the header**: `parse_model_header()` + `model_stream_layout()` (the port of
+   `parse_model()` / `model_stream_layout()` from `formats_ref_parsers.py`), which must consume the stream exactly.
+   The descriptor scan (`find_descriptors` pattern match, then a byte-by-byte search for a "sane" VB offset with
+   `_vb_ok` / `_ib_ok`) remains only as a logged fallback for a model whose header path does not apply.
+2. The primitive type (`ix`) is honoured: a strip is decoded as a strip (`index_triangles`), so the 12 `ix == 0`
+   submeshes (e.g. `Palm_Banana_01`) are not dropped.
+3. Render buffers are format 5 / 6; fmt 9/10 shadow hulls and the extra buffer are accounted for in the layout
+   (kinds `render` / `shadow` / `occluder`).
+4. **LOD 0 is exported by default** (`--lod`; 250 parts have 2–3 LODs). The per-part extra fmt-5 buffer
+   (79 parts) is the part's **occluder** mesh for the engine's occlusion culling (0x545927 → `FUN_0053f9a5`
+   "... not supported for occluder"), not a render submesh.
+5. **Materials are bound from the submesh record's texture-list index** (`tex_index`), not from the
+   `submesh_materials` / `extract_materials` regex.
+6. Vertex colour (@20), tangent (@28), bitangent (@36), `hasColor`/`hasAlpha`, submesh and part names and the
+   per-part pivot `pos`/`quat` are decoded. **Vertices are stored part-local**; the OBJ / GLB hold them in model
+   space when the part transforms are applied.
+7. A degenerate triangle (an index repeated) is left out, counted and logged.
+8. Positions, normal `half3 @12`, UV `half2 @24`, u16 triangle list, and `rig_glb.decode_skin` on PC
+   (`[46,45,44,47]`, weights `half4 @48`) match the engine byte for byte.
+9. A "stride-16 baked env mesh with int16 positions" has no counterpart in the exe (summary table). Whatever
+   those bytes are, they are not a vertex format; the 40-byte cluster table and cooked collision blobs are the
+   likeliest misreads (inferred).
 
-**Proposed toolkit change:** replace `find_descriptors` + VB search with `parse_model()` +
-`model_stream_layout()` from `formats_ref_parsers.py`; export LOD 0 only by default; name materials from
-`texIndex`; add colour/tangent attributes. Console layouts were not examined (PC exe only).
+Console layouts were not examined (PC exe only).
 
 ---
 
@@ -297,14 +304,17 @@ key:    f32 time
 | handle layout | per component: in-handle `(time, value)` then out-handle `(time, value)`, absolute coordinates. Evaluated as a cubic Hermite (`FUN_0040f5a1`): slopes `(out−P0)` and `(P1−in)`, `u = (t−t0)/(t1−t0)` | read from code |
 | `localorient` keys with dim 4 and 3 handles | quaternion tracks are keyed as **Euler angles in degrees** `(x, y, z, pad)`, interpolated as a vector, then converted with `q = qx·qy·qz` (constant π/180 at 0xc8aa10) | read from code; observed dim 4 / n 3 on all 522 such keys |
 | object "slop bytes" | none — the grammar above parses all 194 files to EOF | validated |
-| header `u32` (0/1/4), object `u32` (0/1) | stored at asset+0x94 / object+4; no reader found | **not established** |
+| header `u32` (0/1/4), object `u32` (0/1) | asset+0x94 = `loopMode`, object+4 = `hostsUp` (see Toolkit below) | read from code (toolkit) |
 
 Without the property-type table, the reference parser decides the key class per track by trying both and
 keeping the one that parses to EOF — the only heuristic left, and it was unambiguous on the corpus.
 
-**Proposed toolkit change:** replace the scanning parser with `parse_sequence()`; rename `version` →
-`durationSec`, `ttype`/`mode` → `interpolation`; emit `in`/`out` handles; convert quaternion-typed tracks from
-Euler degrees. Better still, take the key class from the property's registered type instead of trial parsing.
+**Toolkit:** `decode_sequence.parse()` implements this grammar (`durationSec`, `interpolation` on tracks and keys,
+`in`/`out` handles, quaternion-typed tracks converted from Euler degrees) and takes the key class from the
+property's registered data type (`FUN_00539dd9`: number, vector, quaternion). It also names asset+0x94 as
+`loopMode` (describe function 0x53cfce: 0 loop, 1 oneshot, 2 oneshot_reverse, 3 loop_reverse, 4 pingpong) and
+object+4 as `hostsUp` (0x5411dc → 0x53c224: the ids are an entity path starting at the fragment host of the
+playing PropertySequenceNode after climbing `hostsUp` further hosts).
 
 ---
 
@@ -326,19 +336,20 @@ Desc (29 bytes): u32 width · u32 height · u32 formatEnum · u32 x · u32 type 
 ```
 
 - Slot index is the layer role. Observed: 0 diffuse, 1 normal (ATI2), 2 specular (DXT1), 3 DXT1, 4 L8, 7 L8;
-  5 and 6 never present. Labels no longer need the "drift" trick.
+  5 and 6 never present. Labels follow the slot (no "drift" heuristic).
 - `nFrames > 1` with `hasAnim` is the flipbook case; `type == 2` is the cubemap case (×6).
-- Stream length = Σ over frames and present slots of the mip chain (×6 for cubes) — **validated 936/936**, with
-  one correction to the docs: **linear formats (L8, X8/A8R8G8B8) store each mip row padded to 4 bytes** (65 files
-  were off by 5–7 bytes without it).
+- Stream length = Σ over frames and present slots of the mip chain (×6 for cubes) — **validated 936/936**;
+  **linear formats (L8, X8/A8R8G8B8) store each mip row padded to 4 bytes** (65 files are off by 5–7 bytes
+  without it).
 - Format enum → D3DFORMAT table at 0x00C799E0 has 19 entries: 0→22, 1/2→21, 3/4→50, 5 DXT1, 6 DXT3, 7 DXT5,
   9 ATI2, 11/12→114, 13→113, 14/15→81, 16→75, 17→63; 8, 10, 18 are 0 on PC.
-- Cube face order inside the PC stream was **not traced**. The lock helper `FUN_00454492` indexes its table
-  `[face × mipCount + level]` with D3D faces 0..5, consistent with the documented face-major layout, but the
-  code that copies stream bytes into it was not found.
+- Cube face order inside the PC stream: file face k = D3D cube face k (0x454384 / `FUN_00454492`,
+  `LockRect(face, level)`; the lock helper indexes its table `[face × mipCount + level]` with D3D faces 0..5,
+  face-major). The code that copies stream bytes into it was not found.
 
-**Proposed toolkit change:** replace the stride walk and stream-shape oracle with `parse_texture()` +
-`tex_chain_bytes()`; label layers by slot.
+**Toolkit:** `watchmen_extract.parse_texture_frames()` / `parse_texture_header()` and `_chain_bytes_exact()` (the port
+of `parse_texture()` + `tex_chain_bytes()`) replace the stride walk and stream-shape oracle; layers are labelled by
+slot (`TEXTURE_LAYER_SLOTS`, `CUBE_FACE_ORDER`).
 
 ### 5.2 Per-platform format mapping (read from exe data)
 
@@ -383,10 +394,9 @@ produced by code that is not in this binary. No further claim is made.
 
 ## Not established (summary)
 
-- Block header: u32 @0x20, GUID @0x24 (no reader found), meaning of bytes @327 and @388, whether @328 equals the
-  computed version signature, which language slot the stream reader uses.
-- ModelRes: `b24`, `u28`, `ix`, `u2c`, `u70`, `b4`, `e4`; cluster range units; the role of the per-part extra
-  fmt-5 buffer; whether vertices are part-local; the runtime routing of stream bytes; the physics/cloth tail.
-- Sequence: asset `u94`, object `u4`.
-- Texture: PC cube face order (code not traced), the animation tail.
+- Block header: GUID @0x24 (no reader found), meaning of bytes @327, @328 and @388, which language slot the stream
+  reader uses.
+- ModelRes: `b24`, `u28`, `u2c`, `u70`, `b4`, `e4`; cluster range units; the runtime routing of stream bytes;
+  the physics/cloth tail.
+- Texture: the code that copies cube faces into the stream, the animation tail.
 - Console: everything in §5.3 and the 2D half of §5.4.

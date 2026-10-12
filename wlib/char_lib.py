@@ -7,7 +7,10 @@ diffuse textures embedded.  No worldG (engine applies no root-pitch:
 docs/ENGINE_CONSTANTS.md).
 """
 
-import os, sys, glob, struct
+import os
+import sys
+import glob
+import struct
 import numpy as np
 from wutil import load_npz
 
@@ -16,7 +19,7 @@ if _HERE not in sys.path:
     sys.path.append(_HERE)  # append, never insert(0): flat module names must not shadow the stdlib
 
 
-from wutil import read_bytes as _read_bytes  # one copy, in wlib/wutil.py
+from wutil import read_bytes as _read_bytes  # one copy, in wlib/wutil.py  # noqa: E402
 
 
 def _clip_bank(animroot):
@@ -55,9 +58,9 @@ def _texdir(matname, root):
     return None if d is None else str(d)
 
 
-_LAYERCACHE = {}  # (matname,tuple(texroots),flip) -> layers (2026-07-13 perf:
+_LAYERCACHE = {}  # (matname,tuple(texroots),flip) -> layers (perf:
 # shared materials repeat across ~25 variants; the normal-map
-# green-flip PNG re-encode was paid every time)
+# green-flip PNG re-encode is paid once, not per variant)
 
 
 def _find_layers(matname, texroots, flip_normal_g=True):
@@ -89,8 +92,8 @@ def sheet_ref(ref, sheet_name):
 def _sheet_table(texdir, root):
     """Every sheet of the texture carved to `texdir` (watchmen_extract.texture_sheets
     dicts): from its sheet.json when that lists them, else from the Texture header
-    under <extract_out>/extracted (a tree carved before sheet.json held the table),
-    else the one sheet an old sheet.json describes."""
+    under <extract_out>/extracted (a tree whose sheet.json holds no table), else
+    the one sheet such a sheet.json describes."""
     import watchmen_extract as _we
 
     js = _we.read_sheet_json(texdir)
@@ -112,7 +115,8 @@ def _sheet_table(texdir, root):
 def _flat_roughness(exponent):
     """The 4x4 roughness image watchmen_extract._make_roughness writes for a texture
     without a specSize layer, for another sheet's specular exponent."""
-    import io, math
+    import io
+    import math
     from PIL import Image
 
     rv = 1.0 - min(1.0, math.sqrt(2.0 / (float(exponent) + 2.0)))
@@ -132,8 +136,8 @@ def _find_layers_uncached(matname, texroots, flip_normal_g=True):
     textures (<layer>MapOverride).  The first sheet's overrides apply as well.
     normal: engine ATI2 X/Y + reconstructed Z, converted D3D->glTF (green flip;
     set WATCHMEN_NORMALS=dx to keep DirectX orientation).  The PNG must come from
-    this version's texture extraction: before 1.4.0 the PC ATI2 layers were written
-    with X and Y swapped (watchmen_extract.ati2_xy), and no flip repairs that.
+    this toolkit's texture extraction: a PC ATI2 layer written with X and Y swapped
+    (watchmen_extract.ati2_xy) is repaired by no flip.
     'sheet': the sheet in use (alpha threshold, normal-map power, blend ...), if known.
     mr: glTF occlusion/roughness/metallic from the render-verified roughnessGen.png."""
     import io
@@ -222,8 +226,9 @@ def _find_layers_uncached(matname, texroots, flip_normal_g=True):
                 out["mr"] = buf.getvalue()
                 # roughnessGen.png was baked from the FIRST sheet's exponent; a flat
                 # one (no specSize layer) is redone for another sheet's exponent
-                e0, e1 = (sheets[0].get("specularSize") if sheets else None), sheet.get(
-                    "specularSize"
+                e0, e1 = (
+                    (sheets[0].get("specularSize") if sheets else None),
+                    sheet.get("specularSize"),
                 )
                 if (
                     sheet is not (sheets[0] if sheets else None)
@@ -452,8 +457,8 @@ def load_parts(models, bn, sheets=None):
             plat = we.console_platform_for(base + ".model")  # decides the console colour order
             name = os.path.basename(base)
             # byte order: console (X360/PS3) model headers/streams are big-endian.
-            # The header says which (model_order); counting descriptors per order tied
-            # on single-submesh models and picked a false little-endian one.
+            # The header says which (model_order); counting descriptors per order ties
+            # on single-submesh models and picks a false little-endian one.
             order = model_order(mh, ms, name)
             remap, lost = ml.palette_remap(mh, order, bn, name)
             note_palette_names(name, [d for d in lost if d["where"] == ml.MID_LIST])

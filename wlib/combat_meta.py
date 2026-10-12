@@ -738,8 +738,7 @@ def _attack_permission():
                 "Enemy.command_react_to_attack (a hero enters an attack state on it)",
                 "CharacterRoot.command_give_damage 0x691b10 with an inflictor",
                 "CharacterRoot.command_give_ragdoll_damage_increment 0x6914f2",
-                "being the attack target in CharacterRootLogic.FireAttackBasedOnAttackID"
-                " 0x68d870",
+                "being the attack target in CharacterRootLogic.FireAttackBasedOnAttackID 0x68d870",
                 "the trigger action SET_AI_STATE",
             ],
             "note": "a PASSIVE enemy neither chases nor attacks; the whole group turns"
@@ -760,8 +759,7 @@ def _twilight_reaction():
             "attacker records older than 5.0 s are dropped",
             "a human attacker's unblockable attack: no reaction with probability 0.75",
             "first attack of an attacker: dodge with probability 0.22",
-            "attack n of a known attacker, n < hits_before_dodge - 1: dodge with probability"
-            " 0.22",
+            "attack n of a known attacker, n < hits_before_dodge - 1: dodge with probability 0.22",
             "later, below hits_before_dodge + dodges_before_counter - 1: a forced fast attack"
             " with probability _spamprobability_fastquick, else dodge",
             "from hits_before_dodge + dodges_before_counter - 1 on (not in an"
@@ -909,8 +907,7 @@ def _rules(visual_def=None):
                 "gates": [
                     "the defender can lock onto the attacker",
                     "the attack is not unblockable",
-                    "the attacker is not behind the defender (TACTICAL_INFO 0x400"
-                    " PLACEMENT_REAR)",
+                    "the attacker is not behind the defender (TACTICAL_INFO 0x400 PLACEMENT_REAR)",
                     "the defender is neither stunned nor prone (its history is cleared)",
                     "the attack state's animation type is not NOTSET",
                 ],
@@ -1125,8 +1122,7 @@ def _bull_rush():
             "in_front": "dot(face heading, horizontal direction) > 0",
             "gate": "victim state m_tstunlockstate == 0 (set on the hit-reaction, Ragdoll-Hit,"
             " AttackBlocked and ThrownInAir states: 100 states on PC Part 2)",
-            "damage": "special_def.m_nbullrushsecondarydamage, no global / uber / modifier"
-            " factor",
+            "damage": "special_def.m_nbullrushsecondarydamage, no global / uber / modifier factor",
             "stun": "special_def.m_nbullrushsecondarystun",
             "pose": "11 or 8 (rand < 0.5 first) when |local x| >= 0.2 or the victim is big,"
             " else 17 or 14; then DirectionManipulateDamage",
@@ -1517,8 +1513,7 @@ _ACHIEVEMENT_RULES = {
         9: "a proper combo completes with >= _ipingpong_requiredtargets distinct enemies hit"
         " in the string",
         10: "a proper combo completes with hits + 1 >= _iunending_requiredhits",
-        11: "at game completion the flag is still set and hits by character type 33 > 10"
-        " (literal)",
+        11: "at game completion the flag is still set and hits by character type 33 > 10 (literal)",
     },
     "AchievementCtrl": {
         12: "game completed in mode 1 (Rorschach)",
@@ -1728,7 +1723,7 @@ def _leaves(k, neg=False, alt=False):
         inner = alt or (kind == asm.CRIT_ANY_OF) != neg
         for x in k.children:
             if x.cls == asm.CLS_CRIT and x.p("enabled", True) is not False:
-                for row in _leaves(x, neg, inner):
+                for row in _leaves(x, neg, inner):  # noqa: UP028
                     yield row
     else:
         yield k, neg, alt
@@ -1997,8 +1992,10 @@ class CombatData:
         if own:
             eff, src = own, "own (%s)" % rec["damage_modifier_prop"]
         elif base is not None:
-            eff, src = base, "CharacterDef._ndamagemodifier (own value is %s)" % (
-                "0" if own is not None else "absent"
+            eff, src = (
+                base,
+                "CharacterDef._ndamagemodifier (own value is %s)"
+                % ("0" if own is not None else "absent"),
             )
         else:
             eff, src = None, "not established: own value is 0 or absent and no CharacterDef"
@@ -2433,7 +2430,7 @@ def _damage_rows(data, class_name, button, weapons):
                             "damage": None if m is None else round(base * m, 4),
                             "ai_defs": names,
                         }
-                        for m, names in sorted(mods.items(), key=lambda kv: (kv[0] or 0.0))
+                        for m, names in sorted(mods.items(), key=lambda kv: kv[0] or 0.0)
                     ],
                 }
                 rows.append(row)

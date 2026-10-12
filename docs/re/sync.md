@@ -15,7 +15,7 @@ constants named checked in the exe bytes), **inferred**, **not established**.
 - It is a one-shot start-position choice, not a time warp. Nothing re-reads the markers after the new page is created.
   Continuous phase locking is a different feature: the *state* flag `m_tiswalkcycle` (caption "Sync Playpos"), handled by
   `SynchronizePages`.
-- The toolkit's `sync_remap` differs from the engine in three ways (section 6).
+- The toolkit (`anim_state_machine.py`) implements these rules; section 6 lists them side by side with the engine.
 
 ## 1. Properties of AnimationTransition(WM) — read
 
@@ -88,8 +88,7 @@ if m_tsupersyncpos (rec+0x20):
 every criterion in m_ecriterialist must pass
 ```
 
-`ENGINE_CONSTANTS.md` describes this as an "optional PLAY_POS window check ([+0x6c]/[+0x70])" without saying where the window
-comes from. It is the marker range.
+The "optional PLAY_POS window check ([+0x6c]/[+0x70])" of `ENGINE_CONSTANTS.md` is this marker range.
 
 ### 3b. Start position: `AnimationCtrl.TransitionPlayPos` 0x5ac1aa
 
@@ -120,8 +119,9 @@ start = r_0                                                             for p <=
 
 Remote values need not increase (shipped: `(0,1.0),(1.0,0)` maps p to 1 - p).
 
-With "Sync PlayPos?" set and marker 1 < 0 the lists are empty (the markers are nested: k is used only if 1..k−1 are ≥ 0), `m_nsupersyncmin` / `max` are never written, and the value `TransitionPlayPos` reads is not list data. Not present in shipped data; value not established.
-It does not occur in shipped data: all 145 sync transitions in Part 2 PC have at least two markers.
+With "Sync PlayPos?" set and marker 1 < 0 the lists are empty (the markers are nested: k is used only if 1..k−1 are ≥ 0),
+`m_nsupersyncmin` / `max` are never written, and the value `TransitionPlayPos` reads is not list data; the result is not
+established. It does not occur in shipped data: all 145 sync transitions in Part 2 PC have at least two markers.
 
 ## 4. How a transition picks the target's start play position — read
 
@@ -137,8 +137,8 @@ send every event in T.m_eeventlist
 
 The transition is deferred (result 1, nothing happens this frame) while the stack header's timer at +0x14 is > 0
 (`0.0 < [stack+4]+0x14`). `SetupNewPage` loads that field from the entered state's `m_nforcestaytime` ("Force Stay Time",
-state rec+0x50). `ENGINE_CONSTANTS.md` and the toolkit describe this deferral as "during the top page's ease window"; the code
-reads a force-stay timer on the stack, not the page's ease. Where the timer counts down was not traced (**not established**).
+state rec+0x50). The deferral is not "during the top page's ease window": the code reads a force-stay timer on the stack, not
+the page's ease. Where the timer counts down was not traced (**not established**).
 
 `TransitToState` 0x5b4a31 (state record: +0x14 `m_toverridestate`, +0x18 `m_tiswalkcycle`, +0x38 `m_nstartplaypos`):
 
@@ -160,7 +160,7 @@ SetupNewPage(target, start, sync, ease, stack)             # method +0xfc
 - Ease-in: the page starts fully blended in (blend 1, ease 0) if the target state's own `m_neaseinduration` <= 0, or the
   body stack is empty, or the passed ease is exactly 0. Otherwise the ease is the passed value, or the state's
   `m_neaseinduration` when the passed value is negative (no override). So **a transition's ease-in override is ignored when
-  the target state's own ease-in is 0**; the toolkit applies it regardless.
+  the target state's own ease-in is 0**.
 - Writes page+0x10 = start, page+0x18 = sync, page+0x0c = ease, page+0x08 = initial blend.
 
 Start position in one line, in priority order:
@@ -176,18 +176,19 @@ then: target already on the stack + walk cycle -> that page's play position
 Entries that do not come from a transition (overlay entry, fallback/default state in `EvaluateTransitions`) pass pp = -1 and
 ease = -1, i.e. rules 3-4 and the state's own ease-in.
 
-### The walk-cycle flag afterwards: `SynchronizePages` 0x5ac387 — read; field meaning inferred
+### The walk-cycle flag afterwards: `SynchronizePages` 0x5ac387 — read
 
 For each run of pages whose sync flag (page+0x18) is set, down to and including the page under the run, it sets one common
 value in page+0x14:
 
 ```
-rate = sum_i w_i / T_i     (w = blend weights cascaded from the top page down: b_top, (1-b_top)*b_next, ..., remainder to the base page)
-T_common = 1 / rate        written to page+0x14 of every page in the run
+T_i      = 1 / rate_i      (page+0x14 = the page's rate, play position per second; rebuilt every frame by SetAllSlotBlends, pages.md §2)
+period   = sum_i w_i · T_i (w = blend weights cascaded from the top page down: b_top, (1-b_top)*b_next, ..., remainder to the base page)
+rate_common = 1 / period   written to page+0x14 of every page in the run
 ```
 
-page+0x14 is the page's cycle length in seconds (inferred from this weighted harmonic mean; its writer in `UpdatePagePlayPos`
-was not traced). The effect is that synced walk cycles advance at one blended rate and stay in phase during the crossfade.
+page+0x14 is a rate (play position per second), not a cycle length; `SynchronizePages` blends the pages' periods and writes the
+resulting common rate. The effect is that synced walk cycles advance at one blended rate and stay in phase during the crossfade.
 
 ## 5. Fallback flag — read
 
@@ -196,27 +197,30 @@ was not traced). The effect is that synced walk cycles advance at one blended ra
 (arg 1, issued by `EvaluateTransitions` when the current state's criteria no longer hold) sees only fallback ones.
 It also skips a target already tested in this evaluation (list `_etestedstates`), so each target is tried once.
 
-## 6. Differences from `anim_state_machine.py`
+## 6. Engine rules as implemented in `anim_state_machine.py`
 
-| | toolkit | engine |
+| | engine | toolkit |
 |---|---|---|
-| gate | none | sync transition can fire only for l_min <= p <= l_max (`TransitionMet`) |
-| end points | adds (0,0) and (1,1) to the marker list | no implicit points; clamps to r_first / r_last |
-| unset test | pair dropped if local < 0 **or** remote < 0 | list stops at the first local < 0; remote is not tested |
-| walk cycle | not modelled | both states `m_tiswalkcycle` -> start at the outgoing play position; pages then share one cycle length |
-| ease override | always applied | ignored if the target state's own ease-in is 0 |
-| deferral | while the top page eases in | while the stack's force-stay timer > 0 (from the state's "Force Stay Time") |
-| fallback | fallback transitions tried in a separate step | same idea, but the normal pass also *excludes* fallback transitions |
-| marker keys | `key_ee2a40XX` / `key_4cadfbXX` | `m_nsupersynclocalN` / `m_nsupersyncremoteN` (key table has them under the wrong hash) |
+| gate | sync transition can fire only for l_min <= p <= l_max (`TransitionMet`) | `transition_met` / `sync_window` |
+| end points | no implicit points; clamps to r_first / r_last | `map_markers` (no (0,0) / (1,1) padding) |
+| unset test | list stops at the first local < 0; remote is not tested | `marker_pairs` |
+| walk cycle | both states `m_tiswalkcycle` -> start at the outgoing play position; pages then share one rate | `start_playpos` rule `walk_cycle_carry_over` |
+| ease override | ignored if the target state's own ease-in is 0 | page creation |
+| deferral | while the stack's force-stay timer > 0 (from the state's "Force Stay Time") | `stay` timer per stack |
+| fallback | the normal pass *excludes* fallback transitions, the fallback pass sees only them | `get_valid_transition(fallback=)` |
+| marker keys | `m_nsupersynclocalN` / `m_nsupersyncremoteN` | the same names; `key_ee2a40XX` / `key_4cadfbXX` accepted as aliases for a JSON that carries the markers under the mis-hashed name |
 
-With the engine's rules the padding makes no difference inside the marker range only when the markers already start at
-(0, ·) and end at (1, ·); for a typical shipped transition such as `(0.83->0.23),(1.0->0.35)` the toolkit maps p = 0.9 to 0.28
-(same as the engine) but also lets the transition fire at p = 0.5 and maps it to 0.14, where the engine does not fire at all.
+`sync_remap(playpos, trans)` is `map_markers` over `sync_markers(trans)` (play position unchanged without markers);
+`transition_playpos` is `TransitionPlayPos` with -1.0 for "no opinion".
+
+Ruled out: implicit (0,0) and (1,1) end points. They make no difference inside the marker range only when the markers already
+start at (0, ·) and end at (1, ·); for a typical shipped transition such as `(0.83->0.23),(1.0->0.35)` the padded map sends p = 0.9
+to 0.28 (same as the engine) but also lets the transition fire at p = 0.5 and maps it to 0.14, where the engine does not fire at all.
 
 ## 7. Data check (Part 2 PC, all 906 `.fragment.json`, read-only)
 
-2,636 decoded transition nodes (a further 1,901 nodes of the class come out of our fragment parser with unnamed keys and
+2,636 decoded transition nodes (a further 1,901 nodes of the class come out of the fragment parser with unnamed keys and
 were not examined): 145 with "Sync PlayPos?", 42 with "Override Start PlayPos?" (never both), 572 with "Override Ease In?",
 42 fallback. Every sync transition has 2-6 markers, values in 0..1, often stored unsorted; no transition without the flag has
-a marker set. 98 states have the walk-cycle flag, 5 are override states. The `[-1, 9.1e7, -1]` value on marker 8 (local) in our
-JSON is the known 3-float misread of the last record, not data.
+a marker set. 98 states have the walk-cycle flag, 5 are override states. The `[-1, 9.1e7, -1]` value on marker 8 (local) in the
+JSON export is the known 3-float misread of the last record, not data.

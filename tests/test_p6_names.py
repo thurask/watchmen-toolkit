@@ -5,7 +5,9 @@ names2.tsv       the Kynapse bridge functions, named from their role
 fx_meta          the Twilight Lady's fake weapon is null in shipped data (0x6943b8)
 No game files."""
 
-import json, os, sys
+import json
+import os
+import sys
 
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wlib"))
 import fx_meta

@@ -87,8 +87,8 @@ the partial level stays, with its Library switched off, and has to be deleted by
 
 The functions above the "Blender side" line need no ``bpy`` and are tested in
 ``tests/test_blender_import_level.py``.  Checked with Blender 3.6 (bpy 3.6.0); written for
-3.6 to 5.2.  The only 5.x result: the level import was run by the user on desktop Blender 5.2
-through the Scripting tab without errors and was not inspected in detail.
+3.6 to 5.2.  On 5.x the only check is a level import on desktop Blender 5.2 through the
+Scripting tab that ran without errors and was not inspected in detail.
 """
 
 import json
@@ -145,7 +145,7 @@ def glb_json(path):
 
 def glb_frame(doc):
     """FRAME_TRUE or FRAME_MIRRORED: the frame a toolkit GLB (its JSON chunk) is written in.
-    A file without the marker is in the mirrored (1.3.0) frame."""
+    A file without the marker is in the mirrored frame (the layout of releases before 1.4.0)."""
     ex = ((doc.get("asset") or {}).get("extras") or {}).get("watchmen") or {}
     cf = ex.get("coordinate_frame")
     if cf is None:
@@ -450,7 +450,7 @@ def texture_png(root, texture, layer="0_diffuse"):
 
 
 def load_level(path):
-    with open(path, "r", encoding="utf-8") as fh:
+    with open(path, encoding="utf-8") as fh:
         doc = json.load(fh)
     if not isinstance(doc, dict) or doc.get("format") != LEVEL_FORMAT:
         raise LevelError(

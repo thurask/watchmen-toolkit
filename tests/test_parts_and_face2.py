@@ -292,7 +292,7 @@ def test_nothing_hidden_means_no_alternatives_node(tmp_path, rig):
 
 
 # ------------------------------------------------- face: what the exe settled
-import test_face_rule as tf
+import test_face_rule as tf  # noqa: E402
 
 face_extract = tf.face_extract  # the fixture: a hero finisher and its victim
 

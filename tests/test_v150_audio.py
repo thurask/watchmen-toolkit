@@ -106,9 +106,10 @@ def test_decode_sfx_reads_the_header_layout():
     coefs[0] = 128
     other = wx.decode_sfx(_adpcm_sound(blk + part, 57, coefs=coefs))[0]
     assert other != data
-    assert other == wx._adpcm_mono(blk + part, 32, [(128, 0)] + list(wx._COEF_PAIRS[1:]))[
-        :57
-    ].tobytes()
+    assert (
+        other
+        == wx._adpcm_mono(blk + part, 32, [(128, 0)] + list(wx._COEF_PAIRS[1:]))[:57].tobytes()
+    )
 
 
 def test_decode_sfx_falls_back_to_the_table_search():

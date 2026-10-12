@@ -17,7 +17,7 @@ def P(name, typ, value):
     return {"name": name, "type": typ, "value": value}
 
 
-def O(cls, oid, *props):
+def O(cls, oid, *props):  # noqa: E743
     return {"class": cls, "id": "%08x" % oid, "props": list(props)}
 
 

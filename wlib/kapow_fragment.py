@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""kapow_fragment — LOSSLESS .fragment parser (engine-verified, 2026-07-07).
+"""kapow_fragment — LOSSLESS .fragment parser (engine-verified).
 Lossless = parsed to the end of the stream and every stored value written
 exactly: float32 values as the shortest decimal that reads back as the same
 float32 (f32json; $WATCHMEN_JSON_FLOATS=rounded writes the 1.4.0 values,
@@ -23,13 +23,15 @@ Format (from executable decomp FUN_005473ee/FUN_00545e1b + TOD_tools):
   key names/types: game database.bin registry (3693) + TOD_tools builtins +
   exe strings; unknown keys are size-inferred with boundary/lookahead resync
   and reported with '?' type suffix.
-Validation (2026-10): all 906 extracted fragments parse to EOF (lossless) (9 of them are
-17-byte header-only files = empty); 22 unknown-key occurrences remain corpus-wide
-(was 580,286 before the name-hash fold fix, built-in property typing and
-type-record handling); all 12777 resource-path strings present in the output.
+Validation (measured): all 906 extracted fragments parse to EOF (lossless) (9 of them are
+17-byte header-only files = empty); 22 unknown-key occurrences corpus-wide; all 12777
+resource-path strings present in the output.
 """
 
-import struct, sys, re, math
+import struct
+import sys
+import re
+import math
 import os as _os
 
 _D = _os.path.dirname(_os.path.abspath(__file__))
@@ -45,10 +47,10 @@ try:
     h2t = _KD["keytable"]
     std = _KD["stdkeys"]
 except Exception as _ex:  # missing, truncated, not a pickle, not plain data, wrong layout
-    # ImportError, NOT SystemExit (2026-08-17): a library module must not exit
-    # the host process at import time -- SystemExit is a BaseException, so it
-    # blew through every `except Exception` guard (pytest collection died with
-    # zero tests run, and `import watchmenlib` killed interactive hosts).
+    # ImportError, NOT SystemExit: a library module must not exit the host
+    # process at import time -- SystemExit is a BaseException and passes every
+    # `except Exception` guard (pytest collection would die with zero tests run,
+    # and `import watchmenlib` would kill an interactive host).
     raise ImportError(
         "watchmen: %s data table %s (%s: %s)\n"
         "  reinstall the package, or rebuild it with `watchmen gendata keys-import KEYS.json`"
@@ -99,9 +101,9 @@ PART1_KEYS = {
 # PART1_KEYS whose SPELLING is inferred (key hash -> the property's caption in the
 # registration's UI string): a name whose hash is exact but which is in no string list
 # and no database.bin.  A fragment that uses one lists it under `inferred_names`
-# (inferred_names()), so the JSON does not show a guess as a fact.  EMPTY since the
-# Part 1 database.bin confirmed all seven spellings (five were listed here before); the
-# mechanism stays for a name added later without such a source.
+# (inferred_names()), so the JSON does not show a guess as a fact.  EMPTY: the
+# Part 1 database.bin confirms all seven spellings; the mechanism is for a name
+# without such a source.
 PART1_INFERRED = {}
 INFERRED_NAMES = {}  # name -> (key hash, caption), only where PART1_KEYS supplies the name
 for _h, _nt in PART1_KEYS.items():
@@ -131,14 +133,13 @@ TYPERE = re.compile(r"^[A-Za-z_0-9 ]+\([A-Za-z_0-9 ]*\)$")
 FRAGMENT_HOST_NATIVES = ("FragmentNode", "LoadBlock", "SceneNode", "StreamBlockNode")
 
 
-from wutil import read_bytes as _read_bytes  # one copy, in wlib/wutil.py
+from wutil import read_bytes as _read_bytes  # one copy, in wlib/wutil.py  # noqa: E402
 
 
 def _f32_writer(nd):
     """x -> the value of a stored float32: f32json.value (exact, the default: the
     shortest round trip; a NaN or an infinity stays a float, written as null by
-    f32json.dumps) or round(x, nd) under $WATCHMEN_JSON_FLOATS=rounded (the 1.4.0
-    output)."""
+    f32json.dumps) or round(x, nd) under $WATCHMEN_JSON_FLOATS=rounded."""
     import f32json
 
     if f32json.mode() == "exact":
@@ -197,7 +198,7 @@ def dechunk(d, bo="<"):
     import struct as _s
 
     hd = parse_header(d, bo)
-    # the exact header end first (a long fragmentName puts it beyond the old scan window)
+    # the exact header end first (a long fragmentName puts it beyond the scan window)
     starts = ([hd["size"]] if hd else []) + list(range(8, 80))
     for start in starts:
         p = start
@@ -267,7 +268,7 @@ def parse(d, collect_unknown=None, order=None):
         d = dc
     u = lambda o: struct.unpack_from(bo + "I", d, o)[0]
     f = lambda o: struct.unpack_from(bo + "f", d, o)[0]
-    # float32 values: written exactly (f32json, default) or rounded to 6 places (1.4.0)
+    # float32 values: written exactly (f32json, default) or rounded to 6 places
     _num = _f32_writer(6)
     # locate schema start: first valid [FFFFFFFF][hash][wc][TypeName(...)] record in the head
     p = None
@@ -285,8 +286,8 @@ def parse(d, collect_unknown=None, order=None):
     # With a header the stream starts right behind it, so when the scan found a
     # "Class(Native)" record the type records with a bare native name ("SceneNode",
     # "FragmentNode") in front of it are read instead of skipped.  When it found none,
-    # every record is a node's own: the main loop reads them, as it always did, and each
-    # type record keeps its `created` entry in `inst`.
+    # every record is a node's own: the main loop reads them, and each type record
+    # keeps its `created` entry in `inst`.
     lead = header is not None and dc is not None and p is not None
     if lead:
         p = 0
@@ -312,9 +313,9 @@ def parse(d, collect_unknown=None, order=None):
             )
     # opening type records -> schema.  With a header the stream starts at 0 and may open
     # with bare native records ("SceneNode", "Folder"): they go to the schema too, up to
-    # and including the first run of "Class(Native)" records, which is where the scan
-    # used to start.  What follows is read by the main loop exactly as before, so the
-    # order of `inst` (and with it the order of equal-siblingOrder children) is unchanged.
+    # and including the first run of "Class(Native)" records (where the schema scan
+    # lands).  What follows is read by the main loop in stream order, which is the
+    # order of `inst` (and with it the order of equal-siblingOrder children).
     while p + 12 <= len(d) and u(p) == 0xFFFFFFFF:
         wc = u(p + 8)
         if not (1 <= wc <= 40) or p + 12 + wc * 4 > len(d):
@@ -433,8 +434,12 @@ def parse(d, collect_unknown=None, order=None):
                     raise ValueError("not a number inside a %s guess" % typ)
         return rdval(typ, p)
 
-    known_or_marker = lambda q: q == len(d) or (
-        q + 4 <= len(d) and (u(q) in (0xFFFFFFFE, 0xFFFFFFFF) or u(q) in NAMES or u(q) in NAMEABLE)
+    known_or_marker = lambda q: (
+        q == len(d)
+        or (
+            q + 4 <= len(d)
+            and (u(q) in (0xFFFFFFFE, 0xFFFFFFFF) or u(q) in NAMES or u(q) in NAMEABLE)
+        )
     )
     # a typed stream (header byte `typed`; in no shipped file): a property is
     # [keyHash][typeHash][wordCount][value], and the value is wordCount words long
@@ -452,7 +457,7 @@ def parse(d, collect_unknown=None, order=None):
             p += 8
             if w == 0xFFFFFFFF:
                 # type record in the instance stream: [wc][TypeName, NUL-padded to wc
-                # words].  Reading it as properties desynced every created node.
+                # words].  Reading it as properties would desync every created node.
                 nm = type_name_at(p)
                 if nm is not None:
                     schema.append((cur["node"], nm))
@@ -598,7 +603,7 @@ def parse(d, collect_unknown=None, order=None):
 
 
 def ref_kind(text):
-    """The legacy `*_ref` key a resource path is listed under ('model_ref', ...), or None."""
+    """The `*_ref` key a resource path is also listed under ('model_ref', ...), or None."""
     t = text.lower()
     for kind, exts in REF_KINDS:
         if t.endswith(exts):
@@ -612,14 +617,13 @@ def sections(d, r):
 
     A value is text only where the parser typed it `string` or `list(string)` (also as
     the marked guess `string?` of an unknown key), and it is listed under the name
-    `nodes_full` gives that property.  The byte sweep these sections came from took any
-    [key][n][printable bytes] for a string, so an integer followed by a key hash made of
-    printable bytes read as text ('XdV/' under siblingOrder, the bytes reversed on
-    console), and a string cut by a chunk boundary was lost.
+    `nodes_full` gives that property.  Ruled out: a byte sweep that takes any
+    [key][n][printable bytes] for a string reads an integer followed by a key hash made
+    of printable bytes as text ('XdV/' under siblingOrder, the bytes reversed on
+    console) and loses a string cut by a chunk boundary.
 
     nodes       the type records in file order, {type, hash = the node id} (the same
-                records as `schema`).  The sweep paired a type with the id of the record
-                AFTER it and called the word count of that record's name `depth`.
+                records as `schema`).
     named_instances  every `name` value in file order.
     instances   one entry per instance NAME, in order of first appearance; nodes that
                 share a name share the entry, a node without a `name` property adds to
@@ -644,7 +648,7 @@ def sections(d, r):
     if dc is not None:
         d = dc
     f = lambda o: struct.unpack_from(bo + "f", d, o)[0]
-    # pos / quat as stored (f32json; 1.4.0: 3 and 4 places); yaw_deg is derived and
+    # pos / quat as stored (f32json; rounded mode: 3 and 4 places); yaw_deg is derived and
     # stays rounded to 0.1 degree in both modes
     _pos, _quat = _f32_writer(3), _f32_writer(4)
     kname = NAMES[NAME_KEY][0]
@@ -713,7 +717,7 @@ def sections(d, r):
         e = dict(inst[k])
         t = e.pop("_transforms", None)
         if t is not None:
-            e["_transforms"] = t  # last, as it always was
+            e["_transforms"] = t  # last
         out.append({"name": k, **e})
     return {
         "nodes": [{"type": t, "hash": h} for h, t in r["schema"]],

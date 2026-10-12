@@ -105,8 +105,7 @@ known), `registration_site`, `stub` (`null`, `"empty"`, `"returns_zero"`),
 `code`, `slots`, `type_object`, `member`, `getter`, `semantics`.
 
 - `semantics` is one line on what the handler does. `semantics_evidence` is `read` when the
-  line was read from the handler's decompilation or disassembly, here or in the two
-  runtime passes before (141 entries) and
+  line was read from the handler's decompilation or disassembly (141 entries) and
   `from name` otherwise (1: `dumptable_createfromfile`, read only in part). Where a `read`
   line also says what an argument means, that part is marked "from name" in the text.
 - `handler.ps3` is the Part 2 PS3 address of the same registration, matched by the member
@@ -125,8 +124,7 @@ corpus is research output outside the toolkit, kept on the project PC under
 
 A call of the empty stub cannot be attributed to one builtin: the compiler emits a call to
 the body, and 19 builtins and other natives share it. No handler of a math function is
-called from a script handler (0 call sites); the runtime research found their bodies
-inlined at the call.
+called from a script handler (0 call sites); the compiler inlines their bodies at the call.
 
 ## Use
 

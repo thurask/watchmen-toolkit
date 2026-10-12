@@ -246,7 +246,8 @@ def test_the_character_export_picks_the_track_lookup_by_part(tmp_path):
     src = inspect.getsource(ce.bake_cache)
     assert src.count("track_names=_tn") == 2 and "twist_align=np.int32(1)" in src
     assert "bake_is_current(dst, clips[nm], _tn, _bsha)" in src
-    import char_lib, face_export
+    import char_lib
+    import face_export
 
     assert "track_names_for(extract_out)" in inspect.getsource(char_lib.build_all)
     for fn in (face_export.export, ce._face_attach):

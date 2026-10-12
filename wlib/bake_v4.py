@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
-# Baker v3 (final): engine-verified decode. quat/10000, POSITION/1000 (Ghidra-confirmed),
+# Engine-verified clip decode: quat/10000, POSITION/1000 (read from code),
 # t0 = position keys + const quat, file hierarchy, root motion relative to frame 0,
 # twist alignment (engine pass 0x5958f5) is applied; bake(twist_align=False) leaves it out.
 # usage: python3 bake_v4.py CLIP OUT.npy [upsample] --bind BIND.npz
-import sys, struct, numpy as np, watchmen_extract as we, export_female_anims as efa
+import sys
+import struct
+import numpy as np
+import watchmen_extract as we
+import export_female_anims as efa
 from wutil import load_npz, order_name, qmats_xyzw
 
-# 2026-07-24: this module used to read --bind/--conj out of sys.argv AT IMPORT
-# TIME, which forced every caller (and watchmenlib, at import) to rewrite the
-# host program's sys.argv and then importlib.reload() this module.  bake() now
-# takes bind= and conj= directly; argv is parsed only under __main__.
+# bake() takes bind= and conj= directly; argv is parsed only under __main__,
+# never at import time, so a caller (watchmenlib included) does not have to
+# rewrite the host program's sys.argv or reload this module.
 CONJ = True  # engine-exact palette gauge (conjugated FK); see docs/ENGINE_CONSTANTS.md
 
 # Revision of the pose rule; stored in every cached bake (characters_export.bake_cache), so a
@@ -99,8 +102,8 @@ def apply_twist_align(Wr, Wt, names, par):
 
 # First byte the track-name scan looks at.  The clip header is five words and the name list
 # starts at byte 29 in every shipped clip (measured, 6,912 files of Parts 1 and 2 on all
-# platforms).  A scan from byte 0 read the key count 0x372 of the big-endian
-# EN4_EXP_MOV_dance_cage_small_C as the length of a name "r" at byte 11 and baked that
+# platforms).  A scan from byte 0 reads the key count 0x372 of the big-endian
+# EN4_EXP_MOV_dance_cage_small_C as the length of a name "r" at byte 11 and bakes that
 # clip as a still pose.  Stored in every cached bake as `scan`.
 NAME_SCAN_START = 20
 
@@ -130,7 +133,7 @@ def _detect_clip_order(h, start=NAME_SCAN_START):
 
 def scan_start_matters(h):
     """Does clip `h` (its first 400 bytes are enough) read differently when the name scan
-    starts at byte 0, as it did before NAME_SCAN_START?  A cached bake without `scan` of
+    starts at byte 0 instead of at NAME_SCAN_START?  A cached bake without `scan` of
     such a clip is stale (characters_export.bake_is_current)."""
     old = _detect_clip_order(h, 0)
     new = _detect_clip_order(h)
@@ -211,9 +214,9 @@ def walk(h, order=None, types=None):
 def resample_keys(x, n):
     """Keys `x` (K, C) of a track spread over the clip's span, at `n` evenly spaced
     times: linear interpolation of the track's own keys at np.linspace(0, K - 1, n),
-    the same component-wise lerp the bake uses between keys.  1.4.0 took the key
-    at the floor of that position instead, a step function (a 2-key track in a
-    30-key clip held key 0 for 29 frames)."""
+    the same component-wise lerp the bake uses between keys (not the key at the
+    floor of that position, which would be a step function: a 2-key track in a
+    30-key clip would hold key 0 for 29 frames)."""
     x = np.asarray(x, np.float64)
     if len(x) == n:
         return x
@@ -335,10 +338,10 @@ def bake(
         raise
     if not tr:
         raise ValueError("no animation tracks decoded from clip %r" % clipname)
-    # 2026-08-17: frame count from ALL key tracks, not quats only -- a type-0
-    # track (const quat + position keys) contributed 1 before, so a clip whose
-    # longest track was positional got its position keys down-sampled (worst
-    # case, all-const rotations: collapsed to a single frame).
+    # frame count from ALL key tracks, not quats only -- a type-0 track (const
+    # quat + position keys) contributes 1 quat key, so counting quats alone would
+    # down-sample the position keys of a clip whose longest track is positional
+    # (worst case, all-const rotations: collapsed to a single frame).
     nf = max(max(len(q), len(p) if p is not None else 1) for q, p in tr.values())
     F = (nf - 1) * upsample + 1
     t = np.linspace(0, nf - 1, F)
@@ -421,7 +424,7 @@ def bake(
         # the clip header rule keyRate == (keyCount - 1) / duration holds per clip;
         # a track with another key count is taken to span the same time.  No shipped
         # clip has one: every track of the 7,071 clips of the six sets has 1 key or
-        # the clip's count (measured, 1.5.0)
+        # the clip's count (measured)
         print(
             "WARNING: clip %s: %d track(s) with a key count other than 1 or %d, resampled"
             " linearly over the clip: %s" % (clipname, len(resampled), nf, ", ".join(resampled)),
@@ -470,13 +473,13 @@ def bake(
         apply_twist_align(Wr, Wt, names, par)
     Pr = np.einsum("fkab,kcb->fkac", Wr, Rb)
     Pt = Wt - np.einsum("fkab,kb->fka", Pr, tb)
-    # HEADER SOLVED (2026-07-09, docs/ENGINE_CONSTANTS.md): clip header
+    # Clip header (docs/ENGINE_CONSTANTS.md):
     # = [f32 keyRate Hz][f32 duration s][u32 0][u32 keyCount][u32 frameRateScale]
     # keyRate == (keyCount-1)/duration EXACTLY (1163/1163 clips); frameRateScale
     # in {1,2,3} = FULL/HALF/THIRD of the 30fps engine rate (Animation::
-    # SetFrameRateScaling dropdown, deep3/part_0019.c).  The old "x3 capture-
-    # calibrated" constant was this, misread: hdr[0] (keyRate ~10 for THIRD
-    # clips) was taken as the duration.  dur returned = true SECONDS now.
+    # SetFrameRateScaling dropdown, deep3/part_0019.c).  hdr[0] is the keyRate
+    # (~10 for THIRD clips), not the duration; there is no "x3" calibration
+    # constant.  dur returned = SECONDS.
     dur = float(hdr[1])
     return np.concatenate([Pr, Pt[..., None]], axis=-1).astype(np.float32), dur
 

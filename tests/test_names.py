@@ -287,8 +287,9 @@ def _fragment(payload):
 
 
 def _sample_payload():
-    u, f = (lambda *v: struct.pack("<%dI" % len(v), *v)), (
-        lambda *v: struct.pack("<%df" % len(v), *v)
+    u, f = (
+        (lambda *v: struct.pack("<%dI" % len(v), *v)),
+        (lambda *v: struct.pack("<%df" % len(v), *v)),
     )
     p = u(0xFFFFFFFF, 0x11111111) + _str("AnimationEventWM(Node)")  # opening type record
     p += u(0xFFFFFFFE, 0x11111111) + _key("name") + _str("evt")

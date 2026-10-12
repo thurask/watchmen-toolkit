@@ -22,8 +22,9 @@ Extraction scripts: `work/enums/extract.py`, `extract3.py`, `build.py`.
 - Values: 1,623 are immediate pushes, 6 are the LANGUAGE entries, and 184 are register pushes (`push ebx` and the like) whose register was set earlier in the
   function (`xor ebx,ebx`, `push N / pop reg`, `inc`, `or reg,-1`). They were resolved by a single-path simulation from the function
   start and checked: every non-zero register value fills a gap in its family and collides with nothing.
-  One trap, now handled: in 0x809e94 `inc ebx` appears on both arms of an allocation check (0x809ec8 / 0x809ee4), so a naive
-  linear sweep reads 2 where the value is 1 (this affects 18 names, e.g. `ANIMATION_EVENT___PUNCH`, `OPPONENT_MODEL_TYPE___RORSCHACH`).
+  Trap: in 0x809e94 `inc ebx` appears on both arms of an allocation check (0x809ec8 / 0x809ee4), so a naive
+  linear sweep reads 2 where the value is 1 (this affects 18 names, e.g. `ANIMATION_EVENT___PUNCH`, `OPPONENT_MODEL_TYPE___RORSCHACH`);
+  the single-path simulation follows one arm.
 - Result: **186 families, 1,801 distinct names** (1,813 registrations; 12 repeat an existing name with the same value).
   No name is registered with two different values.
 - The exe holds 1,561 strings of the form `X___Y`; all but `LANGUAGE___%s` are pushed at a registration site. Other strings
@@ -52,27 +53,29 @@ Interval type (inline dropdown on the property): INTERVAL 0, LESS_THAN 1, GREATE
 **For kind ENUM the engine reads only `m_ianimationenum` (rec+0x28) and `m_ianimationenumvalue` (rec+0x2c)** (decompiled branch
 `iVar9 == 2`). `m_ianimationvalue` (rec+0x14) is read only in the VALUE branch.
 
-## Disagreements with the toolkit
+## What the criteria tables mean for the animation metadata
 
-1. **"Enum var 11 = character type" is `ANIMATION_ENUM___OPPONENT_MODEL_TYPE`** — the *opponent's* model type, and its values are the
-   `OPPONENT_MODEL_TYPE` family: NONE 0, RORSCHACH 1, NITE_OWL 2, ENEMY_01 3, ENEMY_02_BIG_GUY 4, UNDERBOSS 5, ENEMY_03 6, ENEMY_04 7.
-   The seven ids the toolkit uses agree with the exe exactly. They are *not* `CHARACTER_TYPES` (there RORSCHACH 0, NITE_OWL 1, BIKER 2, ...).
-2. **The "value slot" 0 / 4 / 14 / 23 is not a selector of whose type is tested.** It is `m_ianimationvalue`, an `ANIMATION_VALUE`
-   id (0 NONE, 4 ATTACK_MOVE_DIST, 14 RELATIVE_HEAD_HEIGHT, 23 VERTICAL_HEIGHT_TO_TARGET) that the ENUM branch never reads; it is
-   whatever was left in the editor's Value box. `anim_meta.py` (`_VAR_PARTNER = (0, 4)`, `_is_partner_type_leaf`) therefore drops
-   real opponent-type tests. In the Part 2 data there are 7 such criteria: `NiteOwlAttackFragment` 4x `ENEMY_02_BIG_GUY` (slot 23),
-   `RorshackAttackFragment` 1x `ENEMY_02_BIG_GUY` (slot 23), `AnimationClassRorschach` `NOT NITE_OWL` (slot 14),
-   `AnimationClassNiteOwl` `NOT RORSCHACH` (slot 14). Their captions name an opponent type, as the code predicts.
-3. **`anim_meta.json` `event_names`**: 74 of 75 entries agree with the exe. Id 14 is `WALK_CYCLE_POINT` in the data captions and
-   `UNUSED` in the exe (`ANIMATION_EVENT___UNUSED` = 14). 18 registered events never occur in `event_names`:
+1. **Enum variable 11 is `ANIMATION_ENUM___OPPONENT_MODEL_TYPE`** — the *opponent's* model type, and its values are the
+   `OPPONENT_MODEL_TYPE` family: NONE 0, RORSCHACH 1, NITE_OWL 2, ENEMY_01 3, ENEMY_02_BIG_GUY 4, UNDERBOSS 5, ENEMY_03 6, ENEMY_04 7
+   (the ids `anim_meta.py` uses for "character type"). They are *not* `CHARACTER_TYPES` (there RORSCHACH 0, NITE_OWL 1, BIKER 2, ...).
+2. **The "value slot" 0 / 4 / 14 / 23 of an ENUM criterion is not a selector of whose type is tested.** It is `m_ianimationvalue`,
+   an `ANIMATION_VALUE` id (0 NONE, 4 ATTACK_MOVE_DIST, 14 RELATIVE_HEAD_HEIGHT, 23 VERTICAL_HEIGHT_TO_TARGET) that the ENUM branch
+   never reads; it is whatever was left in the editor's Value box. A reader that keys on it (an older `anim_meta.py` did, with
+   `_VAR_PARTNER = (0, 4)` / `_is_partner_type_leaf`) drops real opponent-type tests. In the Part 2 data there are 7 such criteria:
+   `NiteOwlAttackFragment` 4x `ENEMY_02_BIG_GUY` (slot 23), `RorshackAttackFragment` 1x `ENEMY_02_BIG_GUY` (slot 23),
+   `AnimationClassRorschach` `NOT NITE_OWL` (slot 14), `AnimationClassNiteOwl` `NOT RORSCHACH` (slot 14). Their captions name an
+   opponent type, as the code predicts.
+3. **Event names from captions** (`anim_meta.json` `event_names`): 74 of 75 entries agree with the exe. Id 14 is `WALK_CYCLE_POINT`
+   in the data captions and `UNUSED` in the exe (`ANIMATION_EVENT___UNUSED` = 14). 18 registered events never occur in the captions:
    1 PUNCH, 3 STOP_R, 22 ALLOW_AUTOAIM, 42 NO_LONGER_IMMUNE_TO_ATTACK, 43 RIGHT_FOOT_UP, 44 LEFT_FOOT_UP, 50 RIGHT_ROTATED_HEADING,
    51 LEFT_ROTATED_HEADING, 63-65 UNDERBOSS_*_FLAMER*, 66/67 TRIGGER_*_INTERPOLATING, 68 UNDERBOSS_JUMP_OFF_LAND_DONE,
    71 UNDERBOSS_WOBBLE_DONE, 81 UNDERBOSS_SUPPORT_EVENT, 89/90 *_DEPTH_OF_FIELD.
-4. `ENGINE_CONSTANTS.md` "CHARACTER_TYPE enum (full)" omits `COP_FAST` = 24 and `INVALID` = -1; the rest agrees.
-5. `ENGINE_CONSTANTS.md` "WEAPON_TYPE enum: BASH_1H/MELEE_ONE_HAND=0, BASH_2H/MELEE_TWO_HAND=1" merges two families:
-   `WEAPON_TYPES` {NONE -1, BASH_1H 0, BASH_2H 1} and `WEAPON_TYPE` {MELEE_ONE_HAND 0, MELEE_TWO_HAND 1}. The weapon the criteria
-   test is neither: enum variable 5 is `WEAPON_ANIMATION_TYPE` {UNARMED 0, BASH_1H 1, BASH_2H 2}, and variable 12 is
-   `OPPONENT_WEAPON_TYPE` {NONE -1, BASH_1H 0, BASH_2H 1} (stored as 4294967295 in the fragments for NONE).
+4. The `CHARACTER_TYPES` family includes `COP_FAST` = 24 and `INVALID` = -1 (a "CHARACTER_TYPE enum (full)" without them is
+   incomplete; the family table below is the complete one, which `ENGINE_CONSTANTS.md` refers to).
+5. `WEAPON_TYPES` {NONE -1, BASH_1H 0, BASH_2H 1} and `WEAPON_TYPE` {MELEE_ONE_HAND 0, MELEE_TWO_HAND 1} are two families
+   ("BASH_1H/MELEE_ONE_HAND=0, BASH_2H/MELEE_TWO_HAND=1" merges them). The weapon the criteria test is neither: enum variable 5 is
+   `WEAPON_ANIMATION_TYPE` {UNARMED 0, BASH_1H 1, BASH_2H 2}, and variable 12 is `OPPONENT_WEAPON_TYPE` {NONE -1, BASH_1H 0, BASH_2H 1}
+   (stored as 4294967295 in the fragments for NONE).
 
 ## Checked against the game data (Part 2 PC, all 906 `.fragment.json`, read-only)
 
@@ -398,7 +401,7 @@ Criteria kind ACTION: `m_ianimationaction` (rec+0x24). The property UI is a plai
 | 34 | FLIP_MOVE |
 
 ### `OPPONENT_MODEL_TYPE` (8 names, prefix `OPPONENT_MODEL_TYPE___`, registered in 0x809e94)
-Values of enum variable 11. **These are the ids the toolkit calls "character type".**
+Values of enum variable 11. **These are the ids the toolkit's "character type" uses.**
 
 | id | name |
 |---|---|
@@ -991,11 +994,11 @@ file `SAVE_DEVICES` (0x775ad0..0x775b25: −1 `INVALID`, 0 `X360_PS3`, 1 `KEYBOA
 0x80d17a..0x80d3b8: −1 `NONE`, 0 `MENU_UP` … 39 `CAMERA_STICK_RIGHT`, 40 `SIZE`; 9, 10, 14–17, 19 and
 29 are not registered).
 
-## Side finding: the engine hash is not Python `upper()`
+## The engine hash is not Python `upper()`
 
 `FUN_00423ce8` (0x423ce8, the hash used for enum names and property keys) masks **every** byte with `& 0xDF` before shifting it
 in — it does not upper-case letters only. Digits therefore hash as 0x11-0x19 (and `/`, `.`, `-` change too; `_` is unaffected).
-`kh.py` / `kapow_props.kapow_hash` use `str.upper()`, which is wrong for any name containing a digit: of the key-table names
-with a digit, 387 match a registered property hash under `& 0xDF` and 0 under `upper()`. This is why the sync markers showed up as
-`key_ee2a40a0`: `m_nsupersynclocal1` hashes to 0xee2a40a0 with the engine's rule and 0xee2a40a4 with ours. Whether asset-path
-hashes use the same function was not examined.
+A hasher built on `str.upper()` (the old `kh.py`; `kapow_props.kapow_hash` folds with `& 0xDF`) is wrong for any name containing
+a digit: of the key-table names with a digit, 387 match a registered property hash under `& 0xDF` and 0 under `upper()`. This is
+why the sync markers appear as `key_ee2a40a0` in a table hashed with `upper()`: `m_nsupersynclocal1` hashes to 0xee2a40a0 with
+the engine's rule and 0xee2a40a4 with `upper()`. Asset names use the same folding hash (`FUN_005511b8`, `FUN_0054ba59`).

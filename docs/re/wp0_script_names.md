@@ -2,7 +2,7 @@
 
 Target `KapowMultiDEDRM.exe`. Evidence marks: **read** = traced in code (addresses given),
 **data** = verified on the extracted tables (numbers given), **inferred**, **not established**.
-Slots are 4 bytes everywhere. Files are listed in section 9.
+Slots are 4 bytes everywhere. Files are listed in section 10.
 
 ## 0. Result in one page
 
@@ -12,9 +12,9 @@ Slots are 4 bytes everywhere. Files are listed in section 9.
 - Three frame models exist, decided by the registration slot of the handler (section 2). Together
   with the member rule (properties in registration order) this names every script-visible storage
   location a handler touches.
-- Independent checks on data: 3,939/3,939 command signatures (recovered earlier from hashes) equal
-  the record types; 503 state frames have `Task_PushLocals(N)` equal to the summed local sizes; 362
-  compiler-generated polymorphic member accesses resolve to the same member name in every branch
+- Independent checks on data: 3,939/3,939 command signatures (recovered from the hashes, `names.md`)
+  equal the record types; 503 state frames have `Task_PushLocals(N)` equal to the summed local sizes;
+  362 compiler-generated polymorphic member accesses resolve to the same member name in every branch
   class, 0 contradict; 231 of 233 entity members/arguments whose name implies a class receive only
   commands of that class.
 - Applied in Ghidra (copy of the project) and as a text lifter. Corpus `findings/script_lifted/`:
@@ -45,8 +45,9 @@ Slots are 4 bytes everywhere. Files are listed in section 9.
 Extractor: `work/wp0/extract_tail.py` - a symbolic linear sweep from each function entry (register
 and stack-slot tracking, ebp- and esp-based frames, both record idioms) to the `ret` after
 `ScriptClass_FinalizeLayout` 0x47ed4b. **13,205 push-back call sites exist in the exe, all inside
-the 441 register functions; 13,205 records extracted, 0 failed.** (The dump's sizes for 9 register
-functions are wrong, e.g. `CharacterRoot__register`; the sweep does not use them.)
+the 441 register functions; 13,205 records extracted, 0 failed.** The dump's sizes for 9 register
+functions are wrong, e.g. `CharacterRoot__register`; the sweep does not use them and runs to the
+real end of the function.
 
 ### 1.2 Type pointer -> type name (read; 108/108 resolved)
 
@@ -129,10 +130,10 @@ Objects: `Task` (the `ctx` parameter), `TaskFrame` (0x1c bytes), globals `g_self
 
 - After **every** call that can run script, a handler tests `ctx->pendingCall != 0 && !ctx->blocking`.
   Commands and methods then simply return (the request is honoured further up). State functions call
-  `Task_SetResumeLabelAndCall(ctx, n)` 0x47a66f (better name: check pending call): stores n at
-  frame+0xc and runs 0x47a572: **0** continue, **1** a callee frame was pushed - return to the
-  scheduler, the function is re-entered later through `switch(frame->resume)` at case n, **-1** this
-  frame is being unwound - jump to the cleanup block.
+  `Task_SetResumeLabelAndCall(ctx, n)` 0x47a66f (better name: check pending call; it returns an
+  int): stores n at frame+0xc and runs 0x47a572: **0** continue, **1** a callee frame was pushed -
+  return to the scheduler, the function is re-entered later through `switch(frame->resume)` at case
+  n, **-1** this frame is being unwound - jump to the cleanup block.
 - The pending record is written by `Task_SetupCall` 0x47a4b0 through two wrappers:
   0x47a513 (mode -1) `(fromState, calleeFn|0, calleeIndex, self, class, nargs)`: unwind up to and
   including the frame of `fromState`, then push the callee if there is one - seen as
@@ -166,16 +167,17 @@ Objects: `Task` (the `ctx` parameter), `TaskFrame` (0x1c bytes), globals `g_self
 ## 4. Runtime calls (read; table `findings/wp0_builtins.json`)
 
 4,488 handler bodies make 38,943 direct calls to 637 targets; the top 200 cover 96.2 %. All top-200
-entries are named with evidence: 69 read in this pass, 50 from the native message registry, 40 from
+entries are named with evidence: 69 read for this note, 50 from the native message registry, 40 from
 the native property registry, 37 type casts recognised by pattern, 4 from the subsystem map.
 
 - `Entity_SendCommand(target, cmdIndex, hash, args)` 0x596d91 -> 0x47c9fd: runs
   `class->commands[cmdIndex]` if its hash matches; no-op for non-script entities. The index is a
   compile-time constant of the *static* receiver class, so `(index, hash)` identifies the class
   family of the receiver.
-- 0x4f99a4 (dump name `Entity_GetPropertyByHash` is **wrong**): send message by hash, state-aware
-  script lookup 0x47decf, else native message table. All 1,146 constant hashes passed are command
-  hashes except one (0xca2af20a), the native message `Stop` (hash of the bare name).
+- 0x4f99a4 (the dump name `Entity_GetPropertyByHash` is **wrong**; it is send-by-hash, not a
+  property getter): send message by hash, state-aware script lookup 0x47decf, else native message
+  table. All 1,146 constant hashes passed are command hashes except one (0xca2af20a), the native
+  message `Stop` (hash of the bare name).
 - 0x510737 (thunk 0x5107b2) set property by hash; 0x4ff93b (thunks 0x5037ea, 0x506074) get property
   by hash; 0x4f99c3 / 0x4f99dc get/set script property by index.
 - Own methods: `InvokeHandler(ctx, *(class->commands[i]) + 0x24, self, args)`; parent's
@@ -209,7 +211,7 @@ Run headless on a copy (`work/wp0/proj`), in this order, from a directory that d
 contain the scripts, with `-scriptPath work/wp0`:
 
 1. `FixProtos.java protos.lst 2` - commits the decompiler-inferred prototype of 2,262 runtime
-   targets. In the lead's project these functions are `undefined f(void)` with unknown convention,
+   targets. In the base project these functions are `undefined f(void)` with unknown convention,
    so the receiver in ECX is dropped at every call site; after the commit `Entity_SendCommand(...)`
    shows its target. (4,522 commits, 22 s.)
 2. `ApplyScriptLayout.java script_layout.tsv retype` - 532 labels (globals, type objects `T_*`, class
@@ -270,18 +272,20 @@ Before / after (decompiler output only, no lifter):
 
 ### 5.2 Lifter (`work/wp0/lift.py`)
 
-`lift.py Class.handler | 0xADDR`, `--class Class`, `--all OUTDIR` (`--old`: lift the text of `R/dump`; receivers of sends are missing there). Works on the decompiler text
-(`work/wp0/dump2` preferred, `R/dump` as fallback; 28 entries without text are printed as
-disassembly). Passes: unwrap lines; fold the coroutine boilerplate (`CHECKPOINT(n)`,
-`STATE_CHANGE_PENDING`, `WAIT_FRAME/WAIT_SECONDS ... resume at case n`, `LEAVE_STATE/GOTO_STATE/
-CALL_STATE`, `STACKTOP[-k]`, `POP(n)`); member, local and argument names (`self.`, `loc.`, `arg.`,
-`st.` = enclosing state's locals, `starg.`), including raw offsets through an approximate flow
-tracking of which C variable holds which base pointer; polymorphic `IsDerivedFrom` chains; members of
-other objects with a class guess; struct fields and list elements (`list[i].field`, `COUNT(list)`);
-sends as `send(target, Class.command(sig), args)`, by-hash sends, `setprop/getprop(target,"name")`,
-own/parent/library method calls; type operations as `OP<list_entity>."push_back(T)"(/*value,list*/
-&tmp)`; runtime helper names; enum names on member comparisons where the property UI string names
-an enum (`engine_enums.json` family or an inline `A:0,B:1` list); string addresses; float literals.
+`lift.py Class.handler | 0xADDR`, `--class Class`, `--all OUTDIR` (`--old`: lift the text of `R/dump`;
+receivers of sends are missing there). Works on the decompiler text (`work/wp0/dump2` preferred,
+`R/dump` as fallback; 28 entries without text are printed as disassembly). Passes: unwrap lines;
+fold the coroutine boilerplate (`CHECKPOINT(n)`, `STATE_CHANGE_PENDING`,
+`WAIT_FRAME/WAIT_SECONDS ... resume at case n`, `LEAVE_STATE/GOTO_STATE/ CALL_STATE`,
+`STACKTOP[-k]`, `POP(n)`); member, local and argument names (`self.`, `loc.`, `arg.`, `st.` =
+enclosing state's locals, `starg.`), including raw offsets through an approximate flow tracking of
+which C variable holds which base pointer; polymorphic `IsDerivedFrom` chains; members of other
+objects with a class guess; struct fields and list elements (`list[i].field`, `COUNT(list)`); sends
+as `send(target, Class.command(sig), args)`, by-hash sends, `setprop/getprop(target,"name")`,
+own/parent/library method calls; type operations as
+`OP<list_entity>."push_back(T)"(/*value,list*/ &tmp)`; runtime
+helper names; enum names on member comparisons where the property UI string names an enum
+(`engine_enums.json` family or an inline `A:0,B:1` list); string addresses; float literals.
 Unrecognised text is left unchanged; unresolved hashes are tagged `/*?hash*/`, guessed classes carry
 `/*Class?*/`, classes proven by sends / `HasScript` / polymorphic chains carry `/*Class*/`.
 
@@ -290,7 +294,7 @@ command sent to the same expression (919 uses), a preceding `HasScript("X")` tes
 chain (655), the variable or member name matching a class name (1,048; `m_echaracterphysics` ->
 `CharacterPhysics`), a unique long common prefix (38), a property-name string literal in the
 function (20); 344 more are the object's own block reached through a copy of `self`. The name
-rule is a heuristic: where it could be cross-checked it agreed in 231 of 233 cases (section 6).
+rule is a heuristic: where it can be cross-checked it agrees in 231 of 233 cases (section 6).
 
 Corpus-wide resolution (4,514 distinct bodies, `findings/wp0_lift_stats.json`):
 
@@ -319,7 +323,7 @@ Automatic, on all data:
    to the **same member name** in their respective classes (e.g. `m_nmaxhealth`: AiDef +0x2c,
    CharacterDef +0x30; `m_echaracterdef`: CharacterRoot +0x14, AiDef +0x18); 86 read one offset;
    0 blocks without a common name. This tests member offsets of two or more classes against each
-   other with no input from us.
+   other with no input from the extraction.
 4. Name-implied class vs send-implied class for entity members/arguments/locals: 231 agree, 2
    conflict (`FollowPartner._epartner` holds a CharacterRoot, not a `Partner`;
    `BehaviorMovementTest.m_echaracterroot` receives a CharacterRootLogic command).
@@ -339,7 +343,7 @@ CharacterPhysics 4, HudBar 3, TriggerActionDelay 2, DamageBox 1, BehaviorChase 1
 `m_nquarantinetimemin/max` driving a `rand_number` interpolation; `_iweapontype` at +0x190 as in the
 audit). Hit rate for own names: 48/48 handlers, no wrong name found.
 
-Mismatch patterns found, and what was done:
+Mismatch patterns and how the lifter handles them:
 
 | # | pattern | effect | status |
 |---|---|---|---|
@@ -360,9 +364,10 @@ Mismatch patterns found, and what was done:
 - Registrations with a variable record: 4,391 (2,226 commands, 521 states, 1,644 methods).
 - Records: 13,205 of 13,205 (1,676 return, 4,671 argument, 6,858 local). Unparsed: 0.
 - Handlers not lifted from decompiler text: 28 addresses (156 registrations), entry points inside
-  another function of the dump (shared tails); emitted as disassembly.
+  another function of the dump (shared tails); emitted as disassembly. These 28 entries are not
+  functions in the dump (`fn.py`).
 
-## 8. Acceptance test: three handlers explained from the lifted text alone
+## 8. Worked examples: three handlers read from the lifted text alone
 
 **`CharacterRoot.command_give_damage(characterdamagestruct):truth`** (0x691b10; damage handling
 lives in CharacterRoot, not CharacterRootLogic) with `CharacterRoot.DecreaseHealth`.
@@ -426,12 +431,12 @@ behaviour and `command_get_hang_back_time`). Otherwise the distance to the targe
 the def's `command_get_max_melee_distance`; moving in is allowed when the combat orchestrator's
 `m_imovingcharacterslastframe` is under a def limit or the character already moves
 (`command_get_move_speed > 0`); wanted state becomes 4 or 2, and `SetState` is called when it
-differs. *Honestly:* single statements read well, but the order of decisions is hard to follow -
-the function is a 35-case resume switch with gotos between cases; members of the perceived target
-(`loc.etarget->members + 0x88/0x1a0/0x28`) are unnamed because nothing in the function fixes the
-target's class; several float temporaries are shown as `Entity *`/`Task *`. I would not trust my
-reading of the exact branch conditions without the disassembly; the list of commands and members
-involved is reliable.
+differs. *Limits of the lifted text:* single statements read well, but the order of decisions is
+hard to follow - the function is a 35-case resume switch with gotos between cases; members of the
+perceived target (`loc.etarget->members + 0x88/0x1a0/0x28`) are unnamed because nothing in the
+function fixes the target's class; several float temporaries are shown as `Entity *`/`Task *`. The
+exact branch conditions need the disassembly; the list of commands and members involved is
+reliable.
 
 **`BossHUD.StateActive(eCharacterRoot)`** (0x625c7b). Enables `_erootsprite`; picks the name text slot
 from the boss's character type (def member 0 through a CharacterRoot/AiDef polymorphic read of
@@ -457,24 +462,23 @@ otherwise it waits one frame. *Unclear:* which component of the size/offset vect
 - Names marked `?` in `wp0_builtins.json` (7 of the top 200) describe behaviour only.
 - 1,751 member reads of objects with unknown class; 296 frame expressions; 110 type operations
   through a non-constant type object; C locals of methods.
-- Whether `CLS_*`/class ids in `reg_dump.json` are right for all 335 class objects was checked only
+- Whether `CLS_*`/class ids in `reg_dump.json` are right for all 335 class objects is checked only
   through the polymorphic chains that use them (71 distinct classes).
 
-## 10. Proposed toolkit changes (not made)
+## 10. Files
 
-- `gen_data.py` / `reg_dump.json`: add per command `owner_state` (rename of `arg3`), `vars`
-  `[{name,type,role,slot}]` (extract_tail.py), per class `member_offsets` (needs the key table
-  types), top-level `types`, `structs`, `libs`, `class_objects`.
-- Dump naming: 0x4f99a4 is send-by-hash, not a property getter; 0x47a66f returns int.
-- `fn.py`/dump: register function sizes are wrong for 9 classes; 28 handler entries are not
-  functions.
+Kept with the decompilation outside this repository (`ghidra_kapow_out/engine/engine_notes/`,
+see `README.md`):
 
-## 11. Files
-
-- `findings/wp0_script_names.md` (this), `findings/wp0_script_layout.json`,
+- `findings/wp0_script_names.md` (this note), `findings/wp0_script_layout.json`,
   `findings/wp0_builtins.json`, `findings/wp0_lift_stats.json`, `findings/script_lifted/<Class>.c`.
 - `work/wp0/`: `extract_tail.py`, `extract_types.py`, `extract_globals.py`, `natives2.py`,
   `natives3.py`, `calls.py`, `build_layout.py`, `build_builtins.py`, `gen_ghidra_data.py`, `lift.py`,
   `verify_sends.py`, `wp0lib.py`; Ghidra: `ApplyScriptLayout.java`, `FixProtos.java`,
   `DumpDecomp.java`, `script_layout.tsv`, `protos.lst`, `handlers.lst`; `proj/` (modified copy of
   the project), `dump2/` (re-decompiled handlers).
+
+The toolkit's `wlib/reg_dump.json` (written by `wlib/gen_data.py`) carries the command list and
+property order this note relies on, with the owning-state index as `arg3`; the per-handler
+variable records, member offsets, type, struct, library and class-object tables of
+`wp0_script_layout.json` are not part of it.

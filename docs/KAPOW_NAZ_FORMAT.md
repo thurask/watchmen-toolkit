@@ -13,15 +13,9 @@ executable, and verified by extracting and decoding real assets byte-for-byte.
 > the binary point at `c:\Develop\KapowMulti\delivery\...`, e.g.
 > `kernel/assets/texture/texture.cpp`, which is how individual loaders were named.
 >
-> **Corrected 2026-10-02.** The block header, the directory record, the asset
-> header, the texture descriptor and the ModelRes layout below were re-read from
-> the engine's own loaders (research report: [`re/formats.md`](re/formats.md)).
-> Where an earlier version of this document was wrong, the text is corrected
-> and the correction is marked with that date. The main ones: the fixed header
-> is 400 bytes and the directory starts at 400, not 399; a stream pair belongs
-> to its own record, so there is no "+1 shift"; the six slots of a record are
-> languages, not platforms; the u32 after an asset's type name is the length of
-> its property bag, not a class id.
+> The block header, the directory record, the asset header, the texture descriptor
+> and the ModelRes layout below are read from the engine's own loaders (research
+> report: [`re/formats.md`](re/formats.md)) and checked against the files.
 
 There are three nested layers. Each section below peels one off:
 
@@ -67,7 +61,7 @@ a re-implementer: to get at a block you only need to locate its STORED bytes in 
 ZIP — no inflate at the container level.
 
 ### 1.1 What the engine does with an archive
-*Added 2026-10-05 (mount 0x4428fb, called from 0x442e81; lookup 0x43f9a1).*
+*(mount 0x4428fb, called from 0x442e81; lookup 0x43f9a1)*
 
 - At start-up an empty archive list mounts every `.naz` **and `.zip`** in `/`, in listing order;
   a non-empty list (names separated by space or comma) is mounted in order.
@@ -90,9 +84,9 @@ ZIP — no inflate at the container level.
 
 `watchmen_extract.naz_entries` differs on purpose: it keeps the names, checks the directory
 magic, rejects a plain zip, reads `psize` (naz +12) bytes and `naz_read` would inflate method 8.
-Each entry now carries `key` (`naz_key(name)`, the engine's index key) and `naz_entries(path,
+Each entry carries `key` (`naz_key(name)`, the engine's index key) and `naz_entries(path,
 warn=...)` reports any entry whose compression method is not 0, since the engine would read it
-as stored. Measured since (`naz_entries` on three archives): 57 entries, 57 unique keys, every
+as stored. Measured (`naz_entries` on three archives): 57 entries, 57 unique keys, every
 key = `naz_key(name)`, method 0, +12 == +16 (`psize == usize`) on the PC Part 2 archive, the
 Bordello-mod archive and the XBLA Part 2 archive, so reading the length at +12 (toolkit) or +16
 (engine) gives the same bytes there. The PS3 archives were not opened for this check.
@@ -111,15 +105,13 @@ A level (e.g. `bordello`, `nightclub`, `streetsofriot`, …) ships as **two file
 
 Splitting "what is it" (headers, small, parsed first) from "the heavy bytes"
 (streams) is the core idea of the format. The header file is parsed up front to
-build the asset table. *[Corrected 2026-10-05; this said "stream blobs are pulled
-from `block_s_z` only when an asset is actually needed".]* For a load block that
-is not what happens: when the last header blob has been read the loader hands
-**every** stream record of the block to the stream manager (state 5 of
-0x4a36d8 → 0x4e0515), at most 10 requests are queued at a time (0x4de7af), and
-the block does not reach its final state — the trailing fragment is not read
-and nothing is applied — until every stream has been delivered (state 6,
-0x497ee9 → 0x4df5bb). A record whose asset is a "missing asset" is not
-requested but counts as delivered. See §2.4.
+build the asset table. The streams of a load block are not pulled on demand: when
+the last header blob has been read the loader hands **every** stream record of the
+block to the stream manager (state 5 of 0x4a36d8 → 0x4e0515), at most 10 requests
+are queued at a time (0x4de7af), and the block does not reach its final state — the
+trailing fragment is not read and nothing is applied — until every stream has been
+delivered (state 6, 0x497ee9 → 0x4df5bb). A record whose asset is a "missing asset"
+is not requested but counts as delivered. See §2.4.
 
 Despite the `_z` suffix, **the block files are not zlib-compressed as a whole** —
 their first bytes are not the zlib `0x78` marker. Compression is applied
@@ -127,11 +119,10 @@ their first bytes are not the zlib `0x78` marker. Compression is applied
 
 ### 2.1 `block_h_z` overall layout
 
-*Corrected 2026-10-02.* Earlier versions called the first ~330 bytes an opaque
-high-entropy preamble, placed a "small fixed header at 327" and started the
-directory at 399. The engine reads **exactly 400 bytes in one call**
-(`FUN_004a36d8`, `push 0x190` at 0x4ae315) and the directory follows at 400.
-The high-entropy part is the encrypted fingerprint string.
+The engine reads **exactly 400 bytes in one call** (`FUN_004a36d8`, `push 0x190` at
+0x4ae315) and the directory follows at 400. The high-entropy part of the header is
+the encrypted fingerprint string, not an opaque preamble of ~330 bytes; there is no
+"small fixed header at 327" and the directory does not start at 399.
 
 ```
  offset 0 ─ 399 : fixed header
@@ -169,9 +160,7 @@ The high-entropy part is the encrypted fingerprint string.
                              concatenated in directory order
 ```
 
-The former names for @336 / @340 / @344 (`firstBlobSize`, `maxBlobSize`,
-`fileSize-8`) described the same numbers: the file ends with the 8-byte
-trailing blob, so `fragmentOffset == fileSize − 8`.
+The file ends with the 8-byte trailing blob, so `fragmentOffset == fileSize − 8`.
 
 **In situ (bordello):** `tablesSize=243241`, `numEntries=2291`, directory spans
 `[400, 243641)`, header blobs start at `243641`. The first entry is
@@ -180,7 +169,7 @@ trailing blob, so `fragmentOffset == fileSize − 8`.
 `watchmen_extract.parse_block_header(h)` returns these fields;
 `fingerprint_decrypt()` is the cipher.
 
-*Corrected 2026-10-05 (header fields @32, @327, @328, @388).*
+Header fields @32, @327, @328, @388 in detail:
 
 - **@32 is the block version signature**, in block byte order. The engine computes it in
   0x49db60: a CRC over `"8"` (block version 8) and then, for every asset type sorted by name
@@ -190,16 +179,15 @@ trailing blob, so `fragmentOffset == fileSize − 8`.
   build's type versions). The PC loader calls the function (0x4a3b5e) and **discards the
   result**: the file's value is never compared. The X360 Part 2 loader does the same in the
   decompilation; PS3 Part 2 (0x20e850, read from the decompilation only) discards it too.
-- **@328 is not the signature.** Earlier versions of this document printed it as the u32
-  `0x593F430A`; the bytes are `0a 88 3f 59` (0x593F880A read little-endian) and they are
-  identical on the big-endian consoles, where every neighbouring u32 is byte-swapped — so it is
-  not a platform-order integer. It is `fingerprintCrc`: the unfolded bit-CRC (`kapow_hash`) of
-  the 255-byte plaintext fingerprint field, the text followed by zero bytes (recomputed: the
-  54-character default text plus 201 zeros gives 0x593F880A; 254 or 256 bytes, or the folded
-  name hash, do not). The loader does not read it and the writer is not in the game executable.
-  `parse_block_header` returns the u32 @32 as `version_signature`, the value @328 as
-  `fingerprint_crc` with `fingerprint_crc_ok` (does it match the decrypted fingerprint) and
-  still the four bytes as `unknown_328` (up to 1.3.0 `version_signature` held the @328 value).
+- **@328 is not the signature.** The bytes are `0a 88 3f 59` (0x593F880A read little-endian)
+  and they are identical on the big-endian consoles, where every neighbouring u32 is
+  byte-swapped — so it is not a platform-order integer. It is `fingerprintCrc`: the unfolded
+  bit-CRC (`kapow_hash`) of the 255-byte plaintext fingerprint field, the text followed by zero
+  bytes (recomputed: the 54-character default text plus 201 zeros gives 0x593F880A;
+  254 bytes or 256 bytes, or the folded name hash, do not). The loader does not read it and the writer is not in
+  the game executable. `parse_block_header` returns the u32 @32 as `version_signature`, the
+  value @328 as `fingerprint_crc` with `fingerprint_crc_ok` (does it match the decrypted
+  fingerprint) and the four bytes as `unknown_328`.
 - **@388** is the low-violence flag: 0x4a36d8 passes the byte to 0x435c0b on the platform
   object, which only ever sets the flag; `GetIsLowViolenceMSG` (0x47b135) returns it. It is 0 in
   all nine staged blocks (`low_violence` False).
@@ -210,10 +198,6 @@ trailing blob, so `fragmentOffset == fileSize − 8`.
   nine staged blocks.
 
 ### 2.2 The directory record (per asset)
-
-*Corrected 2026-10-02.* Earlier versions started at 399 and read the record as
-`flag, pair, sizes, hash, name`; the flag and pair are the **tail** of the
-record, and the six copies are per **language**, not per build platform.
 
 Walking from offset **400**, each record is variable-length (engine
 `FUN_004a3525`):
@@ -234,17 +218,15 @@ The slot index is the current language (engine `FUN_0045c762`, the index the
 loader logs as "language: %s"). The six slots are equal except on the
 `numLocalized` records that follow the main directory; for those the loader
 seeks to `languageHeaderOffset[language]` before reading their header blobs.
-*[2026-10-04, replacing "which language each slot number means is not
-established":]* The slot number is the engine's `LANGUAGE` value (enum
-registered at 0x47ff8c): **0 English, 1 French, 2 Italian, 3 German,
-4 Spanish, 5 Danish**. That the block slots use this numbering is inferred
-from the loader (the slot index is the current language) and checked on data:
-the same text asset decoded from the six slots of the main block is English,
-French, Italian, German and Spanish in slots 0 - 4 (Parts 1 and 2; PC, X360,
-PS3). Slot 5 is a byte copy of slot 0 in every shipped block: no Danish text
-exists. The localized records are the 14 text tables of the main block and
-one texture (`WB_WatchmenLogo_01_uk.bmp`) of the menu block. The extractor
-writes slot 0 to `extracted/` by default (`--language 0..5`) and every
+The slot number is the engine's `LANGUAGE` value (enum registered at 0x47ff8c):
+**0 English, 1 French, 2 Italian, 3 German, 4 Spanish, 5 Danish**. That the block
+slots use this numbering is inferred from the loader (the slot index is the current
+language) and checked on data: the same text asset decoded from the six slots of
+the main block is English, French, Italian, German and Spanish in slots 0 - 4
+(Parts 1 and 2; PC, X360, PS3). Slot 5 is a byte copy of slot 0 in every shipped
+block: no Danish text exists. The localized records are the 14 text tables of the
+main block and one texture (`WB_WatchmenLogo_01_uk.bmp`) of the menu block. The
+extractor writes slot 0 to `extracted/` by default (`--language 0..5`) and every
 language's text tables to `text/`.
 
 #### Text assets (`textRes`)
@@ -267,8 +249,10 @@ game's `data/` folder, spelled `data/Levels/Game_Levels/<Level>/Gameplay/`;
 (`files/data/levels/game_levels/<level>/gameplay/<name>.hpd`) unless
 `--names stored` is given.
 
-Type hashes (`kapow_props.name_hash` of the type name — the hash folds every
-byte with `& 0xDF`, it does not upper-case):
+#### Type hashes
+
+`kapow_props.name_hash` of the type name — the hash folds every byte with `& 0xDF`,
+it does not upper-case:
 
 | hash | type name |
 |---|---|
@@ -283,23 +267,22 @@ byte with `& 0xDF`, it does not upper-case):
 | `0x86a9d7dd` | `grass` |
 | `0xe1faf50f` | `mediastream` |
 | `0xdeb3f74e` | `DetailMeshAsset` |
-| `0x41764525` | `ModelEffects(ModelRes)` *(named 2026-10-02)* |
-| `0x96ea413f` | `TextureEffects(Texture)` *(named 2026-10-02)* |
+| `0x41764525` | `ModelEffects(ModelRes)` |
+| `0x96ea413f` | `TextureEffects(Texture)` |
 | `0x6532e9b4` | `terrain` |
 | `0xd8c06967` | `pivotbook` |
 | `0x48d86c33` | `aipathdata` |
-| `0x62f2722a` | `font` *(named 2026-10-05; registered 0x5431f5)* |
-| `0xf1fdbe49` | `terrainColoringAsset` *(named 2026-10-05; registered 0x531981)* |
+| `0x62f2722a` | `font` (registered 0x5431f5) |
+| `0xf1fdbe49` | `terrainColoringAsset` (registered 0x531981) |
 
 `font`: three records in each of the five staged main blocks (Parts 1 and 2; PC, X360, PS3):
-`DaveGibbons40.font`, `TwCentMTCondExtra60.font`, `default.font`. With the two names added no
-record of the nine staged blocks has an unnamed type. `terrainColoringAsset`: no record in any
-Part 2 block and none in the three staged Part 1 **main** blocks; Part 1 data has five
-`.terraincoloringasset` records (final audit of the full Part 1 extracts on the user's PC; not
-re-counted here). Both types are decoded since 1.4.0 (`wlib/font_asset.py` → `<name>.font.json` +
-the atlas `<name>.font.png`; `wlib/terrain_asset.py` → `<name>.terrainColoringAsset.json` + the map
-PNG; FORMATS_MISC.md "`.font`" and "`.terraincoloringasset`"); the raw bytes stay under
-`extracted/` beside the JSON.
+`DaveGibbons40.font`, `TwCentMTCondExtra60.font`, `default.font`. No record of the nine staged
+blocks has an unnamed type. `terrainColoringAsset`: no record in any Part 2 block and none in
+the three staged Part 1 **main** blocks; Part 1 data has five `.terraincoloringasset` records
+(measured on the full Part 1 extracts). Both types are decoded (`wlib/font_asset.py` →
+`<name>.font.json` + the atlas `<name>.font.png`; `wlib/terrain_asset.py` →
+`<name>.terrainColoringAsset.json` + the map PNG; FORMATS_MISC.md "`.font`" and
+"`.terraincoloringasset`"); the raw bytes stay under `extracted/` beside the JSON.
 
 `ModelEffects(ModelRes)` and `TextureEffects(Texture)` are script classes on
 top of a native asset class. They have no reader of their own: the base
@@ -311,18 +294,8 @@ starting where blob *i−1* ended, beginning at `400 + tablesSize`.
 
 ### 2.3 The stream-binding rule
 
-*Corrected 2026-10-02.* This section used to describe a "+1 shift": the stream
-of asset *i* was taken from the pair parsed with record *i+1*, and the
-directory was said to open with a sentinel flag. Both were artefacts of
-starting the walk at 399 — byte 399 is a zero pad byte of the fixed header and
-happened to parse as `flag = 0`. Read from 400, with the flag and pairs at the
-end of the record, **an asset's stream is the pair stored in its own record**,
-and there is no sentinel.
-
-The two readings bind the same bytes to the same assets, which is why
-extraction was correct before: across all blocks of Part 2 PC (8,696 entries)
-the corrected parser returns the same header and stream for every entry.
-What the old reading could not see were the `numLocalized` records.
+Read from 400, with the flag and pairs at the end of the record, **an asset's
+stream is the pair stored in its own record**, and there is no sentinel.
 
 **In situ.** The record's own pair inflates to the stream length the asset's
 header predicts:
@@ -333,16 +306,17 @@ header predicts:
 | 3 | `Sky_SunFlare_01.bmp` | 10 936 | 10 936 |
 | 4 | `Sky_Moon_02.bmp` | 87 408 | 87 408 |
 
-and the walk from 400 ends exactly at `400 + tablesSize`.
+and the walk from 400 ends exactly at `400 + tablesSize`. Across all blocks of
+Part 2 PC (8,696 entries) this parser returns one header and one stream for every
+entry.
 
-*[Corrected 2026-10-05; this said a blob is compressed "when its first byte is `0x78`".]*
 Whether a blob (header *or* stream) is zlib-compressed is decided by the **asset type**, not by
 its bytes: `0x5480fe` = config `useCompressedAssets` (default 1) **and** the type's
 compressible flag, which every type has except **`mediastream`** (0x554a2e clears it). A
 compressed blob is read through zlib inflate bounded by the directory size (0x437546).
 `_maybe_inflate(blob, type_name)` follows the type and reports a blob that should inflate and
 does not (`extract_block(..., report=...)`, `Toc.compressed`, `Toc.inflate_failed`); only a blob
-of an unknown type is still sniffed. Four PC Part 2 blocks: **2,161 header blobs inflate, 7
+of an unknown type is sniffed. Four PC Part 2 blocks: **2,161 header blobs inflate, 7
 `mediastream` headers are raw, 444 of 444 stream blobs inflate, 0 failures.**
 
 Engine cross-reference: the asynchronous block loader is `FUN_004a36d8`
@@ -352,9 +326,17 @@ streams `block_s_z` in chunks (chunk-size array at loader-context `+0x1C0`, coun
 swapped at `+0x1AC`/`+0x1B0`, both allocated with `ioBufferSize`), consuming the
 `(off,sz)` pairs of the records.
 
+**Ruled out.**
+- A directory walk that starts at 399 (byte 399 is a zero pad byte of the fixed
+  header and parses as `flag = 0`) reads the records as `flag, pair, sizes, hash, name` and binds the stream of asset *i* to the pair parsed with record *i+1*
+  (a "+1 shift" behind a sentinel). It binds the same bytes to the same assets
+  as the walk from 400, but cannot see the `numLocalized` records.
+- The six slots of a record are not build platforms.
+- A blob is not compressed "when its first byte is `0x78`"; the type decides.
+
 ### 2.4 Loading rules and the trailing blob
-*Added 2026-10-05 (0x4a36d8, 0x4addf6, 0x4e0e5d, 0x55243f; `LoadBlock` is driven from the end of
-the frame with the frame's spare milliseconds and keeps a 5 ms margin).*
+*(0x4a36d8, 0x4addf6, 0x4e0e5d, 0x55243f; `LoadBlock` is driven from the end of the frame with
+the frame's spare milliseconds and keeps a 5 ms margin)*
 
 1. **Order.** Header (400 bytes) → directory → header blobs in record order, blob *i+1* being
    read by the I/O thread while blob *i* is deserialised (that is what the two buffers are for)
@@ -388,7 +370,7 @@ the frame with the frame's spare milliseconds and keeps a 5 ms margin).*
    the pivot book, version 2, and as the 0x10000 difference of the two
    texture values). The second word differs per file and per platform; that
    it is the source CRC is read from code and was not checked on files. Two
-   standalone pairs with the same base name in different folders no longer
+   standalone pairs with the same base name in different folders do not
    overwrite each other in `extract`: a copy with different bytes is written
    as `<name>~<folder>.<ext>` with a WARNING (none occurs in the six sets:
    three distinct base names each).
@@ -399,15 +381,15 @@ the frame with the frame's spare milliseconds and keeps a 5 ms margin).*
        StreamSet = [f32×3 min][f32×3 max][str streamFile][u32 = count][u32 count]
                    count × { [u32 typeHash][str name] 6 × ([u32 offset][u32 size]) }
 
-   *Corrected 2026-10-05 from data.* The bounds are two 3-float vectors (this section
-   said two 4-float vectors, from the code reading; `parse_block_trailer` tries the
-   4-float layout only when the 3-float one does not end at the blob's end and
-   reports `bounds_floats`). Both counts are 0 in every shipped block but one: the
-   blob is eight zero bytes and `fragmentOffset == fileSize − 8` in the 7 blocks of
-   each Part 2 set and in 7 of the 8 of each Part 1 set. **Part 1's
-   `Prison.block_h_z`** has a blob of 11,765 / 11,769 / 11,773 bytes (PC / PS3 /
-   Xbox 360) with 0 automatic and 4 manual sets of 26 + 24 + 8 + 38 = 96 entries
-   (65 models, 31 textures; 92 distinct assets).
+   The bounds are two 3-float vectors (from data; the code reading suggested two
+   4-float vectors — `parse_block_trailer` tries the 4-float layout only when the
+   3-float one does not end at the blob's end and reports `bounds_floats`). Both
+   counts are 0 in every shipped block but one: the blob is eight zero bytes and
+   `fragmentOffset == fileSize − 8` in the 7 blocks of each Part 2 set and in 7 of
+   the 8 of each Part 1 set. **Part 1's `Prison.block_h_z`** has a blob of
+   11,765 / 11,769 / 11,773 bytes (PC / PS3 / Xbox 360) with 0 automatic and 4
+   manual sets of 26 + 24 + 8 + 38 = 96 entries (65 models, 31 textures; 92
+   distinct assets).
    - `streamFile` is a full path from the platform's derived root, e.g.
      `/derived_pc/Levels/Game_Levels/Prison/Art/PrisonYard.block_s_z`. The four
      files are **stream-only blocks**: a `.block_s_z` with no `.block_h_z`.
@@ -435,13 +417,13 @@ the frame with the frame's spare milliseconds and keeps a 5 ms margin).*
    reference count and referrers (0x551f10).
 9. **StreamingProbe**: sector 0 = inside `sector0Radius`, 1 = inside the frustum, 2 = inside
    `sector2Radius` (0x4e244e); priority key = sector code (0, 0x20000000, 0x40000000; 0x60000000
-   otherwise) | int(distance × 100) & 0x1FFFFFFF, smallest first (0x4de3b3). No Part 2 block has stream sets; Part 1 `Prison.block_h_z` has four manual sets (rule 4; measured).
+   otherwise) | int(distance × 100) & 0x1FFFFFFF, smallest first (0x4de3b3). No Part 2 block has
+   stream sets; Part 1 `Prison.block_h_z` has four manual sets (rule 4; measured).
 10. **PS3 Part 2** (0x20e850) discards the signature result, as PC does.
 
-*(Rules 6–10 read 2026-10-06.)*
-
 **Memory budgets.** The PC Part 2 executable embeds the engine configuration for every platform
-(text at 0xc8f178, 3,630 bytes; reader 0x41cf54; suffixes K / M / G shift by 10 / 20 / 30):
+(text at 0xc8f178, 3,630 bytes; reader 0x41cf54; suffixes K / M / G shift by 10 / 20 / 30;
+every value read from the executable's bytes):
 
 | Key | editor | ps3 (testkit) | ps3_devkit | x360 | pc |
 |---|---|---|---|---|---|
@@ -458,8 +440,6 @@ the frame with the frame's spare milliseconds and keeps a 5 ms margin).*
 | TempBlock / TempThreadBlock | 16M / 2M | 768K / 128K | 768K / 128K | 768K / 128K | 768K / 128K |
 | ListTypeStructPoolSize | 128K | 128K | 128K | 128K | 128K |
 
-*(Every value re-read from the executable's bytes on 2026-10-05.)*
-
 ---
 
 ## 3. Layer three — the per-asset header blob (property bag)
@@ -474,40 +454,39 @@ way and then carries a type-specific body:
  …        bagDwords × 4 bytes of property records, then the type-specific body
 ```
 
-**The header states its byte order** *(added 2026-10-05, from data)*: `typeNameLen`
-is in the byte order of the block the header came from, and it is a valid name
-length in one order only, so an extracted header can be read without knowing
-its platform (`watchmen_extract.header_order`; 5,490 of 5,490 model headers of
-six sets — Parts 1 and 2 on PC, Xbox 360, PS3 — say so, and the result agrees
-with the platform). The toolkit uses this for every header it reads outside
-its block (character parts, ragdoll rig, model nodes, skeleton names). A rule
-that counted mesh descriptors per order tied on single-submesh models and
-picked the wrong order on 87 console Part 2 and 156 console Part 1 models.
+**The header states its byte order** (from data): `typeNameLen` is in the byte
+order of the block the header came from, and it is a valid name length in one
+order only, so an extracted header can be read without knowing its platform
+(`watchmen_extract.header_order`; 5,490 of 5,490 model headers of six sets —
+Parts 1 and 2 on PC, Xbox 360, PS3 — say so, and the result agrees with the
+platform). The toolkit uses this for every header it reads outside its block
+(character parts, ragdoll rig, model nodes, skeleton names). A rule that counts
+mesh descriptors per order ties on single-submesh models and picks the wrong
+order on 87 console Part 2 and 156 console Part 1 models.
 
-**Property records, two layouts** *(added 2026-10-05, from data)*. A record of
-the bag is `[u32 owner][u32 key][u32 typeHash][u32 k][k dwords]` in Part 2 and
-in the PS3 build of Part 1 (block signature 0x79D3E0DA). The standalone Part 1
-on PC and Xbox 360 (signature 0xEE1FB0A3) stores `[u32 owner][u32 key][u32 k]
-[k dwords]`, without the type hash. The object header `[u32 len][name][u32
-dwordCount]` is the same, so the layout of an object is the one whose records
-end exactly at its dword count; nothing is guessed. Value types of the older
-layout are those the typed build stores for the same (class, property): 260
-pairs, 140 names, each with one type (`kapow_props.untyped_types`), covering
-every pair that occurs. `kapow_props.read_records` / `find_objects` read both;
-texture sheets, `.pb`, `.grass`, `.detailmesh` and the model property bag go
-through them. Read from the data, not from an executable. A 64-bit value
-(`uniqueID`, type hash 0xEDEF427C) is two u32 words, low word first, on every
-platform; console swaps the bytes of each word, not of the eight.
-The older **ModelRes header** (the type-specific body after the bag) differs
-in one more byte per submesh record and is read as well: see "The stand-alone
-Part 1 header" in §6b (`parse_model_header` reads 1,090 of 1,090).
+**Property records, two layouts** (from data). A record of the bag is
+`[u32 owner][u32 key][u32 typeHash][u32 k][k dwords]` in Part 2 and in the PS3
+build of Part 1 (block signature 0x79D3E0DA). The standalone Part 1 on PC and
+Xbox 360 (signature 0xEE1FB0A3) stores `[u32 owner][u32 key][u32 k][k dwords]`,
+without the type hash. The object header `[u32 len][name][u32 dwordCount]` is the
+same, so the layout of an object is the one whose records end exactly at its
+dword count; nothing is guessed. Value types of the older layout are those the
+typed build stores for the same (class, property): 260 pairs, 140 names, each
+with one type (`kapow_props.untyped_types`), covering every pair that occurs.
+`kapow_props.read_records` / `find_objects` read both; texture sheets, `.pb`,
+`.grass`, `.detailmesh` and the model property bag go through them. Read from
+the data, not from an executable. A 64-bit value (`uniqueID`, type hash
+0xEDEF427C) is two u32 words, low word first, on every platform; console swaps
+the bytes of each word, not of the eight. The older **ModelRes header** (the
+type-specific body after the bag) differs in one more byte per submesh record
+and is read as well: see "The stand-alone Part 1 header" in §6b
+(`parse_model_header` reads 1,090 of 1,090).
 
-*Corrected 2026-10-02.* The u32 after the type name was documented as a
-"classId / version" (`0x2D` for textures, `0x5B` for models). It is the
-dword count of the property bag (engine `FUN_00511f96`): 45 for `Texture`, 91
-for `ModelRes`, 55 for `TextureEffects(Texture)`, 96 for
-`ModelEffects(ModelRes)`. The body starts at
-`4 + typeNameLen + 4 + 4·bagDwords`.
+The u32 after the type name is the dword count of the property bag (engine
+`FUN_00511f96`): 45 for `Texture`, 91 for `ModelRes`, 55 for
+`TextureEffects(Texture)`, 96 for `ModelEffects(ModelRes)`. The body starts at
+`4 + typeNameLen + 4 + 4·bagDwords`. It is not a class id or version (`0x2D`
+for textures, `0x5B` for models are these same counts).
 
 Reading `typeName` is how you classify an asset without guessing. **In situ
 (bordello)** the class histogram is roughly: 843 `sound`, 273 `Texture`, 217
@@ -529,9 +508,7 @@ in a single stream.
 
 ### 4.1 Header body
 
-*Corrected 2026-10-02 (engine `FUN_005382aa`, descriptor `FUN_00429e77`).*
-Earlier versions described "one ~30-byte record per stored layer" starting at
-a fixed offset 196, with a stride that drifts.
+Engine `FUN_005382aa`, descriptor `FUN_00429e77`:
 
 ```
  (typeName, bagDwords, property bag as in §3)
@@ -578,14 +555,14 @@ rebuild on extraction.
                                 written by the converter 0x45473f; 0 on PC and PS3)
 ```
 
-*Console (added 2026-10-05, from data):* the Xbox 360 and PS3 texture header is
-this same layout in big-endian (`parse_texture_frames(hdr, ">")`). On Xbox 360
-the last u32 of the descriptor is the **stored byte size of that layer** (0 on
-PC and PS3); the sizes add up to the stream length on 937 of 937 Part 2 and
-1,190 of 1,190 Part 1 textures, and for a cube layer the size is six times the
-2D rule. `extract` plans the console carve from this header and falls back to
-the stride walk, with a `WARNING:` line and `decodeWarnings` in `sheet.json`,
-only when it does not read (0 times on the four console sets).
+*Console* (from data): the Xbox 360 and PS3 texture header is this same layout in
+big-endian (`parse_texture_frames(hdr, ">")`). On Xbox 360 the last u32 of the
+descriptor is the **stored byte size of that layer** (0 on PC and PS3); the sizes
+add up to the stream length on 937 of 937 Part 2 and 1,190 of 1,190 Part 1
+textures, and for a cube layer the size is six times the 2D rule. `extract` plans
+the console carve from this header and falls back to the stride walk, with a
+`WARNING:` line and `decodeWarnings` in `sheet.json`, only when it does not read
+(0 times on the four console sets).
 
 `hasAlpha` of slot 0 is what enables the alpha test (0x429e77 → 0x571d5d); `sheet.json`
 records it as `textureHasAlpha`.
@@ -618,19 +595,13 @@ per Part 1 set; the three platforms agree): Part 2 has slot 3 on 59 textures
 and roof textures plus `pickupWindows`) and slot 7 on 55; Part 1 has slot 4 on
 24 and slot 7 on 33; slots 5 and 6 occur on none. `extract` names every layer
 PNG by its slot (`watchmen_extract.TEXTURE_SLOT_LABELS`): `diffuse`, `normal`,
-`specMap`, `glow`, `height`, `fallOff`, `ambOcc`, `specSize`. In 1.3.0 a slot-3
-map without a slot-2 map was written `_specMap_` (15 textures per Part 2 set,
-23 per Part 1 set) and a slot-4 map `_specSize_` (10 and 24), and the material
-writers used them as a specular-colour map and a specular-power map. The
-format rule that produced those names is kept only for a layer whose slot is
-not known (the stride walk and the drift rescue, which decode no shipped
-texture).
-
-The offsets earlier versions gave for a "30-byte record" (`+4` width × 256,
-`+8` height × 256, `+13` format, `+20 == 256`, `+26` mip count) are these same
-fields read through a window that began five bytes early, at `nFrames`: the
-"× 256" is the `hasAnim` byte in front of the width, and the "256 signature" is
-the type field (1) seen one byte early.
+`specMap`, `glow`, `height`, `fallOff`, `ambOcc`, `specSize`. 15 textures per
+Part 2 set and 23 per Part 1 set have a slot-3 map without a slot-2 map, and
+10 and 24 have a slot-4 map. A layer whose slot is not known (the stride walk
+and the drift rescue, which decode no shipped texture) is labelled by a format
+rule instead: a slot-3 map without a slot-2 map is written `_specMap_` and a
+slot-4 map `_specSize_`, and the material writers use them as a specular-colour
+map and a specular-power map.
 
 **Format enum** (the engine's enum→`D3DFORMAT` table lives at `0x00C799E0`):
 
@@ -645,19 +616,18 @@ the type field (1) seen one byte early.
 | 9 | `ATI2` / `BC5` | block, 16 B / 4×4 — a two-channel **normal map** |
 | 8 (Xbox 360 only) | `DXT3A` | block, 8 B / 4×4, 4 bits per texel — the height map, in slot 4 where PC has `L8` |
 
-*Format 8, added 2026-10-05:* the Xbox 360 executable's table at 0x830892d8
-maps id 8 to DXT3A. The name and the nibble order are inferred and then
-confirmed by pixels (1 layer identical, 32 within tolerance against the PC `L8`
-map). No PC path accepts id 8. On Xbox 360 the slot-7 specular-size map is
-`DXT1` (PC and PS3: `L8`); `extract` writes its red channel as a grayscale PNG
-(red matches the PC map within a mean of 8.4 on 88 of 88; which channel the
-console shader samples was not read from code). The `L8` / `DXT3A` map of
-slot 4 (10 + 24 textures in Parts 2 + 1) is the height map and is written
-`_height_`; the one of slot 7 (55 + 33) is `specSize`. File slot 7 is engine
-layer 8 (table above).
+*Format 8:* the Xbox 360 executable's table at 0x830892d8 maps id 8 to DXT3A.
+The name and the nibble order are inferred and then confirmed by pixels (1
+layer identical, 32 within tolerance against the PC `L8` map). No PC path
+accepts id 8. On Xbox 360 the slot-7 specular-size map is `DXT1` (PC and PS3:
+`L8`); `extract` writes its red channel as a grayscale PNG (red matches the PC
+map within a mean of 8.4 on 88 of 88; which channel the console shader samples
+was not read from code). The `L8` / `DXT3A` map of slot 4 (10 + 24 textures in
+Parts 2 + 1) is the height map and is written `_height_`; the one of slot 7
+(55 + 33) is `specSize`. File slot 7 is engine layer 8 (table above).
 
-**Cube maps** *(added 2026-10-05, from data; 110 cube maps in Part 2, 200 in
-Part 1)*: the stream holds
+**Cube maps** (from data; 110 cube maps in Part 2, 200 in Part 1): the stream
+holds
 - on PC: the mip **levels** one after another, six faces per level;
 - on Xbox 360: the same, each face of a level padded to 32 × 32 blocks, so
   face *k* of level 0 starts at *k* × the padded level-0 size (a cube under 32
@@ -666,33 +636,34 @@ Part 1)*: the stream holds
 - on PS3: one segment of six face mip chains, each but the last padded to 128
   bytes (segment size = 5·align128(C) + C on 310 of 310; the mip count is
   byte 13 of the 36-byte segment descriptor).
+
 Read this way all six faces of all 310 maps are pixel-identical on the three
-platforms. Up to this correction the extractor read a PC cube as six face
-chains — only face 0 is right that way — and wrote one face on PS3
-(`watchmen_extract.PC_CUBE_LEVEL_MAJOR = False` gives the old PC reading).
+platforms. Reading a PC cube as six face chains is right for face 0 only
+(`watchmen_extract.PC_CUBE_LEVEL_MAJOR = False` gives that reading).
 Code: 0x454384 reads level by level, six faces per level, into the pointers
 0x454492 took from `LockRect(face, level)`; file face *k* is D3D cube face *k*
 (+X, −X, +Y, −Y, +Z, −Z). `sheet.json` of a cube map states it as
-`cubeFaceOrder`; the `faceN_` file names are unchanged. Runtime check
-(measured): in the D3D9 gameplay captures the six level-0 face uploads of 94
-cube textures match file slices 0…5 in that order.
+`cubeFaceOrder`; the files are named `faceN_`. Runtime check (measured): in the
+D3D9 gameplay captures the six level-0 face uploads of 94 cube textures match
+file slices 0…5 in that order.
 
 A typical material packs: slot 0 diffuse (`DXT1`/`DXT5`), slot 1 normal
 (`ATI2`/BC5), slot 2 specular (`DXT1`), optionally slot 7 **glossiness**
 (`L8`) — the gloss / specular-power channel (not a reflection mask).
 
-*Corrected 2026-10-03:* the two channels of a PC `ATI2` layer are stored **Y
-block first, X block second** (each 8 bytes of the 16-byte block). Earlier
-versions of this document did not state the order and the extractor read the
-first block as X; see §4.5.
+The two channels of a PC `ATI2` layer are stored **Y block first, X block
+second** (each 8 bytes of the 16-byte block); see §4.5.
 
-### 4.3 Why a fixed 30-byte stride did not work
+### 4.3 Ruled out: a fixed 30-byte stride
 
-*Corrected 2026-10-02.* The "drift" earlier versions worked around is the
-presence byte: a present slot costs 1 + 29 bytes, an absent one 1 byte. A
-29-byte descriptor followed by the next slot's presence byte looks like a
-30-byte record until a slot is skipped; the gloss map in slot 7 sits behind the
-presence bytes of the empty slots before it. No extra field exists.
+A present slot costs 1 + 29 bytes, an absent one 1 byte. A 29-byte descriptor
+followed by the next slot's presence byte looks like a 30-byte record until a
+slot is skipped; the gloss map in slot 7 sits behind the presence bytes of the
+empty slots before it. No extra field exists. The offsets of a "30-byte record"
+(`+4` width × 256, `+8` height × 256, `+13` format, `+20 == 256`, `+26` mip
+count) are the fields of §4.2 read through a window that begins five bytes
+early, at `nFrames`: the "× 256" is the `hasAnim` byte in front of the width,
+and the "256 signature" is the type field (1) seen one byte early.
 
 ### 4.4 Layer sizing
 
@@ -705,9 +676,8 @@ first, containing exactly `mipCount` levels:
                  = h · align4(w·bpp)                 (linear: X8R8G8B8=4, L8=1)
 ```
 
-*Corrected 2026-10-02:* **linear formats store every row padded to 4 bytes.**
-That adds 5–7 bytes to an `L8` chain that reaches 2×2 and 1×1; earlier versions
-had `w·h·bpp` and absorbed the difference with a tolerance.
+**Linear formats store every row padded to 4 bytes.** That adds 5–7 bytes to an
+`L8` chain that reaches 2×2 and 1×1 (`w·h·bpp` is short by that much).
 
 The inflated stream is, for each frame, each present slot's chain in slot order
 (× 6 for a cube), with no per-layer header. The header says which shape it is:
@@ -719,11 +689,10 @@ The inflated stream is, for each frame, each present slot's chain in slot order
 | **anim** | `nFrames > 1`, `hasAnim` | an N-frame flipbook: each frame = the layer set |
 
 With the row padding, header and stream length agree exactly on **936 / 936**
-Part 2 PC textures (822 single, 110 cube, 4 anim), so the stream length is no
-longer needed as an oracle to pick the shape. Earlier versions inferred the
-shape from the length (`Σ == len`, `Σ·6 == len`, `Σ·N == len`) and reported
-more flipbooks: 10 two- or three-layer materials with same-size `DXT1` layers
-had been read as N frames.
+Part 2 PC textures (822 single, 110 cube, 4 anim), so the stream length is not
+needed as an oracle to pick the shape. Inferring the shape from the length
+(`Σ == len`, `Σ·6 == len`, `Σ·N == len`) reports more flipbooks: 10 two- or
+three-layer materials with same-size `DXT1` layers read as N frames that way.
 
 The extractor uses the exact plan when it tiles the stream byte-for-byte and
 falls back to the length-based planner otherwise (console files; cube textures
@@ -742,29 +711,26 @@ the descriptor type (`1` = 2D, `2` = cube → `WrappedCreateCubeTexture`).
   textures store a flat colour in RGB and the actual decal shape in the alpha, and
   DXT5/DXT3/A8R8G8B8 (and DXT1's 1-bit punch-through) all encode it. Dropping alpha
   turns a decal into a solid colour blob. DXT3 (enum 6) stores an explicit 4-bit
-  alpha per texel, DXT5 an interpolated one: each needs its own decoder. Up to
-  1.4.0 the extractor decoded a DXT3 layer as DXT5 (wrong alpha); since 1.5.0
-  it is decoded as DXT3. No shipped texture of the six game sets uses DXT3
-  (measured: no `*_DXT3.png` layer in the six 1.4.0 exports; the 34 Xbox 360
+  alpha per texel, DXT5 an interpolated one: each needs its own decoder, and a
+  DXT3 layer is decoded as DXT3. No shipped texture of the six game sets uses DXT3
+  (measured: no `*_DXT3.png` layer in the six exports; the 34 Xbox 360
   `*_DXT3A.png` layers are enum 8, a one-channel format with its own decoder).
 - **ATI2 / BC5** → decode the two BC4 channels to X and Y, reconstruct
   `Z = √(1 − X² − Y²)` for a viewable tangent-space normal map. The six
   interpolated BC4 values of a block are rounded to the nearest integer, as the
-  Direct3D reference decoder does; up to 1.4.0 they were truncated, 1 lower on
+  Direct3D reference decoder does; truncating them gives a value 1 lower on
   22 % of the PC and 25 % of the Xbox 360 channel values of Part 2's normal
   maps (measured, 909 layer decodes each; never more than 1).
-  *Corrected 2026-10-03:* on PC (format enum 9) the **first** 8-byte block of
-  each 16-byte block is **Y** and the **second** is **X**
-  (`watchmen_extract.ati2_xy`). Up to toolkit 1.3.0 the extractor wrote the
-  first block to red, so every PC `*_normal_*_ATI2.png` it produced has X and
-  Y swapped; PNGs from those versions must be extracted again. The X360
-  layers (enum 10) and the PS3 `DXT5` layers decode X-first and were always
-  right. In the written PNG, red is X along +u and green is Y along +v (the
-  direction of the stored bitangent); a glTF normal texture needs green
-  inverted. Evidence — the pixel shader pairs sampler `.x` with the tangent
-  and `.y` with the bitangent, the mixed partials of the maps agree only in
-  that order, and a render test — is in `ENGINE_CONSTANTS.md`, section
-  "2026-10-03".
+  On PC (format enum 9) the **first** 8-byte block of each 16-byte block is
+  **Y** and the **second** is **X** (`watchmen_extract.ati2_xy`); a decoder that
+  writes the first block to red produces a `*_normal_*_ATI2.png` with X and Y
+  swapped, and nothing in a PNG says which decoder wrote it. The X360 layers
+  (enum 10) and the PS3 `DXT5` layers decode X-first. In the written PNG, red
+  is X along +u and green is Y along +v (the direction of the stored
+  bitangent); a glTF normal texture needs green inverted. Evidence — the pixel
+  shader pairs sampler `.x` with the tangent and `.y` with the bitangent, the
+  mixed partials of the maps agree only in that order, and a render test — is
+  in `ENGINE_CONSTANTS.md`, section "PC `ATI2` normal maps store Y first".
 - **X8R8G8B8 / A8R8G8B8** → raw 4 B/px, swizzle BGRA→RGB.
 - **L8** → raw 1 B/px grayscale.
 
@@ -774,8 +740,8 @@ the top stored mip for maximum resolution.
 
 ### 4.6 Material switches in the property bag (`sheet.json`)
 
-*Added 2026-10-03.* The 20-byte records of the header's property bag (§4.1)
-are `[salt u32][name hash u32][type hash u32][tag u32][value]`, both hashes
+The 20-byte records of the header's property bag (§4.1) are
+`[salt u32][name hash u32][type hash u32][tag u32][value]`, both hashes
 being the engine name hash of the strings. Nine of the names are the
 TextureSheet's material switches (`watchmen_extract.TEXTURE_SHEET_PROPS`):
 
@@ -787,52 +753,52 @@ TextureSheet's material switches (`watchmen_extract.TEXTURE_SHEET_PROPS`):
 | `normalMapPower` | number | scales the normal map's x and y (`$effectFactors.x`) |
 | `enableNormalMapping` | truth | when false, `extract --glb` embeds no normal texture |
 | `opacity` | number | below 0.99 a type 0 / 10 sheet is drawn in the blended list (0x5739d0) and a type 7 sheet is faded by the sky pass (0x589dd9: the pixel shader's alpha factor); exported as `BLEND` with the opacity as base-colour alpha |
-| `blendType` | integer | 0 standard, 1 add, 2 subtract, 3 manual. The character writer turns a subtractive layer (Rorschach's inkblots) into black ink with alpha, `alphaMode: BLEND`; `extract --glb` does not use it *(corrected 2026-10-04)* *[corrected again 2026-10-04: `extract --glb` uses it too, with the same code; §4.7]* |
+| `blendType` | integer | 0 standard, 1 add, 2 subtract, 3 manual. The character writer and `extract --glb` (same code) turn a subtractive layer (Rorschach's inkblots) into black ink with alpha, `alphaMode: BLEND`; §4.7 |
 | `isLit`, `writeDepthBuffer` | truth | recorded, not used by the GLB writers |
 
-`texture_sheet(header)` returns them for the first sheet of the header (later
-sheets hold defaults *[corrected 2026-10-04: a texture can hold several named
-sheets, each with a `uniqueID` and eight `<layer>MapOverride` paths, and a
-collection node can select one of them; they are alternatives, not defaults.
-`face_rule.texture_sheets` reads them all. See `ENGINE_CONSTANTS.md`, section
-"2026-10-04", "Texture sheets"]*); texture extraction writes them as `sheet.json` beside
-the layer PNGs, and the GLB writers map `twoSided` → `doubleSided`,
-`renderType` 1 → `alphaMode: BLEND`, `alphaThreshold` / 255 → the `MASK`
-cutoff and `normalMapPower` → the normal texture's `scale`.
-*[2026-10-04: that is the mapping of `--materials legacy`. The default now
-builds the whole material from the sheet (`wlib/materials.py`):
-`twoSided` → `doubleSided`. Alpha follows the render list the engine sorts
-the sheet into (`renderType`, 0x5739d0): types 0, 10 and 11 are opaque and
-alpha-tested at `alphaThreshold` / 255 when the diffuse layer has alpha
-(`MASK`; hair included); type 1, and `opacity` below 0.99 on a type 0, 7
-or 10 sheet, are blended (`BLEND`, `opacity` as base-colour alpha). `normalMapPower` → the normal
+`texture_sheet(header)` returns them for the first sheet of the header. A
+texture can hold several named sheets, each with a `uniqueID` and eight
+`<layer>MapOverride` paths, and a collection node can select one of them; they
+are alternatives, not defaults. `face_rule.texture_sheets` reads them all (see
+`ENGINE_CONSTANTS.md`, "Texture sheets", and §4.7). Texture extraction writes
+them as `sheet.json` beside the layer PNGs.
+
+How the GLB writers use them. With `--materials legacy`: `twoSided` →
+`doubleSided`, `renderType` 1 → `alphaMode: BLEND`, `alphaThreshold` / 255 → the
+`MASK` cutoff and `normalMapPower` → the normal texture's `scale`. The default
+builds the whole material from the sheet (`wlib/materials.py`): `twoSided` →
+`doubleSided`. Alpha follows the render list the engine sorts the sheet into
+(`renderType`, 0x5739d0): types 0, 10 and 11 are opaque and alpha-tested at
+`alphaThreshold` / 255 when the diffuse layer has alpha (`MASK`; hair included);
+type 1, and `opacity` below 0.99 on a type 0, 7 or 10 sheet, are blended
+(`BLEND`, `opacity` as base-colour alpha). `normalMapPower` → the normal
 texture's `scale`. `specularSize` is the exponent n of the game's highlight
-(multiplied per texel by specSize.g² · 256 + 1 when the texture has a
-specSize layer), `specularPower` its intensity: roughness = (2 / (n +
-2))^0.25, reflectance F0 = 4 · (2 / (n + 2)) · intensity · specular layer,
-written with `KHR_materials_specular` and, above 0.04, `KHR_materials_ior`;
-both are corrected for the game lighting display-encoded values. A sheet
-without any highlight (`specularPower` ≤ 0 and no cube reflection, or F0 = 0
-everywhere) is written with roughness 1.0 and no roughness texture, so that
-it is matte also where the specular extension is ignored.
-`selfIlluminance` · `selfIlluminanceColor` · glow layer · (albedo + specular
-layer) is the emission. Missing layers count as: specular white, glow white,
-specSize black. The sheet's values are copied to
-`material.extras.watchmen.sheet_values`. Sheet offsets in the executable:
-`specularPower` +0x8c, `specularSize` +0x90, `writeDepthBuffer` +0xa1,
-`twoSided` +0xa4.]* The names come
-from the registration strings of texturesheet.cpp in the executable, the
-`renderType` values from the editor's dropdown string; the `twoSided` byte
-and the cull modes are read from code and confirmed on the capture
-(`re/vcolor.md` §5).
+(multiplied per texel by specSize.g² · 256 + 1 when the texture has a specSize
+layer), `specularPower` its intensity: roughness = (2 / (n + 2))^0.25,
+reflectance F0 = 4 · (2 / (n + 2)) · intensity · specular layer, written with
+`KHR_materials_specular` and, above 0.04, `KHR_materials_ior`; both are
+corrected for the game lighting display-encoded values. A sheet without any
+highlight (`specularPower` ≤ 0 and no cube reflection, or F0 = 0 everywhere) is
+written with roughness 1.0 and no roughness texture, so that it is matte also
+where the specular extension is ignored. `selfIlluminance` ·
+`selfIlluminanceColor` · glow layer · (albedo + specular layer) is the emission.
+Missing layers count as: specular white, glow white, specSize black. The
+sheet's values are copied to `material.extras.watchmen.sheet_values`. Sheet
+offsets in the executable: `specularPower` +0x8c, `specularSize` +0x90,
+`writeDepthBuffer` +0xa1, `twoSided` +0xa4.
+
+The names come from the registration strings of texturesheet.cpp in the
+executable, the `renderType` values from the editor's dropdown string; the
+`twoSided` byte and the cull modes are read from code and confirmed on the
+capture (`re/vcolor.md` §5).
 
 ### 4.7 Texture sheets: several per texture, layer overrides, blend
 
-*Added 2026-10-04.* A Texture header holds one or more TextureSheets, one
-after the other, each a run of property records (§4.6) sharing one salt. A
-record is `[salt u32][name hash u32][type hash u32][payload dwords
-u32][payload]`; a string payload is `[length u32][bytes, NUL-padded to 4]`.
-Part 2 PC: 936 textures, 769 with one sheet, 123 with two, up to eight.
+A Texture header holds one or more TextureSheets, one after the other, each a
+run of property records (§4.6) sharing one salt. A record is
+`[salt u32][name hash u32][type hash u32][payload dwords u32][payload]`; a
+string payload is `[length u32][bytes, NUL-padded to 4]`. Part 2 PC: 936
+textures, 769 with one sheet, 123 with two, up to eight.
 `watchmen_extract.texture_sheets(header)` returns them in file order, and
 `sheet.json` lists them under `sheets`.
 
@@ -870,20 +836,18 @@ texture's first layer file of that kind, which is the same thing unless the
 override texture has more than one frame (no case was looked for).
 
 How the exporters write a blend type (`watchmen_extract.sheet_blend`,
-`blend_material`; engine states in `ENGINE_CONSTANTS.md`, "Blend states"):
-`standard` → `alphaMode: BLEND`; `subtract` → the layer rewritten as black
-with alpha = brightness × alpha (exact over white); `add`, and a manual
-SRCALPHA or ONE / ONE ADD → base colour black, the layer normalised to full
-brightness as emissive texture, alpha = its peak × alpha (an approximation);
-any other manual blend → the raw layer, no alpha mode. The material's
-`extras.watchmen` holds `blend`, `src`, `dst`, `op`. OBJ/MTL cannot express a
-blend equation and links the raw layer.
+`blend_material`; engine states in `ENGINE_CONSTANTS.md`, "Render lists, alpha
+and blend states"): `standard` → `alphaMode: BLEND`; `subtract` → the layer
+rewritten as black with alpha = brightness × alpha (exact over white); `add`,
+and a manual SRCALPHA or ONE / ONE ADD → base colour black, the layer
+normalised to full brightness as emissive texture, alpha = its peak × alpha (an
+approximation); any other manual blend → the raw layer, no alpha mode. The
+material's `extras.watchmen` holds `blend`, `src`, `dst`, `op`. OBJ/MTL cannot
+express a blend equation and links the raw layer.
 
 ---
 
 ## 5. Practical recipe (what a clean extractor does)
-
-*Corrected 2026-10-02 (steps 1–3).*
 
 1. Open `block_h_z`; read `tablesSize @332`, `numEntries @352`, `numLocalized @356`;
    walk the directory from `400` (§2.2). Compute each header blob's offset from
@@ -933,13 +897,9 @@ in a default Ghidra analysis; `tools/ghidra/FixEHProlog.java` repairs that.
 
 ## 6b. The ModelRes (mesh) asset
 
-*Rewritten 2026-10-02 from the engine's readers (`ModelRes::Read` `FUN_00547006`
-→ part `FUN_00545927` → submesh `FUN_00542541` → mesh buffer `FUN_004336ec`).*
-Earlier versions described a 7×u32 "geometry descriptor" found by scanning, a
-field `G` read as an element count, an index buffer that "ends at the first
-index ≥ vertexCount", and an open "multi-submesh reality". All of that is
-replaced by the layout below, which reproduces the stream length exactly on
-740 / 740 Part 2 PC models.
+Read from the engine's readers (`ModelRes::Read` `FUN_00547006` → part
+`FUN_00545927` → submesh `FUN_00542541` → mesh buffer `FUN_004336ec`). The layout
+below reproduces the stream length exactly on 740 / 740 Part 2 PC models.
 
 A `ModelRes` is a mesh. Like a texture it splits across the two block files: the
 **header blob** carries the structure, the **stream blob** the raw geometry.
@@ -974,7 +934,7 @@ A `ModelRes` is a mesh. Like a texture it splits across the two block files: the
 - `textureIndex` indexes the model's texture list; that is the submesh's
   material.
 - A part has one or more levels of detail, each a list of submeshes.
-- `FORMAT` is the vertex format id (what earlier versions called `G`).
+- `FORMAT` is the vertex format id (`G` in the descriptor-scan code).
 - `indexBytes` is a byte count of `u16` indices; the last `u32` of the MeshBuffer is the primitive
   type: 0 triangle strip, 1 triangle list (table 0xc7f398 = D3D 5, 4, 6, 1, 2, 3; count rule
   0x417bf2; triangle rule 0x431206: `(i, i+1, i+2)` for even i, `(i+2, i+1, i)` for odd i).
@@ -984,16 +944,15 @@ A `ModelRes` is a mesh. Like a texture it splits across the two block files: the
   a strip (`index_triangles`); `<model>.model.json` names it per submesh (`primitive`).
 - `maxLodIndex` equals (largest LOD count − 1) on 740 of 740 PC Part 2 and 1,090 of 1,090 PC
   Part 1 models (measured; writer 0x543e10).
-- *Added 2026-10-03:* `hasColor` (at +0x31 of the engine's MeshBuffer) is what
-  makes the renderer pick the `VERTEX_COLORS` vertex shader for the buffer;
-  without it the colour bytes are not read and are all 255. `hasAlpha` (+0x32)
-  marks a buffer whose vertex alpha varies and implies `hasColor`. On the
-  files, 1,204 format 5 / 6 buffers have neither flag, 1,400 `hasColor` only,
-  53 both; 387 of 735 Part 2 PC models have at least one coloured buffer
-  (`re/vcolor.md`).
+- `hasColor` (at +0x31 of the engine's MeshBuffer) is what makes the renderer
+  pick the `VERTEX_COLORS` vertex shader for the buffer; without it the colour
+  bytes are not read and are all 255. `hasAlpha` (+0x32) marks a buffer whose
+  vertex alpha varies and implies `hasColor`. On the files, 1,204 format 5 / 6
+  buffers have neither flag, 1,400 `hasColor` only, 53 both; 387 of 735 Part 2
+  PC models have at least one coloured buffer (`re/vcolor.md`).
 
 **Stream blob** — for each MeshBuffer in header order (per part: the submeshes
-of every LOD, then the shadow groups, then the proxy slab):
+of every LOD, then the shadow groups, then the occluder):
 
 ```
  vertexCount × stride[FORMAT]    vertex data
@@ -1012,8 +971,10 @@ of every LOD, then the shadow groups, then the proxy slab):
 | 9 shadow hull | 20 | pos f32×3 @0 · normal half3 @12 |
 | 10 skinned hull | 32 | format 9 + joints @20 · weights half4 @24 |
 
-*[2026-10-05] Console files (Xbox 360 and PS3, both parts)* have the same
-header and the same stream structure with other sizes: vertex strides
+### Console streams
+
+Console files (Xbox 360 and PS3, both parts) have the same header and the same
+stream structure with other sizes: vertex strides
 `[28,24,68,16,56,32,44,60,36,16,28]` (Xbox 360 exe table `0x8308b6e0`), a
 **48**-byte cluster record (the PC 40 bytes plus `7FFFFFFF 00000000`) and
 **0x50**-byte list items (PC 0x44). With these the computed layout consumes the
@@ -1052,7 +1013,7 @@ plus the measured byte order; 40 programs read the colour attribute unswizzled).
 19 `Grass` / `GrassDepth` programs read attribute 3 as `.yzwx`; their vertex
 format was not identified.
 
-*[2026-10-06]* Both consoles' own format tables say the same, read from code.
+Both consoles' own format tables say the same, read from code.
 Xbox 360: the vertex declarations at `0x82235e68…` (12-byte
 `D3DVERTEXELEMENT9` records); the 44-byte one at `0x82236078` (format 6; that
 format 5 is its first 32 bytes is from the strides and the data) is
@@ -1095,7 +1056,7 @@ for byte). So the console comes from where the model was read
 4. a big-endian header in the stand-alone Part 1 layout is Xbox 360 (of the
    four console sets only Xbox Live Part 1 has it: 1,090 of 1,090 headers).
 
-Rule 3 alone left 13 / 13 / 22 / 23 models open (Xbox 360 Part 2 / PS3 Part 2 /
+Rule 3 alone leaves 13 / 13 / 22 / 23 models open (Xbox 360 Part 2 / PS3 Part 2 /
 Xbox 360 Part 1 / PS3 Part 1: water surfaces, puddles, sky domes, decals and
 the two Rorschach bodies — every render buffer has `hasAlpha`, or both end
 bytes are 255 throughout). With the console from rule 2 all 71 decode, and
@@ -1109,14 +1070,16 @@ are still written, in the character GLBs too
 `WATCHMEN_CONSOLE_MODELS=scan` sends console models back to the descriptor
 scan.
 
+### Vertex fields
+
 Positions are raw floats; there is no quantisation, scale or bias in any
 format. UVs are raw half floats with no scale, bias or V flip. The stride
 table (`0x00C791B0`) has 11 formats; only these four occur in `.model` files
 (Part 2 PC: format 5 ×2370, 6 ×287, 9 ×357, 10 ×104).
 
-*Added 2026-10-03 — what the colour, tangent and bitangent fields are*
-(`re/vcolor.md`; details and addresses in `ENGINE_CONSTANTS.md`, section
-"2026-10-03"):
+What the colour, tangent and bitangent fields are (`re/vcolor.md`; details and
+addresses in `ENGINE_CONSTANTS.md`, "Vertex colour" and "Tangent frame, culling
+and winding"):
 
 - **colour @20** is a `D3DCOLOR` (bytes B, G, R, A). In the game's shaders its
   rgb multiplies the complete lit colour and its alpha multiplies the
@@ -1135,12 +1098,11 @@ table (`0x00C791B0`) has 11 formats; only these four occur in `.model` files
   is left-handed: with x negated (the toolkit's default output frame) the
   file's index order is counter-clockwise seen from the normal side.
 
-*[2026-10-04]* The per-part coarse rigid buffer (79 parts; earlier called the
-"proxy slab") is the part's **occluder** mesh: the engine submits it to its
-occlusion pass (0x545927 → 0x53f9a5) and never draws it in colour. The shadow
-groups are stencil shadow hulls. The extractor names the kinds `render`,
-`shadow` and `occluder` (`proxy` is accepted as the old name of `occluder`),
-writes only `render`, and returns the others through
+The per-part coarse rigid buffer (79 parts) is the part's **occluder** mesh:
+the engine submits it to its occlusion pass (0x545927 → 0x53f9a5) and never
+draws it in colour. The shadow groups are stencil shadow hulls. The extractor
+names the kinds `render`, `shadow` and `occluder` (`proxy` is accepted as the
+old name of `occluder`), writes only `render`, and returns the others through
 `select_model_buffers(kinds=…)`.
 
 The ModelRes property bag holds the LOD switch: `lodDistance01` …
@@ -1149,8 +1111,10 @@ node's and the level's LOD factor), `lodFadeIn…`, `lodFadeOut…` (ModelRes
 0x53ef10, selection 0x53a317). `extract` writes them to `<model>.model.json`
 (format `watchmen-model-meta/1`). All 134 character models have one LOD.
 
-**Articulated body** *(added 2026-10-04; reader 0x51e1ad; parser
-`skeleton_records.parse_articulated_body`)*. After the node array:
+### Articulated body
+
+Reader 0x51e1ad; parser `skeleton_records.parse_articulated_body`. After the
+node array:
 
     [u32 nDw][blob]                      property records, below
     [u32 n0]{u16 node}                   bodies of PhysX scene 0 (the ragdoll)
@@ -1169,9 +1133,10 @@ Part 2 PC: 13 models carry a rig, each with 17 bodies and 16 joints; the two
 player models also have cloths (Rorschach 2, Nite Owl 1). `docs/RAGDOLL_RIG.md`
 describes the exported rig, `docs/re/wp2_physics.md` the engine side.
 
-**The stand-alone Part 1 header** *(added 2026-10-05; PC and Xbox 360 Part 1,
-block signature `0xEE1FB0A3`; PS3 Part 1 is in the Part 2 layout)*. It is the
-record stream above with two differences:
+### The stand-alone Part 1 header
+
+PC and Xbox 360 Part 1, block signature `0xEE1FB0A3`; PS3 Part 1 is in the
+Part 2 layout. It is the record stream above with two differences:
 
 1. A submesh record has **one** flag byte between its `u32` and the
    MeshBuffer, not two: `string name, [u32 1][u32 textureIndex], bool, bool
@@ -1203,6 +1168,8 @@ are equal to the PS3 Part 1 copy of the same model on 1,090 / 1,090. The
 readers of the Part 1 node and model root were not opened; their equality is
 from the data and the unchanged version terms.
 
+### Part transforms
+
 **Vertices are part-local** (measured; the chain is read from code, 0x53b605). A buffer's positions are in the space
 of its part; model space is `v' = conj(q)·v·q + pos`, the part first and then
 every parent up to parent 0xFFFFFFFF (`model_part_transforms`). The union of
@@ -1218,7 +1185,9 @@ model has a skinned buffer in a moved part. `decode_model` (OBJ and GLB) and
 bitangent of unskinned buffers (`part_space=True` returns them as stored; the
 rule is measured on render buffers and applied to shadow hulls and occluders
 by inference); `<model>.model.json` lists the parts under `parts` and says
-`part_transforms_applied`. 1.3.0 wrote every part at the model origin.
+`part_transforms_applied`.
+
+### Submesh and part fields
 
 Not established: what asset flag bit 4 (the texture-list bool) does beyond selecting
 the load argument of 0x55243f (0x49b2b2); the collision volume's second u32. The submesh
@@ -1227,70 +1196,75 @@ flag byte the Part 1 build does not have is 'the buffer has a cloth mesh' (write
 Part 2 render buffers, and the one bool PC Part 1 stores is set on 41 buffers
 that have no cloth mesh); `has_cloth_mesh` in `parse_model_header` (the old key
 `no_defer` is kept).
-*[2026-10-05, submesh and part fields:]* the submesh bool at +0x24 (`b24` in
-`parse_model_header`) makes the submesh **skipped** when set — 0x4b3886
-returns "flag is 0" and all five of its callers skip a flagged submesh
-(the fifth, 0x53fee6, read; the other four as reported). It is 0 in all
-2,575 submeshes of the 738 staged PC Part 2 models. The submesh u32 at +0x28
-(`u28`) is the shadow-hull group id (`shadowID`; read from code): at build
-time (0x544ae4) the submeshes of one part and LOD that have the same id above
-0 and the `b24` flag clear are merged into one stencil-shadow hull, one hull
-per id from 1 to the maximum; 0 = in no hull. A cloth submesh with an id above
-0 gets a hull of its own. Submeshes whose MeshBuffer has flag 0x40 go to a
-separate list whose use was not traced. Values 0–10 (1 on 1,851, 0 on 629,
-2–10 on 95). No run-time reader was found. The part u32 `f1` (node +0x2c) is
-the index into the model's pivot-book list (the `nPb` paths, model+0x9c; set
-by 0x53e987, default `/pivotbooks/default.pb`); the consumer found (0x4a5961)
-reads part 0's value only. It is 0 on all 6,220 parts. `parse_model_header`
-and `<model>.model.json` name them `shadow_id` and `pivotbook_index` (the old
-keys `u28` and `f1` stay in the parsed header).
+The submesh bool at +0x24 (`b24` in `parse_model_header`) makes the submesh
+**skipped** when set — 0x4b3886 returns "flag is 0" and all five of its callers
+skip a flagged submesh (the fifth, 0x53fee6, read; the other four as reported).
+It is 0 in all 2,575 submeshes of the 738 staged PC Part 2 models. The submesh
+u32 at +0x28 (`u28`) is the shadow-hull group id (`shadowID`; read from code):
+at build time (0x544ae4) the submeshes of one part and LOD that have the same
+id above 0 and the `b24` flag clear are merged into one stencil-shadow hull,
+one hull per id from 1 to the maximum; 0 = in no hull. A cloth submesh with an
+id above 0 gets a hull of its own. Submeshes whose MeshBuffer has flag 0x40 go
+to a separate list whose use was not traced. Values 0–10 (1 on 1,851, 0 on
+629, 2–10 on 95). No run-time reader was found. The part u32 `f1` (node
++0x2c) is the index into the model's pivot-book list (the `nPb` paths,
+model+0x9c; set by 0x53e987, default `/pivotbooks/default.pb`); the consumer
+found (0x4a5961) reads part 0's value only. It is 0 on all 6,220 parts.
+`parse_model_header` and `<model>.model.json` name them `shadow_id` and
+`pivotbook_index` (the old keys `u28` and `f1` stay in the parsed header).
 
-**Extractor.** `watchmen_extract.parse_model_header` and `model_stream_layout`
-implement this layout; `decode_model_mesh` returns everything per submesh
-(name, part, LOD, texture, positions, normals, UVs, triangles, colour, tangent,
-bitangent, joints, weights). `decode_model` writes an **OBJ + MTL** per model
-(and, with `--glb`, a rigged GLB for skinned models), with LOD 0 by default
-(`--model-lod N|all`) and without shadow hulls and occluders. The header
-path is used only when the header parses and the layout consumes the stream
-to the last byte; anything else takes the older descriptor scan, unchanged.
-*[2026-10-05]* It now covers all six sets: both header layouts, and the
-console streams. Every model that has a stream is decoded header-driven on
-PC Part 1, Xbox 360 and PS3 (735 per Part 2 set, 1,085 per Part 1 set); the
-scan remains as the fallback and decodes no shipped model.
+### Extractor
 
-*Corrected 2026-10-03 (toolkit 1.4.0):* with `--glb`, every header-decoded
-model now gets a GLB — a rigged one when it is fully skinned, a static one
-otherwise (735 on Part 2 PC, 130 before). Those GLBs carry NORMAL, TANGENT
-(stored tangent, `w = −sign(dot(cross(N, T), B))`, only for a material with a
-normal map), COLOR_0 (only for `hasColor` buffers; float, rgb sRGB → linear,
-alpha as stored), triangles reversed so that the normal side is glTF's front
-face, and materials from the texture's `sheet.json` (§4.6).
-`--no-vertex-attrs` writes the 1.3.0 files instead. A model that takes the
-descriptor scan gets a GLB only when skinned, without these attributes, as
-before. *[2026-10-05]* Console and Part 1 models are header-decoded too (see
-above), so they get the same GLBs. *[2026-10-06]* The console colour byte
-order comes from the console the source path names; only a console model with
-no such source and undecided data gets no COLOR_0, and says so.
+`watchmen_extract.parse_model_header` and `model_stream_layout` implement this
+layout; `decode_model_mesh` returns everything per submesh (name, part, LOD,
+texture, positions, normals, UVs, triangles, colour, tangent, bitangent,
+joints, weights). `decode_model` writes an **OBJ + MTL** per model (and, with
+`--glb`, a GLB), with LOD 0 by default (`--model-lod N|all`) and without shadow
+hulls and occluders. The header path is used only when the header parses and
+the layout consumes the stream to the last byte; anything else takes the
+descriptor scan. It covers all six sets: both header layouts, and the console
+streams. Every model that has a stream is decoded header-driven on PC, Xbox
+360 and PS3, Parts 1 and 2 (735 per Part 2 set, 1,085 per Part 1 set); the scan
+remains as the fallback and decodes no shipped model.
 
-*Corrected 2026-10-02:* earlier versions said the extractor also writes FBX
-and STL (`--format obj,fbx,stl`). The shipped extractor has no such option
-and no FBX or STL writer.
+With `--glb`, every header-decoded model gets a GLB — a rigged one when it is
+fully skinned, a static one otherwise (735 on Part 2 PC). Those GLBs carry
+NORMAL, TANGENT (stored tangent, `w = −sign(dot(cross(N, T), B))`, only for a
+material with a normal map), COLOR_0 (only for `hasColor` buffers; float, rgb
+sRGB → linear, alpha as stored), triangles reversed so that the normal side is
+glTF's front face, and materials from the texture's `sheet.json` (§4.6).
+`--no-vertex-attrs` writes the GLBs of releases before 1.4.0 instead: no
+NORMAL, TANGENT or COLOR_0, file winding, and a GLB only for skinned models.
+A model that takes the descriptor scan gets a GLB only when skinned, without
+these attributes. Console and Part 1 models are header-decoded too (above), so
+they get the same GLBs; the console colour byte order comes from the console
+the source path names, and only a console model with no such source and
+undecided data gets no COLOR_0, and says so.
+
+**Not implemented.** The extractor has no FBX or STL writer and no
+`--format obj,fbx,stl` option.
+
+**Ruled out** (readings the header layout above replaces):
+- a 7×u32 "geometry descriptor" found by scanning the header, with a field
+  `G` read as an element count (it is the vertex format id);
+- an index buffer that "ends at the first index ≥ vertexCount" (`indexBytes`
+  is stored);
+- an open "multi-submesh reality" (every buffer is listed in the header);
+- a part written at the model origin (vertices are part-local, above).
 
 ## 7. Status of the wider format
 
 **Textures are fully solved** — naming, deterministic stream binding, and
 byte-exact layer/cube/animation carving all verified end-to-end against real data
-and the engine code. Models (`ModelRes`) decode from their header on Part 2 PC
-*(corrected 2026-10-02: the "index-buffer recovery still partial for some
-baked-environment meshes" caveat is withdrawn; see §6b)*; audio (`MediaStream`,
-libVorbis/Bink) is covered in `WATCHMEN_EXTRACTION_MASTER.md` *[2026-10-04:
-the multi-track layout of music streams is in §8 below, the `sound` header
-in `FORMATS_MISC.md`]*. The container and block formats above are common to
-all of them.
+and the engine code. Models (`ModelRes`) decode from their header on all six
+sets (§6b). Audio (`MediaStream`, libVorbis/Bink; `sound`): the multi-track layout of
+music streams is in §8 below, the `sound` header in `FORMATS_MISC.md`, the console
+containers in `WATCHMEN_EXTRACTION_MASTER.md`. The container and block formats above are
+common to all of them.
 
 ## 8. Music streams
 
-*Added 2026-10-04 (report `re/wp6_audio.md`).*
+*(report `re/wp6_audio.md`)*
 
 A stream holds N synchronous tracks (music stems; N = 1 - 7 in the shipped data). It is a chain of
 **groups**: one chunk per track, back to back. Every group is followed by a link record
@@ -1327,23 +1301,22 @@ waits for. Track names and track states are in the level's `MusicSetup` fragment
 
 `extract` writes one file per track and a `<stream>.json` sidecar; every track file ends at
 the granule position stored with its last packet (the decoder shortens the last block to it,
-0x8d29c0). `--flat-music` writes all packets in file order into one file, as 1.3.0 did, ending
-at the computed block position.
+0x8d29c0). `--flat-music` writes all packets in file order into one file, ending at the
+computed block position.
 
-Paging *(1.5.0)*: the identification header alone on the first page, the comment and setup
+Paging: the identification header alone on the first page, the comment and setup
 headers on the next, then the audio packets packed into pages of about 4 KB (at most 255
 lacing values; a packet that does not fit starts the next page, only one larger than a page
 is continued across pages); each page's granule position is that of the last packet that ends
-on it (−1 when none does), the last page carries the end position and the EOS flag. 1.4.0
-wrote one page per audio packet (27 + 1 bytes of page header per packet of about 100 bytes).
-Measured on the 53 track files of PC Part 2's 13 streams: ffmpeg decodes the same samples
-(sha1 of the PCM) with the same duration (ffprobe), and the files are 11.6 % smaller in all. The block flags that give the granule positions are read
-from the setup header (`_vorbis_blockflags`); a setup header that does not follow the Vorbis I
-layout raises ValueError (also under `python -O`), and the file then gets 1,024 samples per
-packet as before.
+on it (−1 when none does), the last page carries the end position and the EOS flag. Against
+one page per audio packet (27 + 1 bytes of page header per packet of about 100 bytes) the
+files are 11.6 % smaller in all; measured on the 53 track files of PC Part 2's 13 streams,
+ffmpeg decodes the same samples (sha1 of the PCM) with the same duration (ffprobe). The block
+flags that give the granule positions are read from the setup header (`_vorbis_blockflags`);
+a setup header that does not follow the Vorbis I layout raises ValueError (also under
+`python -O`), and the file then gets 1,024 samples per packet.
 
 Part 2 PC: 13 streams, 10 with more than one track (53 track files in all).
-Up to 1.3.0 the extractor wrote the chunks of all tracks into one file.
 
 *This document describes the shipped data of one specific title and was derived by
 clean-room reverse engineering for interoperability/preservation.*

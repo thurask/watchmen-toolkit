@@ -15,7 +15,9 @@
 #   keyHash/typeHash = name_hash(name): kapow bit-CRC32(poly 0x04C11DB7) over the name's
 #   bytes each ANDed with 0xDF (engine FUN_00423ce8) -- NOT str.upper(): digits and
 #   punctuation are folded too ('0'..'9' -> 0x10..0x19, '(' -> 0x08, ',' -> 0x0C).
-import struct, json, pickle
+import struct
+import json
+import pickle
 from wutil import restricted_load
 
 
@@ -409,7 +411,7 @@ def parse(b, keynames=None, order=None):
     n = len(b)
     blocks = []
     pre = []
-    trunc = 0  # records/blocks whose payload ran past the buffer (2026-08-17)
+    trunc = 0  # records/blocks whose payload runs past the buffer
     wcmm = 0  # string records whose wordcount disagrees with the dword count k
     untyped_blocks = untyped_unknown = 0  # older record layout (no type hash)
     while p + 8 <= n:
@@ -423,7 +425,7 @@ def parse(b, keynames=None, order=None):
         if nskip:
             pre = list(struct.unpack_from(bo + "%dI" % nskip, b, p))
         cls, p = r
-        if p + 4 > n:  # 2026-08-17: truncated before schemaCount -- stop cleanly
+        if p + 4 > n:  # truncated before schemaCount: stop cleanly
             trunc += 1
             break
         schema = struct.unpack_from(bo + "I", b, p)[0]
@@ -478,7 +480,7 @@ def parse(b, keynames=None, order=None):
             if tn is None and k > 1024:
                 break
             q = p + 16
-            # 2026-08-17: every payload is k dwords ([u32 k][k dwords]); these
+            # every payload is k dwords ([u32 k][k dwords]); these
             # buffers are carved heuristically, so a record running past the
             # end is routine -- stop the walk instead of letting struct.error
             # escape into the caller's whole extraction pass.
@@ -486,7 +488,7 @@ def parse(b, keynames=None, order=None):
                 trunc += 1
                 break
             if tn == "string" and struct.unpack_from(bo + "I", b, q)[0] + 1 != k:
-                wcmm += 1  # counted + reported via out['warn'] (was a no-op)
+                wcmm += 1  # counted + reported via out['warn']
             val = _value(tn, typ, b, q, k, bo)
             p = q + 4 * k
             recs.append(

@@ -6,20 +6,14 @@ Evidence tags: **[code]** read from decompilation and/or disassembly at the addr
 Machine-readable: `findings/physx_d6.json` (addresses, offsets, constants, all test results).
 Scratch: `work/physx/` — `d6_ref.py` (reference integrator), `synth_tests.py`, `cap_eval.py`, `cap_var.py`, `cap_fps.py`,
 `cap_belly.py`, `fit_pivot_to_ref.py`, `rtti.py`, `all.asm` (linear disassembly of all 7,813 functions).
-
-> **Addendum (after the toolkit port, see `findings/impl_jiggle_solver.md`).** Three statements below are superseded:
-> (1) the belly IS explained — the capture's one-step map matches the solver with the file's k = 70
-> (0.899 / −0.778 / 0.798 captured vs 0.890 / −0.775 / 0.800), and the earlier trace deficit came from zero-step
-> frames and from segments that start in mid-motion (1.34° rms vs 1.30° for the fitted model once both are handled);
-> (2) the capture did not run at 60 fps: 5.9 % / 7.7 % of frames have a frozen jiggle palette (no physics step), i.e.
-> about 64–65 fps on average — "60 fps fits best" below only means one step per frame;
-> (3) frames without a physics step are observed in the captures, not hypothetical.
+Toolkit: the `solver` model of `wlib/jiggle_d6.py` (the default) is the port of `d6_ref.py`; its validation is in
+`findings/impl_jiggle_solver.md` (§8).
 
 ## 0. Answer first
 
 1. **The jiggle joint has no drive.** The game sets every `driveType` to 0; the spring/damping file values go into the
-   **soft swing limits** (`swing1Limit` 45°, `swing2Limit` 0°, both `LIMITED`). jiggle.md already said this; the task brief's
-   "angular drive springs" is wrong. In PhysX two limited swing axes become one **elliptic cone limit**; with a 0° semi-axis
+   **soft swing limits** (`swing1Limit` 45°, `swing2Limit` 0°, both `LIMITED`), as jiggle.md says; there are no
+   "angular drive springs". In PhysX two limited swing axes become one **elliptic cone limit**; with a 0° semi-axis
    the cone has zero radius, so the limit row is active whenever the swing is non-zero and pulls the whole swing (both axes)
    to zero. It is a **unilateral** row (impulse ≥ 0, toward the centre only).
 2. The row is the textbook implicit soft constraint (found in the instructions, §2), with three things that are not textbook:
@@ -27,16 +21,17 @@ Scratch: `work/physx/` — `d6_ref.py` (reference integrator), `synth_tests.py`,
    step has the limit's position bias removed by a "conclude" pass. With 4 iterations the result is close to a **first-order
    relaxation** of the swing toward zero with rate `0.175·k / (d + k·dt)` — 8.5 s⁻¹ for the breasts, 6.2 s⁻¹ for the belly —
    not a second-order oscillator with the file's K and D.
-3. **Is the capture-fitted stiffness explained?** For the breasts, yes in the sense that matters: the reference integrator
-   (`work/physx/d6_ref.py`, file constants k = 200, d = 0.8, nothing fitted) reproduces the captures as well as the
-   capture-fitted model (rot error 3.02° / 2.70° rms at 60 fps against 3.12° / 2.69° for the fitted pivot model; scanning k in the
-   integrator, the file value 200 is the optimum). The numbers 570 s⁻² / 37.5 s⁻¹ themselves are **not** reproduced by a
-   formula: they are the linear surrogate of a non-linear process, and the best linear surrogate of the integrator's own output
-   is a flat valley around K ≈ 900, D ≈ 25–30 (570 / 37.5 is 9 % worse in that valley). For the belly the integrator is clearly
-   better than the file-constant pivot model but worse than the capture-fitted one (2.2–2.5° against 1.96° rms) and the belly
-   capture does not discriminate k at all — **not explained**, see §7.
-4. There is no closed-form `file constants → (K_eff, D_eff)` for the toolkit's linear model. What can be given in closed form
-   is §4 (relaxation rate, row coefficients). The recommendation is to port `d6_ref.py` (about 300 lines, numpy only).
+3. **Is the capture-fitted stiffness explained?** Yes, in the sense that matters: the reference integrator
+   (`work/physx/d6_ref.py`, file constants k = 200, d = 0.8, nothing fitted) reproduces the breast captures as well as the
+   capture-fitted model (rot error 3.02° / 2.70° rms at one step per frame against 3.12° / 2.69° for the fitted pivot model;
+   scanning k in the integrator, the file value 200 is the optimum). The numbers 570 s⁻² / 37.5 s⁻¹ themselves are **not**
+   reproduced by a formula: they are the linear surrogate of a non-linear process, and the best linear surrogate of the
+   integrator's own output is a flat valley around K ≈ 900, D ≈ 25–30 (570 / 37.5 is 9 % worse in that valley). The belly is
+   explained too, once frames without a physics step and segments that start in mid-motion are handled (§5): the capture's
+   one-step map matches the solver with the file's k = 70.
+4. There is no closed-form `file constants → (K_eff, D_eff)` for a linear pivot model. What can be given in closed form
+   is §4 (relaxation rate, row coefficients); the engine behaviour is the per-step procedure of `d6_ref.py`
+   (about 300 lines, numpy only), ported as the toolkit's `solver` model.
 
 ## 1. Class map and descriptor path **[code]**
 
@@ -160,7 +155,7 @@ spring moves the pose, hardly the velocity. Force limit: `hi = maxTorque = FLT_M
 | max angular velocity | `|ω|² ≤ atom+0x8c` in 0x101ffb50; SDK default 7.0 (param 7), the game calls `setMaxAngularVelocity(200)`. Pose integration clamps only at 1e18 (0x1029fb38) | **[code]** |
 | pose integration | `x += v_m·dt`; `q = (sin(|ω|dt/2)·ω̂, cos(|ω|dt/2))·q` | **[code]** 0x102008a0 |
 | forces | `addForce(NX_FORCE)` adds `F·invMass` to body+0x23c (0x100339b0); every substep takes the accumulator as acceleration; it is cleared only on the **last** substep of a simulate (0x10035330, flag from 0x100c35d0 `nbSubsteps == index+1`). The anti-gravity force therefore cancels gravity in every substep | **[code]** |
-| frames without a physics step | the game calls simulate only when `floor(acc/h) > 0` (0x4f4ddc) but applies the force every frame, so above 60 fps the next step carries two forces: net +|g| upward for one step | **[code]** game + DLL; effect on screen **[not established]** |
+| frames without a physics step | the game calls simulate only when `floor(acc/h) > 0` (0x4f4ddc) but applies the force every frame, so above 60 fps the next step carries two forces: net +|g| upward for one step. Such frames occur in the captures: 5.9 % / 7.7 % of frames have a frozen jiggle palette | **[code]** game + DLL; frozen frames **[data]** |
 | sleep | body flags 0x900 = visualization + energy sleep test; SDK defaults sleep energy 0.005, lin/ang vel² 0.0225 / 0.0196. The game's per-frame `addForce(…, wake = true)` keeps the body awake | defaults **[code]** 0x100ac8d0; wake path **[inferred]** from the argument |
 | kinematic anchor | `moveGlobalPose` stores a target (0x10033430). On the first substep: `v = Δx/(n·dt)`, `ω = 2·acos(w)/(n·dt)·axis`, pushed to the low-level atom as its velocity; target flags cleared, velocity kept for all n substeps (0x10034c10, n from 0x100ca870) | **[code]** |
 | kinematic deadband | if `|w − 1| ≤ 1e-6` (0x102a1990) the angular velocity is 0: an anchor rotation below 0.16° per frame is not executed until it accumulates | **[code]** 0x10034c10 |
@@ -178,7 +173,7 @@ Body: cube 0.8 m, mass 0.1, I_cm = 0.010667; lever 0.1323 m (breast) / 0.1015 m 
 | relaxation rate `0.175·k/(d + k·dt)` | 8.47 s⁻¹ (τ 0.118 s) | 6.23 s⁻¹ (τ 0.161 s) | 7.09 s⁻¹ |
 | converged linearisation of §2.4 as pivot-model constants (K, D at 60 Hz, incl. angular damping) | 430 s⁻², 51 s⁻¹ | 275 s⁻², 44 s⁻¹ | 338, 48 |
 | best linear pivot-model fit **to the integrator's output** on the capture parent motion (55 / 60 fps) | K 900, D 25–30 (residual 1.7° of 3.4° rms) | K 570–650, D 15–19 (residual 1.2° of 1.8°) | — |
-| capture fit (impl_phys, 55 fps) | 570, 37.5 | 308, 19.2 | — |
+| capture fit (impl_phys, capture read at 55 fps) | 570, 37.5 | 308, 19.2 | — |
 | capture fit rescaled to 60 fps / 30 fps (K ∝ fps², D ∝ fps) | 678, 40.9 / 170, 20.5 | 366, 20.9 / 92, 10.5 | — |
 
 The three model rows disagree with each other because the process is not linear (unilateral row, position-level action);
@@ -188,13 +183,15 @@ tan(θ/4) ≈ θ/4, the 0.7 and the implicit softening.
 
 ## 5. Decisive test — capture traces **[data]**
 
-Method of `work/impl_phys/harness.py` (captured parent motion in, bone compared frame by frame), capture files staged
+Method of `work/impl_phys/harness.py` (captured parent motion in, bone compared frame by frame), capture files
 read-only (`track_NN_pals.npy`, `gimp_captured_palettes_t2.npy`, binds). Reference = `d6_ref.apply_jiggle_ref`, file
 constants, nothing fitted, game frame order and metre clamp included. Tracks 23 and 39 excluded for the breasts as in impl_phys.
+The "55 fps" rows read the capture at the frame rate impl_phys estimated; the capture's actual average is about 64–65 fps
+with zero-step frames (§3), and "60 fps" means one physics step per frame.
 
 | model (55 fps unless noted) | BreastL rms / corr / lsq | BreastR | JiggleBelly |
 |---|---|---|---|
-| pinned (toolkit default) | 5.16° / 0.35 / 0.34 | 4.72° / 0.38 / 0.36 | 4.09° / 0.26 / 0.16 |
+| pinned | 5.16° / 0.35 / 0.34 | 4.72° / 0.38 / 0.36 | 4.09° / 0.26 / 0.16 |
 | pivot, file K/D + latency | 4.81° / 0.56 / 0.45 | 4.46° / 0.60 / 0.45 | 3.26° / 0.44 / 0.32 |
 | pivot, capture-fitted K/D + latency | 3.12° / 0.72 / 0.98 | 2.69° / 0.76 / 0.96 | 1.96° / 0.63 / 0.87 |
 | **PhysX reference, file k/d** | 3.11° / 0.72 / 0.95 | 2.83° / 0.73 / 0.89 | 2.52° / 0.36 / 0.49 |
@@ -210,8 +207,12 @@ Origin error (excl.): reference 6.2 / 5.7 mm, fitted pivot 6.2 / 5.6 mm.
   instead of 0.7 3.30°; angular damping 0.05 3.26°; acceleration spring 19.6° (rejected). The traces confirm the reading but
   separate the fine variants only weakly.
 - Frame-rate scan of the parameter-free integrator: breasts best at **60 fps** (3.02°), 55 → 3.11°, 50 → 3.32°, 45 → 3.38°,
-  70 → 3.64°. This suggests the breast capture ran at 60 fps (one physics step per frame), not 55 **[inferred]**.
-- Belly: flat (2.14–2.52°) over frame rate and over k; the fitted linear model stays better. See §7.
+  70 → 3.64°. "60 fps fits best" means one physics step per frame; the capture itself did not run at 60 fps: 5.9 % / 7.7 % of
+  its frames have a frozen jiggle palette (no physics step), i.e. about 64–65 fps on average **[data]**.
+- Belly: over the whole trace the integrator is flat (2.14–2.52°) over frame rate and over k, and the fitted linear model
+  (1.96°) scores better. The deficit comes from zero-step frames and from segments that start in mid-motion: with both
+  handled the integrator is at 1.34° rms against 1.30° for the fitted model, and the capture's one-step map matches the
+  solver with the file's k = 70 (0.899 / −0.778 / 0.798 captured vs 0.890 / −0.775 / 0.800) **[data]**.
 
 ## 6. Synthetic tests (60 fps; `work/physx/synth_tests.txt`, `.json`)
 
@@ -268,23 +269,24 @@ Below 3 Hz the reference responds like the capture-fitted pivot model at 0.6–0
 | timing | `setTiming(1/rate, maxSteps, NX_TIMESTEP_FIXED)`, `simulate(min(n, maxSteps)·h)` only when n > 0 | 0x4f4d20, 0x4f4ddc |
 
 Not established:
-- **Belly**: why the capture-fitted linear model beats the integrator there, and why the belly traces are insensitive to k.
-  Candidates not tested: the gimp capture's time base (two interleaved streams; the integrator's belly error is lowest when
-  the stream is read at 20–30 fps), a different anchor/lever for `JiggleBelly`, contacts of the 0.8 m box.
 - Which actor is `actor[0]` (taken from jiggle.md: the dynamic box) and the joint frame orientation relative to the bone
   axes; the integrator assumes joint frame = parent bone frame. With the cube's isotropic inertia a swap changes only which
   frame's Y/Z build the cone axis.
 - Whether the 0.8 m jiggle box collides with anything (collision groups not traced).
 - Kinematic anchor: inverse mass 0 and no damping of its velocity, read from 0x10037f30; keep the integrator
   option `anchor_ang_damp` off.
-- The capture frame rate (55 estimated by impl_phys; 60 fits the integrator best).
 - Float32 effects: the integrator runs in float64 with the DLL's thresholds kept.
 
-## 8. Proposed toolkit change
+## 8. Toolkit
 
-1. Add `d6_ref.PhysXD6Jiggle` / `run_addon` as a third model (e.g. `model='physx'`): file constants only, no fitted numbers,
-   breasts equal to the capture-fitted model on every metric; 14 000 frames take about 10 s in pure Python.
-2. Keep `pivot` + capture constants for the belly until §7's belly item is resolved.
-3. Docs to correct: "D6 with angular drive springs" → soft swing limits forming a zero-radius cone; "K, D not derivable" →
-   derivable as a per-step procedure, not as a (K, D) pair; `solver_soften` (k/(1 + d·dt + k·dt²)) is not what the DLL does
-   (softness is scaled by the row inertia, error is tan(θ/4), bias 0.7, unilateral).
+1. `jiggle_d6` model `solver` (`jiggle_d6.SoftLimitJoint`, the default for every group): the port of `d6_ref.PhysXD6Jiggle` /
+   `run_addon` — file constants only, no fitted numbers, breasts equal to the capture-fitted model on every metric; 14 000 frames
+   take about 10 s in pure Python. Modelling the zero-step frames and the doubled anti-gravity force on the step that follows
+   improves the reference fit slightly (BreastR 2.64° → 2.54° rms).
+   A clip the game loops is baked as a closed lap of its settled motion; any other clip starts with the parent already
+   moving at its frame-0 velocity.
+2. The `pivot` model with capture constants and the `pinned` model remain available as opt-in alternatives.
+3. Ruled out (statements older descriptions made): "D6 with angular drive springs" (it is soft swing limits forming a
+   zero-radius cone); "K, D not derivable" (derivable as a per-step procedure, not as a (K, D) pair); `solver_soften`
+   (k/(1 + d·dt + k·dt²)) is not what the DLL does (softness is scaled by the row inertia, error is tan(θ/4), bias 0.7,
+   unilateral); "the belly is not explained" (it is, §5); "the capture ran at 55 fps" (about 64–65 fps with zero-step frames).

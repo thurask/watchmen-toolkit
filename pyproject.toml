@@ -32,7 +32,7 @@ Repository = "https://github.com/thurask/watchmen-toolkit"
 Issues = "https://github.com/thurask/watchmen-toolkit/issues"
 
 [project.optional-dependencies]
-dev = ["black", "pyflakes", "pytest"]
+dev = ["ruff>=0.17", "pytest"]  # 1.5.1: ruff replaces black + pyflakes (ruff format / ruff check)
 # for `watchmen gendata regdump` (needs an exe whose .text is not encrypted)
 regdump = ["capstone"]
 
@@ -48,8 +48,25 @@ packages = ["wlib"]
 [tool.setuptools.package-data]
 wlib = ["*.pkl", "*.json"]
 
-[tool.black]
+[tool.ruff]
 line-length = 100
+target-version = "py313"
+# Markdown code blocks are reference prose, not code to reformat
+extend-exclude = ["*.md"]
+
+[tool.ruff.lint]
+# E/F = what pyflakes + pycodestyle-errors reported before; B (bugbear) and UP (pyupgrade) added.
+select = ["E", "F", "B", "UP"]
+ignore = [
+    "E501",  # line length: the formatter decides; long docstring / data lines stay
+    "E731",  # lambda assignment: the flat modules use small named lambdas on purpose (78)
+    "E741",  # ambiguous names l / I / O in math code (27)
+    "B007",  # unused loop variable (38; enumerate() counters kept for readability)
+    "B023",  # closure over a loop variable: every case is called within its own iteration (26; review later)
+    "B905",  # zip() without strict= (70; the pairs are same-length by construction)
+    "B911",  # itertools.batched() without strict= (12)
+    "UP031", # printf-style %-formatting: the house style of the whole tree (1,219)
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

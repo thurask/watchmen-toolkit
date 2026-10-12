@@ -358,7 +358,9 @@ def _py310_problems(src):
         name = (
             node.id
             if isinstance(node, ast.Name)
-            else node.attr if isinstance(node, ast.Attribute) else None
+            else node.attr
+            if isinstance(node, ast.Attribute)
+            else None
         )
         if name in _NEWER_THAN_310:
             out.append("%s (line %d)" % (name, node.lineno))

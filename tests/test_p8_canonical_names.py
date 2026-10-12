@@ -580,7 +580,11 @@ def test_cli_names_option(cmd, monkeypatch, capsys):
 
     monkeypatch.setattr(watchmen, "_wl", stop)
     monkeypatch.setattr(pm, "write", stop)
-    import anim_meta, fx_meta, level_meta, materials, sound_meta
+    import anim_meta
+    import fx_meta
+    import level_meta
+    import materials
+    import sound_meta
 
     for mod, fn in (
         (anim_meta, "write"),

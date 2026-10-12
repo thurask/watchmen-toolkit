@@ -693,7 +693,7 @@ def _cli(*args, **env):
         [sys.executable, os.path.join(ROOT, "watchmen.py")] + list(args),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        universal_newlines=True,
+        text=True,
         env=e,
     )
 

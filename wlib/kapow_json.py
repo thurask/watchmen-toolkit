@@ -2,8 +2,13 @@
 # Human-readable JSON emitters for Kapow property/sequence/fragment assets.
 # Used by watchmen_extract.py (extracted/*.json) and standalone:
 #   python3 kapow_json.py FILE            (prints JSON)
-import json, struct, re, math, bisect
-import kapow_props, decode_sequence
+import json
+import struct
+import re
+import math
+import bisect
+import kapow_props
+import decode_sequence
 
 # a .scene is a fragment whose root is the SceneNode (engine: same Fragment asset type)
 FRAGMENT_EXTS = (".fragment", ".scene")
@@ -17,7 +22,7 @@ NAMEK = 0x7282B2A2  # kapow keyHash of NAME (stored in platform byte order)
 _NOT_PRINTABLE = bytes(0 if 32 <= c < 127 else 1 for c in range(256))
 
 
-from wutil import read_bytes as _read_bytes  # one copy, in wlib/wutil.py
+from wutil import read_bytes as _read_bytes  # one copy, in wlib/wutil.py  # noqa: E402
 
 
 def _schema_name(d, p, e):
@@ -42,8 +47,8 @@ def fragment_json(d, bo="<"):
     # "{", closed by a NUL and followed (after up to 8 more NULs) by a 12-byte record
     # that looks like a node header.  The scan tries every start offset in turn; all
     # starts inside one NUL-free run share that run's end and so its record, which is
-    # why the run is judged once (_schema_name) instead of once per start offset: the
-    # per-offset form re-read the rest of the run each time, quadratic in its length.
+    # why the run is judged once (_schema_name) instead of once per start offset: a
+    # per-offset form would re-read the rest of the run each time, quadratic in its length.
     nodes = []
     p = 0
     n = len(d)
@@ -207,9 +212,8 @@ def fragment_json(d, bo="<"):
 
 def terrain_json(b, bo=None, stream=None):
     """`.terrain` header -> JSON (terrain_asset, format kapow-terrain/2): the whole
-    file from the engine's loader 0x5397d0, `tail_bytes` 0.  Before 1.4.0 this read the
-    three path lists and left the rest as `tail_bytes` (74 to 95% of each file).  A
-    file the grammar does not fit comes back as a marked stub (`not_decoded`)."""
+    file from the engine's loader 0x5397d0, `tail_bytes` 0.  A file the grammar does
+    not fit comes back as a marked stub (`not_decoded`)."""
     import terrain_asset
 
     return terrain_asset.strip(terrain_asset.to_json(b, bo, stream))
@@ -222,7 +226,7 @@ _SCENE_COMMON = frozenset(
         "UseRealTime recordInSavepoints runScript Open enabled Visible runFrameUpdate "
         "smartSelectable logicalParent siblingOrder parentLink spatialTreeStrategy localPos "
         "localOrient Locked UserType includeInAO includeInReflections castShadow "
-        # the same five as the executable registers them (key table from 1.4.0 on)
+        # the same five as the executable registers them
         "useRealtime open visible locked userType"
     ).split()
 )
@@ -346,8 +350,8 @@ def to_json(name_lower, data, order=None, stream=None):
             out["lossless"] = bool(r["ok"])
             out["float_values"] = _kf.float_values()
             # nodes / named_instances / instances / transforms from the exact parse (the
-            # byte sweep above read integers as text); the sweep stays only as the
-            # marked fallback of a fragment that does not parse to its end
+            # byte sweep above reads integers as text); the sweep is only the marked
+            # fallback of a fragment that does not parse to its end
             out["instances_source"] = "exact" if r["ok"] else "sweep"
             if r["ok"]:
                 out.update(_kf.sections(data, r))
@@ -390,7 +394,7 @@ def to_json(name_lower, data, order=None, stream=None):
         try:
             return particle_asset.to_json(data, order=order)
         except particle_asset.ParticleError as ex:
-            out = kapow_props.parse(data, order=order)  # legacy block walk, never raises
+            out = kapow_props.parse(data, order=order)  # generic block walk, never raises
             out.setdefault("warn", []).append("not a complete .particle tree: %s" % ex)
             return out
     if name_lower.endswith(".pb"):
@@ -547,9 +551,9 @@ def load_fragment(path):
     """The fragment JSON of `path` (a `.fragment` or its `.fragment.json`).
 
     Parses the BINARY `.fragment` whenever it is there: a `.fragment.json` on
-    disk may have been written by an older extractor (unnamed `key_xxxxxxxx`
-    properties, a desynchronised EnemyDef in Dominatrices.fragment) and is only
-    read when the binary is missing.  Cached per file (path, size, mtime)."""
+    disk may carry unnamed `key_xxxxxxxx` properties or a desynchronised EnemyDef
+    (Dominatrices.fragment) and is only read when the binary is missing.  Cached
+    per file (path, size, mtime)."""
     import os
 
     frag = path.removesuffix(".json")
@@ -599,7 +603,8 @@ def glob_tree(root, *parts):
     seconds.  Inside `tree_cache(root)` the tree is walked once: the directory list
     `**` expands to is kept, a literal name is looked up in it, and only the
     directories that have it are listed for the pattern."""
-    import glob, os
+    import glob
+    import os
 
     slot = _TREE_DIRS.get(root)
     if slot is None:
@@ -630,7 +635,8 @@ def find_fragment(root, stem):
     """Path of `<stem>.fragment` under `root` (recursive; the first in sorted
     order), found through the binary or, failing that, its `.fragment.json`.
     None when neither exists."""
-    import glob, os
+    import glob
+    import os
 
     hits = set()
     for ext in (".fragment", ".fragment.json"):

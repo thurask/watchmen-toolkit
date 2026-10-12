@@ -43,7 +43,7 @@ def _m2q(M):
     return q / np.linalg.norm(q, axis=1, keepdims=True)
 
 
-from wutil import qmat_xyzw as _q2m  # v -> q v q*, (x, y, z, w), not normalised
+from wutil import qmat_xyzw as _q2m  # v -> q v q*, (x, y, z, w), not normalised  # noqa: E402
 
 
 def blend_pal(A, B, w):

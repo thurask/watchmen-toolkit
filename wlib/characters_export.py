@@ -8,7 +8,10 @@ fragments).  Bakes are cached per skeleton in <outdir>/_bake/<key>/ so the
 export is resumable and variants of the same skeleton share the work.
 """
 
-import os, struct, sys, glob
+import os
+import struct
+import sys
+import glob
 import numpy as np
 from wutil import default_naz, load_npz, order_name, platform_name
 
@@ -49,7 +52,7 @@ ENEMY_FRAGS = [
     "ThugBig",
 ]
 
-# ---- Part 1 (WM06) cast (2026-07-14). Part 1 enemy defs live under Enemy/
+# ---- Part 1 (WM06) cast. Part 1 enemy defs live under Enemy/
 # with different stems; the whole cast rides the Medium/Small/Large binds
 # (Part 1 ships no Female/Gimp skeletons -- and its M/S/L REST POSES DIFFER
 # from Part 2's, so binds must be built from the Part 1 source, not game.naz).
@@ -76,7 +79,7 @@ ENEMY_FRAGS_P1 = [
 CLIP_PREFIX_P1 = {"large": ("EN1", "EN2"), "small": ("EN1", "EN3")}
 
 
-from wutil import read_bytes as _read_bytes  # one copy, in wlib/wutil.py
+from wutil import read_bytes as _read_bytes  # one copy, in wlib/wutil.py  # noqa: E402
 
 
 def _find_fragment(root, stem):
@@ -87,7 +90,7 @@ def _find_fragment(root, stem):
 
 def _load_fragment(path):
     """Fragment JSON, parsed from the binary `.fragment` when it is there (a
-    `.fragment.json` left by an older extractor is never preferred)."""
+    `.fragment.json` beside it is never preferred)."""
     import kapow_json
 
     return kapow_json.load_fragment(path)
@@ -98,7 +101,10 @@ def bind_mismatches(extract_out):
     from this extract: its skeleton model is on disk and gives other bones or
     another rest pose, or the extract has no such skeleton at all (a Part 2 bind in
     a Part 1 extract).  The test reads the content -- no path or folder name."""
-    import contextlib, io, shutil, tempfile
+    import contextlib
+    import io
+    import shutil
+    import tempfile
     import build_bind_file
     import watchmenlib as wl
 
@@ -213,27 +219,27 @@ def _is_part1(extract_out):
 
 
 def track_names_for(extract_out):
-    """Part 1 keeps the prefix-insensitive track lookup (not established for Part 1; see
+    """Part 1 uses the prefix-insensitive track lookup (not established for Part 1; see
     bake_v4)."""
     return "prefix" if _is_part1(extract_out) else "exact"
 
 
 # RESTORATION overrides (material -> texture name), applied per variant.
 # The game's own data gives the black-afro dominatrices (5/7/10) a black FACE
-# (GogoHeadAfro) but a WHITE body: the in-game dark body skin is FemaleSkinBody_Dominatrix1 (white skin x neutral 0.606 shadow overlay, per user NinjaRipper QA); FemaleSkinBody_Black ships completely
-# unreferenced (no model or fragment names it).  Clearly authored for these
-# variants, so we swap it in.  Disable with WATCHMEN_NO_RESTORE=1.
+# (GogoHeadAfro) but a WHITE body: the in-game dark body skin is FemaleSkinBody_Dominatrix1 (white skin x neutral 0.606 shadow overlay, NinjaRipper capture); FemaleSkinBody_Black ships completely
+# unreferenced (no model or fragment names it).  It is authored for these
+# variants, so the export swaps it in.  Disable with WATCHMEN_NO_RESTORE=1.
 # runtime-attached head models (not in the fragment's model_ref):
 # char -> (head model basename, attach bone).  The head has its own facial rig
 # (jaw/lips/eyelids) that the body skeleton doesn't carry -- exported rigid on
 # the attach bone, aligned via both models' node FK.
 EXTRA_HEADS = {
     "TwilightLady": ("TwilightLady_Head", "Head"),
-    # 2026-07-13: Heavy variant is a headless wardrobe set; the
-    # face-rigged head was never wired (user QA approved attach)
+    # Heavy variant is a headless wardrobe set; the game data does not
+    # wire the face-rigged head, the export attaches it
     "Heavies": ("Heavies_Head_1", "Head"),
     # NiteOwl's mask model carries his facial rig (Bip01>Neck>Head +
-    # Jaw/lips/teeth) -- the long-orphaned NTO face poses attach here.
+    # Jaw/lips/teeth) -- the NTO face poses, which no shipped model wires, attach here.
     "NiteOwl": ("NiteOwl_MaskDry2", "Head"),
 }
 
@@ -251,7 +257,7 @@ HEAD_SWAPS = {
 # char -> WeaponDB collections (engine: WeaponDB.fragment CharacterModelCollection
 # groups per enemy class; players disarm+use any common weapon -> '*').
 # For the enemies this is only the FALLBACK: char_weapon_colls reads the two
-# collections from the character's own CharacterDef.  (The table gave ThugBig no
+# collections from the character's own CharacterDef.  (The table gives ThugBig no
 # two-handed collection; its CharacterDef names ThugsWeapons_2H.)
 # Attach rule (decomp part_0023 + Bs2CharVisual): the engine BoneAttacher snaps
 # the weapon model (grip authored at origin) onto the 'Attach RHand' bone;
@@ -318,7 +324,7 @@ def char_weapon_colls(extract_out, cname):
 # reconstructed Dominatrix_3 wears its "Dominatrix1" sheet (SYNTH_VARIANTS).
 TEX_OVERRIDES = {}
 
-# --- Synthetic (reconstructed) variants (2026-07-16) ---------------------------
+# --- Synthetic (reconstructed) variants ----------------------------------------
 # The Dominatrices fragment ships variants 1,2,4..10 -- there is NO Dominatrix_3
 # in the shipped data. Pre-release screenshots show a _3 identical to Dominatrix_2
 # but with Twilight Lady's hair (the TwilightLadyHair submesh of BS2_WithoutWeapon,
@@ -511,7 +517,8 @@ def _brown_hair_layers(texroots, hair_mat, tint_mat):
     """Fabricate the tinted-hair texture layer dict: recolour the hair diffuse to
     the median-brown of `tint_mat`, preserving strand detail + the alpha cutout;
     reuse the hair's own normal/spec/specSize. Returns a layers dict or None."""
-    import char_lib, io
+    import char_lib
+    import io
     from PIL import Image
 
     src = char_lib._find_layers(hair_mat, texroots)
@@ -694,7 +701,7 @@ def _lerp_err(pal, bind_B4):
     viewer LERPs between them.  pal: (F,NB,3,4) palettes at 2x rate; even
     frames = kept keys, odd frames = ground truth midpoints.  glTF lerps each
     joint's WORLD rotation independently -- fast wrist/finger motion shears
-    mid-keyframe (user QA: EN4_COM_WPN_1H_heavy_B hands, 35 deg at 1x)."""
+    mid-keyframe (measured: EN4_COM_WPN_1H_heavy_B hands, 35 deg at 1x)."""
     F, NB = pal.shape[:2]
     if F < 3:
         return 0.0
@@ -865,8 +872,8 @@ def bake_cache(key, bind, extract_out, outdir, budget=None):
                     pal = pal4  # keep 4x
                 print("  dense bake %s: %dx frames" % (nm, len(pal) // len(pal2[::2])))
             # fps stored EXPLICITLY (header-exact: frames span dur seconds).
-            # Old caches lack 'fps' and used the misread x3 formula -- loader
-            # falls back for them, but a full rebake is the real fix.
+            # A cache without 'fps' is read at a fallback rate (cached_fps);
+            # a full rebake is the real fix.
             np.savez(
                 dst + ".tmp.npz",
                 pal=pal.astype(np.float32),
@@ -929,8 +936,9 @@ def anim_meta_is_current(m, extract_out):
     its own format and content revision, the float mode of this run
     ($WATCHMEN_JSON_FLOATS, `float_values`), the rig layout its `skeletons` describe
     (--rig, `skeleton_rig`), and the format marker of every block the
-    build adds (face, combat, fx).  A table from before one of those blocks, or with an older one,
-    is not reused by a resumed export -- it would keep the old tables for good."""
+    build adds (face, combat, fx).  A table without one of those blocks, or with one in
+    another format, is not reused by a resumed export -- it would keep the stale table
+    for good."""
     import anim_meta
     import combat_meta
     import f32json
@@ -1172,8 +1180,9 @@ def pairs_without_contact_check(m):
 
 def ensure_all_binds(keys, extract_out, naz=None):
     """Build every missing bind of `keys` now ({key: reason} for those that fail), so the
-    animation table that is written next can run its contact check on every pair: the
-    `bs2` bind used to be built after the table, on the first run of an export."""
+    animation table that is written next can run its contact check on every pair, the
+    `bs2` bind included (ensure_binds would otherwise build it during the export,
+    after the table)."""
     if naz is None:
         naz = default_naz()  # 01_game.naz, else game.naz
     failed = {}
@@ -1189,8 +1198,8 @@ def jiggle_cache_dir(cdir, jiggle_model=None, props=None):
     """Directory of the jiggled-palette memo of bake cache `cdir`.  Its name
     carries the jiggle model, mode and constants (jiggle_d6.cache_signature), and the
     extract's PhysicsWorld values `props` when they differ from the shipped ones, so a
-    directory baked with another model or other values -- including the bare `<key>_j`
-    of 1.2.0 -- is never read.  Old directories are simply unused and can be deleted."""
+    directory baked with another model or other values -- including a bare `<key>_j`
+    -- is never read.  Such directories are unused and can be deleted."""
     from jiggle_d6 import cache_signature
 
     return cdir + "_j_" + cache_signature(jiggle_model, props=props)
@@ -1207,16 +1216,16 @@ def bake_fps(d):
     return bake_v4.fps_for(len(d["pal"]), float(d["dur"]))
 
 
-#: clip names the retired walk / run multipliers applied to: a jiggle memo of one of them
-#: without a stored `fps` was solved at 2.3 / 2.6 x the clip's rate
+#: clip names whose jiggle memo, when it stores no `fps`, was solved at 2.3 / 2.6 x the
+#: clip's rate (a walk / run multiplier that no clip gets)
 _LEGACY_MULTIPLIED = ("walk_cycle", "run_cycle")
 
 
 def jiggle_memo_is_current(memo, bake, clip, fps):
     """Is the jiggled palette `memo` of clip `clip` usable with raw bake `bake` written at
     `fps`?  It must exist, be no older than the bake and have been solved at `fps`: a memo
-    stores the rate it was solved at; one without it is from before the rate was stored and
-    is used only for a clip that was never written at another rate."""
+    stores the rate it was solved at; one without it is used only for a clip that is
+    not in _LEGACY_MULTIPLIED (never written at another rate)."""
     if not (os.path.exists(memo) and os.path.getmtime(memo) >= os.path.getmtime(bake)):
         return False
     try:
@@ -1269,7 +1278,8 @@ def export(
     scene) and <Variant>.ragdoll.json beside it (ragdoll_rig)."""
     if naz is None:
         naz = default_naz()  # 01_game.naz, else game.naz
-    import char_lib, variant_glb as vg
+    import char_lib
+    import variant_glb as vg
     import extract_out as _xo
     import parts_rule
 
@@ -1327,7 +1337,7 @@ def export(
                 char_lib.dropped_palette_names(reset=True)
                 os.makedirs(os.path.dirname(out), exist_ok=True)
                 if anims is None:
-                    # 2026-07-13 perf: npz members are lazy — when a jiggle
+                    # perf: npz members are lazy — when a jiggle
                     # memo exists, read pal from the memo ONLY (raw npz is
                     # opened just for dur/fps), halving mount I/O per skeleton.
                     anims = []
@@ -1337,8 +1347,6 @@ def export(
                     os.makedirs(jdir, exist_ok=True)
                     jn = 0
                     jig_todo = []  # anim indices needing a jiggle attempt
-                    # (was named `pending`, which shadowed the outer resumable-
-                    #  bake counter and made export() return a list)
                     for f in sorted(glob.glob(os.path.join(cdir, "*.npz"))):
                         if f.endswith(".tmp.npz"):
                             os.remove(f)  # torn write from a killed run
@@ -1353,8 +1361,7 @@ def export(
                         else:
                             anims.append((nm, d["pal"], fps))
                             jig_todo.append(len(anims) - 1)
-                    # 2026-07-13: d6 jiggle promoted into the character glbs
-                    # (07-12e capture verdict; was CLI-only in variant_glb).
+                    # d6 jiggle in the character glbs (capture-verified)
                     for i in jig_todo:
                         nm, pal, fps = anims[i]
                         try:
@@ -1478,7 +1485,7 @@ def export(
                 if sv and sv.get("hair_from") and not os.environ.get("WATCHMEN_NO_SYNTH"):
                     hmodel, hmat = sv["hair_from"]
                     if hmodel in midx:
-                        # (collapsed-UV tangent sanitation now happens for every
+                        # (collapsed-UV tangent sanitation happens for every
                         # normal-mapped part in variant_glb.write_glb.)
                         hp = [
                             vg.keep_attrs(pt, (pt[0], pt[1], pt[2], pt[3], pt[4], sv["hair_mat"]))
@@ -1907,7 +1914,8 @@ def _rigid_attach_parts(model_base, bone, bind, bn):
     heads with their face rig (_face_attach); this rigid form is kept for
     callers of the module and reads its pieces through _rigid_parts, like the
     weapon loader."""
-    import parse_model_nodes, build_bind_file as bbf
+    import parse_model_nodes
+    import build_bind_file as bbf
 
     names, pos, quat, parent = parse_model_nodes.parse(_read_bytes(model_base + ".model"))
     pos[0] = 0
@@ -1972,7 +1980,9 @@ def _face_textures(face, texroots, extract_out):
     Large_Head_1 wears the "Goatee" sheet of bikers/head.bmp, whose diffuse is
     bikers/head02.bmp), the layer is taken from there.  The part gets a material
     key of its own, so a body part with the same texture keeps the default sheet."""
-    import char_lib, face_rule, variant_glb as vg
+    import char_lib
+    import face_rule
+    import variant_glb as vg
     import watchmen_extract as we
 
     gh = face.get("game_head") or {}
@@ -2025,8 +2035,11 @@ def _face_textures(face, texroots, extract_out):
 def _face_attach(model_base, bone, bind, bn, cname, extract_out, outdir, align_ref=None):
     """Animated face attach: face bind from the head model's own nodes, its
     family's expression poses baked on, alignment M,t mapping face-model space
-    -> body bind space (same node-FK alignment as the old rigid attach)."""
-    import bake_v4, char_lib, parse_model_nodes, build_bind_file as bbf
+    -> body bind space (the node-FK alignment of _rigid_attach_parts)."""
+    import bake_v4
+    import char_lib
+    import parse_model_nodes
+    import build_bind_file as bbf
     import face_export
 
     # face bind
@@ -2056,9 +2069,9 @@ def _face_attach(model_base, bone, bind, bn, cname, extract_out, outdir, align_r
     parts = char_lib.load_parts([model_base], fbn)
     proxy_slots = []
     if align_ref is None:
-        # 2026-07-13: NAME-PROXY RIDE (see docs/ENGINE_CONSTANTS.md,
-        # now applied after user QA: NiteOwl cowl moved separately from the
-        # body).  The cowl/head models blend real weight onto Bip01/Neck/
+        # NAME-PROXY RIDE (see docs/ENGINE_CONSTANTS.md; without it the
+        # NiteOwl cowl moves separately from the body).  The cowl/head
+        # models blend real weight onto Bip01/Neck/
         # clavicles/twists; a rigid Head ride over-rotates all of it.  Face-rig
         # slots NOT under Head whose names exist in the body bind ride the
         # matching BODY joint via the same per-body-slot proxy mechanism the
@@ -2084,20 +2097,20 @@ def _face_attach(model_base, bone, bind, bn, cname, extract_out, outdir, align_r
             bnm = NAME_MAP.get(n, n)
             if bnm in bn:
                 bs = bn.index(bnm)
-                # PER-BONE alignment (2026-07-13 giraffe fix): engine drives
+                # PER-BONE alignment: engine drives
                 # the face-rig bone with the body bone's WORLD, skinning stays
                 # against the FACE rig's own bind => proxy skin = P_body(bs) @
                 # B_body(bs) @ inv(B_face(k)).  Equals the global head-frame
                 # M4 only when the two binds align (Neck/clavicles/twists do;
-                # NTO cowl 'Bip01' is 0.34m/122deg off -> M4 slung its verts
-                # around the root = giraffe neck).
+                # NTO cowl 'Bip01' is 0.34m/122deg off -> M4 would sling its
+                # verts around the root = giraffe neck).
                 B4b = np.eye(4)
                 B4b[:3, :3] = bv["Rb"][bs]
                 B4b[:3, 3] = bv["tb"][bs]
                 B4fk = np.eye(4)
                 B4fk[:3, :3] = fb["Rb"][k]
                 B4fk[:3, 3] = fb["tb"][k]
-                # ALIGNMENT GATE (giraffe fix, round 2): only proxy bones whose
+                # ALIGNMENT GATE: only proxy bones whose
                 # face bind agrees with the body bind under the head-frame M4.
                 # The cowl is authored rest-coherent (one rigid M4 places ALL
                 # of it correctly), so a misaligned 'match' (NTO Bip01: 0.34m/
@@ -2117,10 +2130,10 @@ def _face_attach(model_base, bone, bind, bn, cname, extract_out, outdir, align_r
                 if _dp > 0.02 or _dR > 5.0:
                     # Misaligned 'match' = the mini-rig ROOT (NTO cowl Bip01:
                     # zeroed bind, Head's grandparent; its verts = the skirt
-                    # base at chest height). User QA killed both extremes:
-                    # Head-anchor ride pitches the skirt with the head
-                    # (round 3), entity ride leaves it behind when the torso
-                    # moves (round 4 giraffe). The verts sit at upper-chest
+                    # base at chest height). Neither extreme is right: a
+                    # Head-anchor ride pitches the skirt with the head, an
+                    # entity ride leaves it behind when the torso moves
+                    # (giraffe neck). The verts sit at upper-chest
                     # height with clavicle weights already separate -> ride
                     # the UPPER TORSO: proxy to Spine2 with the global M4
                     # (S = P_spine2@M4: exact at rest, follows the chest).
@@ -2163,7 +2176,7 @@ def _face_attach(model_base, bone, bind, bn, cname, extract_out, outdir, align_r
         # GROUND-TRUTH alignment: register the face twin onto the static head
         # it replaces (authored in body space) -- cutscene heads carry a
         # slightly different head-vs-bone orientation than the game heads, so
-        # pure bone-frame alignment tilts the face (user Blender QA).
+        # pure bone-frame alignment tilts the face (verified in Blender).
         ref_parts = char_lib.load_parts([align_ref], bn)
         A = max((pt[0] for pt in parts), key=len)  # twin's biggest submesh
         B = np.vstack([pt[0] for pt in ref_parts])
@@ -2176,7 +2189,7 @@ def _face_attach(model_base, bone, bind, bn, cname, extract_out, outdir, align_r
         )
         # WEIGHT TRANSFER: the static head is body-skinned with a soft blend
         # (e.g. 92%% Head + 8%% Spine2 at the neck base); a rigid ride on Head
-        # over-rotates (user QA).  Copy each twin vertex's body blend from its
+        # over-rotates.  Copy each twin vertex's body blend from its
         # nearest static-head vertex; core (non-face-bone) weight goes to
         # per-body-slot PROXY joints, face-bone weight stays on the face rig.
         fpar = fb["par"]

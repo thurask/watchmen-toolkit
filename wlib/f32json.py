@@ -57,8 +57,8 @@ def f32(x):
 
 
 def num(x, nd, exact=None):
-    """A stored float32 for JSON: f32(x) in exact mode, round(x, nd) (the 1.4.0
-    writing) in rounded mode.  `exact`: True / False, or None for mode()."""
+    """A stored float32 for JSON: f32(x) in exact mode, round(x, nd) (the writer's
+    own rounding) in rounded mode.  `exact`: True / False, or None for mode()."""
     if exact is None:
         exact = mode() == "exact"
     return f32(x) if exact else round(x, nd)
@@ -93,8 +93,8 @@ def finite(obj):
 
 def dumps(obj, exact=None, **kw):
     """json.dumps for the decoded JSON files: in exact mode a NaN or an infinity
-    (anywhere in `obj`) is written as null; in rounded mode `obj` is written as
-    1.4.0 wrote it (json.dumps' own NaN / Infinity tokens).  `exact`: True /
+    (anywhere in `obj`) is written as null; in rounded mode `obj` is written with
+    json.dumps' own NaN / Infinity tokens.  `exact`: True /
     False, or None for mode()."""
     if exact is None:
         exact = mode() == "exact"

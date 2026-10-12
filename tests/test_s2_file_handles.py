@@ -12,7 +12,6 @@ Synthetic data only: no game files.
 import ast
 import gc
 import glob
-import io
 import os
 import struct
 import warnings
@@ -30,7 +29,7 @@ SOURCES = sorted(
 
 def _bare_opens(path):
     """(line, source) of every builtin open() call that is not a `with` item."""
-    with io.open(path, encoding="utf-8") as fh:
+    with open(path, encoding="utf-8") as fh:
         src = fh.read()
     tree = ast.parse(src)
     managed = set()
@@ -71,7 +70,7 @@ def test_read_bytes_is_defined_once():
     as `_read_bytes` (1.4.0 had 16 copies of the three lines)."""
     defs, users = [], []
     for p in SOURCES:
-        with io.open(p, encoding="utf-8") as fh:
+        with open(p, encoding="utf-8") as fh:
             tree = ast.parse(fh.read())
         for node in ast.walk(tree):
             if isinstance(node, ast.FunctionDef) and node.name in ("_read_bytes", "read_bytes"):

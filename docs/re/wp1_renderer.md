@@ -5,16 +5,13 @@ address given), **[bytecode]** read from the SM3 listings in `work/vcolor/dis`, 
 `apitrace_dump.txt` (410 frames, 1920x1080, D3D9), **[data]** measured on the extracted Part 2 PC files,
 **[inferred]**, **[NE]** not established.
 
-Tables: `findings/wp1_renderer.json`. Scratch and tools: `work/wp1/` (`rtti.py` vtable/RTTI reader,
-`props.py` property-registration → member offset, `xref.py`, `bf.c` define-set search, `rf.sh`).
-On the PC (scratch, outside `mnt/`): `~/scratch/wp1/c.txt.gz` (compacted UTF-8 copy of the dump),
-`summ.py` (frame → pass / target / shader / state summary), `ev.py` (constants of one pass).
+Tables: `findings/wp1_renderer.json` (outside this repository, section 9).
 
 **Limit of the ground truth.** The capture is the **main menu** (camera `Cam_001`, Rorschach and Nite Owl
 posing in a lit room), not a combat level. It contains no Dominatrix. Pass order, targets, states and the
 character path are the same code (one `DeferredRA`), and the Dominatrix numbers below come from her sheets
 in the game data, but no Dominatrix draw call was observed. The three large traces
-(`KapowMulti.1-3.trace`, 4.5–11 GB) were not dumped.
+(`KapowMulti.1-3.trace`, 4.5–11 GB) are not dumped.
 
 ---
 
@@ -23,7 +20,7 @@ in the game data, but no Dominatrix draw call was observed. The three large trac
 `FUN_00563ca4` (per frame) → for every camera `MasterRA::vfunc_02` 0x5632f6 → `DeferredRA::vfunc_01`
 0x575da5 (collect) and `DeferredRA::vfunc_02` 0x56f9fb (draw) → post-process → 2-D.
 The engine wraps every pass in `D3DPERF_BeginEvent` (Gfx vtable +0xd4), so the capture names the passes
-itself; all 26 event names occur as strings in the exe and each was matched to its call site.
+itself; all 26 event names occur as strings in the exe and each is matched to its call site.
 
 | # | pass (PERF event) | code | effect (slot of `DAT_00e166cc`) / pass id | target [capture] | state [capture] |
 |---|---|---|---|---|---|
@@ -52,7 +49,7 @@ itself; all 26 event names occur as strings in the exe and each was matched to i
 | 21 | `Debug visualization`, `ImmRA` | 0x56a8f0, 0x563ca4 | REDebug 0x28; immediate-mode RA | back surface | HUD / sprites / text: `FixedFunctionVS` + `FixedFunctionPS[TEXTURING]` |
 | – | ColorFill + StretchRect (LINEAR) to the swap chain, Present | Gfx | – | back buffer | |
 
-Optional passes that exist in the code and did not run in the capture [code]: `Shadowmap directional` /
+Optional passes that exist in the code and do not run in the capture [code]: `Shadowmap directional` /
 `Shadowmap positional` (0x56ca27, only when `DAT_00c8d3ac == 0`), `Reflection - depth / render lights /
 Sky boxes / Main / Particles` (0x56cd1f, planar reflection, when a visible item needs it:
 `this+0x3ec`), `Refractions` + `-Depth`, `-Deferred render lights`, `-Main` (0x56d299, when the water
@@ -77,8 +74,9 @@ fixed-function fog state is set. [capture]
 - `MasterRA::vfunc_02` 0x5632f6: event `Main 3D content` → the scene RA (`FUN_005614dd()` → vtable +8),
   then `PostProcessing` = REPostProcess (slot 0x20: Begin +8, SetPass(0) +0xc, End +0x20), then
   registered overlays, then `Debug visualization`.
-- Two scene render algorithms exist: `DeferredRA` (vtable 0xa3f0d0) and `Simple3DRA` (vfunc_02 0x561117, uses RESkyBox, RESimpleTerrain, REMainVertexLight, REParticles: the vertex-lit
-  fallback). The capture runs `DeferredRA`.
+- Two scene render algorithms exist: `DeferredRA` (vtable 0xa3f0d0) and `Simple3DRA` (vfunc_02
+  0x561117, uses RESkyBox, RESimpleTerrain, REMainVertexLight, REParticles: the vertex-lit fallback).
+  The capture runs `DeferredRA`.
 - Render effects are created once by `FUN_00572a7b` into a 34-slot table (`DAT_00e166cc`). Common
   interface (vtable): +8 Begin, +0xc SetPass(id), +0x10 Render(itemBegin, itemEnd), +0x20 End,
   +0x24 SetWorldMatrix, +0x28 SetDirLight, +0x30 SetMaterial(sheet), +0x40 per-item.
@@ -113,7 +111,7 @@ fixed-function fog state is set. [capture]
 | 0x80 | REDeferredLightLayer | DeferredLightLayerVS/PS ×16 | light buffers |
 | 0x84 | REDeferredWater | DeferredWaterVS/PS | water |
 
-"No RA references it": every load of `DAT_00e166cc` in the exe was enumerated (`work/wp1/xref.py`, 44
+"No RA references it": every load of `DAT_00e166cc` in the exe is enumerated (`work/wp1/xref.py`, 44
 sites); slots 0x00, 0x10, 0x2c, 0x30, 0x48, 0x58, 0x68, 0x70 are never read. Their shaders are compiled
 (all 242 are created in the capture) and never bound: in 410 frames no `MainVS`, `MainPS`, `HairVS`,
 `HairPS`, `GlassWater*`, `SimpleLight*` draw occurs [capture]. So the forward lighting model, the
@@ -142,8 +140,8 @@ whether anything flips it at run time: [NE] (caller 0x575041 not read).
 4. `FUN_005750cd` (via 0x574cdb / 0x574e20): light gathering, section 4.
 5. **`FUN_005739d0`: builds the render lists.** For every visible node:
    - distance cull for model nodes: `dist² · globalGeometryLodFactor² · node.geometryLodFactor² ≤
-     (2·radius + lodDistance[last] + lodFadeOut[last])²` (0x5739d0 + `FUN_0049cf99`; the radius is added twice); nodes with a forced LOD use
-     57312 m.
+     (2·radius + lodDistance[last] + lodFadeOut[last])²` (0x5739d0 + `FUN_0049cf99`; the radius is
+     added twice); nodes with a forced LOD use 57312 m.
    - `FUN_0049d00f` → `FUN_0053a317` chooses LOD A, LOD B and a cross-fade weight (2.3).
    - for every render instance (RI) of the node whose LOD byte (`RI+0x1e`) is A or B:
      `alpha = sheet.opacity (+0x98) · RI.opacity (+0x18, the node's opacity) · fade`;
@@ -159,7 +157,7 @@ whether anything flips it at run time: [NE] (caller 0x575041 not read).
 
 The twelve lists live at `DeferredRA+0x7c + 12·type`:
 
-| list = renderType | name in the editor dropdown | depth pre-pass | drawn in | 
+| list = renderType | name in the editor dropdown | depth pre-pass | drawn in |
 |---|---|---|---|
 | 0 | Standard | yes | `Deferred main hard alpha` |
 | 1 | Standard with blending (and any 0/10 item with alpha < 0.99) | no | `Deferred main soft alpha` |
@@ -175,11 +173,18 @@ The twelve lists live at `DeferredRA+0x7c + 12·type`:
 3 ×2, 7 ×17, 9 ×11; **no sheet uses type 6 (Hair) or 2 (Glass)**. Character textures (220 sheets):
 type 0 ×115, 10 ×100, 1 ×5.
 
+The list is chosen by renderType and opacity alone (0x5739d0); the opaque lists are drawn with
+blending off, and a buffer's vertex alpha only reaches the alpha test there (section 3.3). A material
+does not go to the blended list because its vertex alpha varies.
+
+There is no per-material render-effect choice in the deferred RA: a material chooses a *list* by
+renderType (this section) and a *shader variant* by the rule of 3.2.
+
 There is no instancing for models (one `DrawIndexedPrimitive` per RI; `SetStreamSourceFreq` in the
 capture belongs to grass / particles [capture, not traced further]).
 
 Script-level culling (`CullingGroup`, `CullingVisibilityGroup`, PVS fragments) works by enabling and
-disabling nodes before this stage (dominatrix_audit g2); it was not re-read here.
+disabling nodes before this stage (dominatrix_audit g2); not re-read here.
 
 ### 2.2 Render instances [code]
 
@@ -214,7 +219,7 @@ LOD counts over 740 models: 623 with one LOD, 113 with two, 4 with three. **All 
 have exactly one LOD**; `lodDistance01` is 150 m on 75 of them, 40 m on 55, 30 m on 4 (fade-out 5 m), so
 a character part simply fades out between 150 and 155 m (or 40–45 m). The character code only ever
 instantiates pivot 0 / LOD 0 (`FUN_004bea65` calls every accessor with `(0, 0, i)`) [code].
-`CharacterLodCtrl` (script) was not read.
+`CharacterLodCtrl` (script) is not read here (`ENGINE_CONSTANTS.md`, "Character LOD").
 
 ---
 
@@ -236,19 +241,19 @@ Full list (70 properties) in the JSON. The ones the deferred path reads:
 | +0x98 | opacity | item alpha; < 0.99 → blended list |
 | +0xa0 | alphaThreshold | `D3DRS_ALPHAREF` (0x5696a7) |
 | +0xa1 | writeDepthBuffer | Z write of blended items (0x582eb6) |
-| +0xa2, +0xa3 | castShadow, receiveShadow | not read in this pass |
+| +0xa2, +0xa3 | castShadow, receiveShadow | not read in the default stencil-shadow mode; whether the shadow-map mode reads them is [NE] |
 | +0xa4 | twoSided | `D3DCULL_NONE`; selects the `TWO_SIDED` bundle |
 | +0xb0 | reflectionType (0 none, 1 plane, 2 cube) | pixel-shader choice 0x56bcb8 |
 | +0x104, +0x10c | reflectionBumpPower, reflectionLightFactor | `$reflectionData` = (lightFactor, bumpPower) |
 | +0x114..+0x124 | u/v/u2/v2 scroll | `$UVScrollData`, `$additionalGlowUVScroll` |
 | +0x154..+0x160 | blendType, srcBlend, dstBlend, blendOp | 0x582eb6 |
 | +0x168, +0x16c | fallOffPower, fallOffColor | `$falloffData` = (colour, power) |
-| +0xc4 / +0xd4, +0xe0 | depthFadeGradient (+alpha), gradient texture | `$falloffMap` (s4) |
+| +0xc4 / +0xd4, +0xe0 | depthFadeGradient (+alpha), gradient texture | `$falloffMap` (s4); the string is baked to the texture at load (0x525650) |
 | +0x18c | renderOrder | blended sort key |
 | +0x190.. | eight layer overrides (diffuse, normal, specular, glow, height, fallOff, ambOcc, specSize) | sampler binding |
 
-**Correction:** `impl_sheets.md` 2.1 says "twoSided (+0xa1)". +0xa1 is `writeDepthBuffer`; `twoSided` is
-+0xa4 (as vcolor.md and KAPOW_NAZ_FORMAT.md already say).
++0xa1 is `writeDepthBuffer` and `twoSided` is +0xa4, as `KAPOW_NAZ_FORMAT.md` §4.6 and `vcolor.md` have
+them.
 
 Layer ids used by `FUN_0049c838` / `FUN_00523d9a` [code]: 0/1 diffuse, 2 normal, 3 height, 4 specular,
 5 glow, 6 fallOff, 7 ambOcc, 8 specSize. A texture frame holds eight slots (0x20 bytes); a missing layer
@@ -277,6 +282,8 @@ otherwise                   : extra ? [AAF;SPECULAR;TANGENTSPACE;TWO_SIDED] : [S
 
 `ALL_ADDITIONAL_FEATURES` and `TWO_SIDED` always come together: one flag buys glow, the specular-size map
 and the `vFace` normal flip. A falloff material with a cube reflection always gets the full variant.
+The "additional-features / two-sided flag" of `FUN_0056bcb8` is this four-way OR, applied after the
+material type (sheet+0x60 = 10 or 11) and the reflection type.
 Vertex shader: `FUN_00569734(skinned = RI type 3, hasColor = MeshBuffer+0x31)` as vcolor.md 4 describes.
 Both agree with every (VS, PS) pair in the capture.
 
@@ -315,9 +322,10 @@ Capture check, one falloff draw of the menu characters: `c2 = (20, 0.58, 250, 2)
 `c14 = (1, 1, 1, 0.06)`; next material `c2 = (11, 1.2, 250, 2)`, `c14 = (0, 0, 0, 0.42)`.
 
 Render state per material [code 0x571d5d, 0x582eb6, 0x5696a7; capture]: cull = NONE when twoSided else the
-pass default (CW); alpha test enabled when the diffuse texture has an alpha channel (`tex+0x1c` bit 0),
-`ALPHAREF = alphaThreshold`, `ALPHAFUNC = GREATEREQUAL` (the only value in the capture); in the blended
-pass: blendType 0 = SRCALPHA / INVSRCALPHA ADD, 1 = SRCALPHA / ONE ADD, 2 = SRCALPHA / ONE REVSUBTRACT,
+pass default (CW); alpha test enabled when the diffuse texture has an alpha channel (`tex+0x1c` bit 0;
+the engine uses the texture header's `hasAlpha` byte, 0x429e77, not the pixels),
+`ALPHAREF = alphaThreshold`, `ALPHAFUNC = GREATEREQUAL` (the only value in the capture); in the blended pass:
+blendType 0 = SRCALPHA / INVSRCALPHA ADD, 1 = SRCALPHA / ONE ADD, 2 = SRCALPHA / ONE REVSUBTRACT,
 3 = the sheet's own triple; Z write = writeDepthBuffer.
 
 ### 3.4 Define sets — the 19 unresolved shaders
@@ -329,9 +337,10 @@ and an `UNLIT` variant [code]. With that vocabulary an exhaustive subset search 
 in vcolor.md) names **all 15 DeferredMainPS**, and `FixedFunctionPS453591715 = [TEXTURING]` (string at
 the compile site in part_0003). 16 of 19 resolved; list in the JSON.
 
-- **Correction to `defines_resolved.tsv`:** `DeferredMainPS-1209756536` is
+- `DeferredMainPS-1209756536` is
   `DIR_LIGHT_ENABLE;DIR_LIGHT_SHADOWS;PLANAR_REFLECTION;SPECULAR;TANGENTSPACE;TERRAIN_AO;TWO_SIDED;WET_SURFACE`;
-  the 7-define set recorded there (with two `NUM_SHADOW_CASTING_LIGHTS`) is a 32-bit collision.
+  the 7-define set with two `NUM_SHADOW_CASTING_LIGHTS` recorded for it in vcolor's
+  `defines_resolved.tsv` is a 32-bit hash collision.
 - Still unresolved: `MainVS-1480351135`, `MainVS901430857` (terrain variants by their constant tables:
   `$terrainTextureNr`, `$shadowMapMats` ×3 / ×1) and `SimpleLightVS1431484195` (`$textureNr`, `$zbias`).
   All three belong to effects no render algorithm uses.
@@ -388,8 +397,10 @@ behind them [inferred from pass order + bytecode].
 ### 4.3 Shadows [code + capture]
 
 - Mode global `DAT_00c8d3ac`: 1 = stencil volumes (value in the exe image and what the capture shows),
-  0 = shadow maps (REShadowMap; no depth texture is ever created in the capture). `DAT_00c8d3b0` = 1:
-  half-resolution shadow buffer.
+  0 = shadow maps (REShadowMap; no depth texture is ever created in the capture). It is the config key
+  `shadowmode` (stencil by default, shadowmaps, none); `DAT_00c8d3b0` = 1 (half-resolution shadow
+  buffer) is the config key `usescaledbuffers`. Neither is compile-time. The sheet's `castShadow` /
+  `receiveShadow` are not read in the stencil mode; whether the shadow-map mode reads them is [NE].
 - A light casts when `causeShadows` and the camera is within `light radius + 25 m`
   (`FUN_00574b7d`; 25.0 = `_DAT_009f8094`, the `shadowMaxRange` default).
 - Casters (`FUN_005748e2`): up to 512 nodes from a spatial query around the light; enabled, visible,
@@ -445,37 +456,29 @@ Notes, all [bytecode] unless tagged:
   not tinted by the texture.
 - Everything is computed on display-encoded values (no sRGB anywhere) [capture].
 
-**Reconciliation with `TEXTURE_SHADER_NOTES.md`:**
+The specular model, stated against the sheet data:
 
-- Sampler table: correct for the full variant. In the plain `[SPECULAR;TANGENTSPACE]` variant s6 / s7 do
-  not exist.
-- "exponent = specSize² · 256 + 1 (× c2.x)": correct, the channel read is **G** of the specSize texture;
-  without a specSize layer (or without the `extra` flag) `n = specularSize`.
-- "specular = c2.y · NdotH / (NdotH + exponent · (1 − NdotH))": correct, and it is additionally × N·L ×
+- The sampler table above holds for the full variant. In the plain `[SPECULAR;TANGENTSPACE]` variant
+  s6 / s7 do not exist.
+- The exponent is `specSize² · 256 + 1` × `c2.x`, where the channel read is **G** of the specSize
+  texture; without a specSize layer (or without the `extra` flag) `n = specularSize`.
+- The specular term `c2.y · NdotH / (NdotH + exponent · (1 − NdotH))` is additionally × N·L ×
   attenuation × light colour.
-- "finalRGB = diffuseMap · (Σ diffuse + glow) + specMap · (Σ specular + glow)": correct for the full
-  variant; add ambient + directional to the first sum, the reflection lerp, vertex colour, falloff, fog.
-- "z = 250, w = 2 are global constants (rim / fresnel)": they are literals pushed with every material.
-  Only `DeferredMain2PS-270807833` (the low-quality full variant) reads `c2.zw` (as a scale / bias);
-  no rim or Fresnel term uses them.
-- **"CORRECTION: the specSize layer behaves as a matte map; roughness must increase with specSize" is not
-  what the shader does.** A larger specSize gives a larger exponent, i.e. a *narrower* lobe. Because the
-  lobe is not normalised, a narrow lobe is small *and no brighter*, so the surface reads as less shiny
-  overall; in a PBR viewer the right translation is "narrow lobe (lower roughness) **and** lower
-  specular strength" (section 7.2), not an inverted roughness.
+- `finalRGB = diffuseMap · (Σ diffuse + glow) + specMap · (Σ specular + glow)` holds for the full
+  variant, with ambient + directional in the first sum, the reflection lerp, vertex colour, falloff
+  and fog.
+- `c2.z = 250`, `c2.w = 2` are literals pushed with every material. Only `DeferredMain2PS-270807833`
+  (the low-quality full variant) reads `c2.zw` (as a scale / bias); no rim or Fresnel term uses them.
+- The specSize layer is **not a matte map**. A larger specSize gives a larger exponent, i.e. a *narrower*
+  lobe. Because the lobe is not normalised, a narrow lobe is small *and no brighter*, so the surface
+  reads as less shiny overall; in a PBR viewer the translation is "narrow lobe (lower roughness) **and**
+  lower specular strength" (section 7.2), not an inverted roughness.
 - "roughness = sqrt(2 / (exp + 2))" yields the GGX alpha, not glTF's perceptual roughness (alpha =
-  roughness²): use the fourth root.
-- "$specularData is stored per texture, hashLo 0xf4142d28 / 0xb3ab3306": these are the sheet properties
-  `specularSize` (+0x90, exponent) and `specularPower` (+0x8c, intensity) [code]; "the first block is
-  active" = the first sheet, unless the model's `textureSheetsDescription` selects another
-  (impl_sheets.md).
-- "intensity 0 → matte": correct (`s_k = 0`); note that a missing specular **map** is white, not black.
-
-**Corrections to `vcolor.md`:** 7 "the rule that routes a material to REDeferredMain2 versus the other
-render effects" is now established (1.2, 2.1: there is no per-material effect choice in the deferred
-RA; the material chooses a *list* by renderType and a *shader variant* by 3.2). 4 "`FUN_0056bcb8` picks
-by … material type (sheet+0x60 = 10 or 11) and an additional-features / two-sided flag": the flag is the
-four-way OR of 3.2.
+  roughness²): the perceptual roughness is the fourth root.
+- `$specularData` comes from the sheet properties `specularSize` (+0x90, exponent; hashLo 0xf4142d28)
+  and `specularPower` (+0x8c, intensity; hashLo 0xb3ab3306) [code]; the active block is the first
+  sheet, unless the model's `textureSheetsDescription` selects another (`KAPOW_NAZ_FORMAT.md`).
+- `specularPower` 0 → matte (`s_k = 0`); a missing specular **map** is white, not black.
 
 ### 4.5 Vertex-lit fallback
 
@@ -521,7 +524,8 @@ selected (hardware without MRT / SM3, an option): [NE].
 - **Rorschach's ink** [capture]: two draws in `Deferred main soft alpha`, `DeferredMain2VS[SKIN;
   TANGENTSPACE;VERTEX_COLORS]` + `[SPECULAR;TANGENTSPACE]`, `SRCBLEND = SRCALPHA`, `DESTBLEND = ONE`,
   `BLENDOP = REVSUBTRACT`, alpha test off, Z write off: `dst − lit · alpha`, where `lit` is the fully
-  lit layer colour and alpha = texture alpha × vertex alpha.
+  lit layer colour and alpha = texture alpha × vertex alpha. This is the subtractive layer of
+  `KAPOW_NAZ_FORMAT.md` (blendType 2), confirmed on the capture.
 - **Target highlight / damage**: not re-read (dominatrix_audit g13).
 
 ---
@@ -571,53 +575,54 @@ judged against screenshots must compare *before* this stage or apply it.
 
 ---
 
-## 7. Export consequences (prioritised)
+## 7. Consequences for an export (prioritised)
 
-### 7.1 What to change in the toolkit
+### 7.1 Material and geometry mapping
 
-1. **Alpha mode from the list, not from the look.** renderType 0 / 10 / 11 → opaque; add
+1. **Alpha mode from the list, not from the look.** renderType 0 / 10 / 11 → opaque, with
    `alphaMode: MASK`, `alphaCutoff = alphaThreshold / 255` (default 95 → 0.373) when the diffuse layer
-   has an alpha channel. renderType 1 → `BLEND` (and the blend type as today). **Hair is MASK +
+   has an alpha channel. renderType 1 → `BLEND` (with the blend type). **Hair is MASK +
    doubleSided, not BLEND** — that is how the engine draws it, and it removes the sorting problem.
    `opacity < 0.99` on a type 0 / 10 sheet → `BLEND` with `baseColorFactor.a = opacity`.
-2. **doubleSided = twoSided** (already done); note that the engine also flips the shading normal on back
-   faces only in the `extra` variants, which twoSided itself forces — glTF viewers do the same.
-3. **Specular**: emit both roughness and specular strength from `(n, I)` (7.2). A material without a
+2. **doubleSided = twoSided**; the engine flips the shading normal on back faces only in the `extra`
+   variants, which twoSided itself forces — glTF viewers do the same.
+3. **Specular**: both roughness and specular strength follow from `(n, I)` (7.2). A material without a
    specular layer has specTex = white, not black; a material with `specularPower = 0` has no specular at
    all regardless of maps (90 of 220 character sheets).
 4. **Emission**: `emissive = selfIllumColor · selfIlluminance · glow · (albedo + specTex)`; with no glow
-   layer `glow = 1`. Bake that product into the emissive texture (glTF multiplies emissive by nothing
-   else). Negative selfIlluminance cannot be expressed: clamp to 0 and record it in extras.
-   `bloomPower` only feeds the bloom buffer: write it to extras (optionally
-   `KHR_materials_emissive_strength` for viewers with bloom), never into base colour.
+   layer `glow = 1`. That product is the emissive texture (glTF multiplies emissive by nothing else).
+   Negative selfIlluminance cannot be expressed in glTF: clamped to 0 and recorded in extras.
+   `bloomPower` only feeds the bloom buffer: it belongs in extras (optionally
+   `KHR_materials_emissive_strength` for viewers with bloom), never in base colour.
 5. **Falloff sheets (100 of 220 character sheets, all Dominatrix clothing and most skin)**: glTF has no
    rim term. Closest: `KHR_materials_sheen` with `sheenColorFactor ≈ fallOffPower · gradient colour` and
-   high sheen roughness; keep the exact parameters (`fallOffPower`, `fallOffColor`, the
-   `depthFadeGradient` string) in extras. Without sheen the export is darker at grazing angles than the
-   game.
+   high sheen roughness; the exact parameters (`fallOffPower`, `fallOffColor`, the
+   `depthFadeGradient` string) belong in extras. Without sheen the export is darker at grazing angles
+   than the game.
 6. **Reflection (cube, 43 character sheets)**: `lerp(diffuse lighting, environment, specTex ·
-   reflectionLightFactor)`. Approximation: raise F0 to at least `reflectionLightFactor · specTex`
-   (7.2) so the viewer's environment shows through; do not make the material metallic (the engine
-   keeps the diffuse term and does not tint the reflection). Store the factor in extras.
-7. **LOD**: export LOD 0. It is the only LOD of every character model, the only one the character code
+   reflectionLightFactor)`. Approximation: F0 raised to at least `reflectionLightFactor · specTex`
+   (7.2) so the viewer's environment shows through; the material is not metallic (the engine
+   keeps the diffuse term and does not tint the reflection). The factor belongs in extras.
+7. **LOD**: LOD 0 is the only LOD of every character model, the only one the character code
    instantiates, and for props it is what the game shows up to `lodDistance01` (30–150 m).
-   `--model-lod N` should keep meaning "file LOD index N"; add the switch distances from the property
-   bag (`lodDistance01..`, `lodFadeIn..`, `lodFadeOut..`) to the model's metadata, and if LODs are
-   exported together use `MSFT_lod` or node names `_LOD1` with those distances in extras.
+   `--model-lod N` means "file LOD index N"; the switch distances from the property bag
+   (`lodDistance01..`, `lodFadeIn..`, `lodFadeOut..`) are the model's LOD metadata, and LODs exported
+   together carry those distances (`MSFT_lod` or node names `_LOD1` with the distances in extras).
 8. **Shadow hulls** (format 9 / 10 buffers): they are the stencil shadow-volume geometry, never shaded.
-   Keep them out of the default export; when asked for, emit as separate meshes named `<part>_shadowhull`
+   They are not visible geometry; exported on request as separate meshes named `<part>_shadowhull`
    with `extras.watchmen.role = "shadow_hull"` and no material.
 9. **"Proxy slab"** (one optional MeshBuffer per part, 79 models: doors, containers, rooms, city blocks,
    never a character): it is the **occluder mesh for occlusion culling** — the part reader 0x545927
    allocates a 0x14-byte occluder record from it and `FUN_0053f9a5` converts its vertices / indices,
-   failing with "primitive type … not supported for occluder" (modelresderivedio.cpp) [code]. Rename the
-   kind from `proxy` to `occluder`; never export it as visible geometry.
-10. **Vertex colour, tangents**: as vcolor.md / impl_vcolor.md (unchanged by this work).
-11. **Subtractive / additive layers**: as impl_sheets.md 2.5 (confirmed on the capture for Rorschach).
+   failing with "primitive type … not supported for occluder" (modelresderivedio.cpp) [code]. Its kind
+   is `occluder`, not `proxy`; it is never visible geometry.
+10. **Vertex colour, tangents**: as vcolor.md.
+11. **Subtractive / additive layers**: blendType 2 / 1 of `KAPOW_NAZ_FORMAT.md` (section 5, Rorschach's
+    ink, confirmed on the capture).
 12. **Unlit preview option**: because the engine lights in gamma space with a constant ambient
     (0.65 fallback) and a contrast / tint / gamma grade, a "looks like the game" preset is: ambient-heavy
-    lighting + the level's grade. Offer the grade values per level in the export metadata rather than
-    baking them into textures.
+    lighting + the level's grade. The grade values per level belong in the export metadata rather than
+    baked into textures.
 
 ### 7.2 Formulas (derived from 4.4; [inferred] — not validated against renders)
 
@@ -649,30 +654,38 @@ and ambient light; at most four lights per pixel; gamma-space lighting; the rim 
 reflection; negative self-illumination; subtractive blending; vertex colour scaling specular and
 emission; per-object (not per-pixel) transparency order with `renderOrder`.
 
+The toolkit's material mapping and its comparison against renders: `docs/MATERIAL_COMPARISON.md`,
+`docs/ENGINE_CONSTANTS.md` (renderer, materials).
+
 ---
 
 ## 8. Not established, and what each would take
 
 | item | what it would take |
 |---|---|
-| A combat frame with a Dominatrix (draw order among many characters, light counts, shadow layers in a level) | dump ~3 frames of `KapowMulti.3.trace` with `apitrace dump --calls` (the 11 GB trace needs ~1 GB scratch; the VM had 100 MB free) and run `summ.py` |
+| A combat frame with a Dominatrix (draw order among many characters, light counts, shadow layers in a level) | dump ~3 frames of `KapowMulti.3.trace` with `apitrace dump --calls` (the 11 GB trace needs ~1 GB scratch) and run `summ.py` |
 | Default of `DeferredRA+0x3c4` (REDeferredMain2 vs the DeferredMain family) and what flips it | read the ctor 0x574f74 / caller 0x575041 |
 | Sort key `light+0x24` | read the Light / scene-node base ctor |
 | Occlusion culling (software rasteriser, occluder selection, `FUN_00583640`) | read 0x574048 callees and the three Occlusion job containers |
 | `CharacterLodCtrl`, `FXGfxEffectCtrl`, `GfxBlender` (script side of LOD and grading) | script classes, WP0 naming first |
-| Falloff gradient: exact format of `depthFadeGradient` and the generated texture (`sheet+0xe0`) | read setter 0x5256cf; the strings look like `pos,r,g,b[,a]\|…` |
+| Falloff gradient: exact format of `depthFadeGradient` and the generated texture (`sheet+0xe0`; baked at load by 0x525650) | read setter 0x5256cf; the strings look like `pos,r,g,b[,a]\|…` |
 | `$wetSurfaceConstants`, wet / water / planar-reflection passes | read 0x56debe, 0x5697a4, 0x56cd1f, 0x56d299 |
 | Which cube map a reflective character samples (`FUN_004d1299`, nearest CubeMap node?) | read 0x56bd5f callees and the CubeMap node |
 | `$shadowAttnData`, shadowPower use, shadow LOD (`FUN_0049d149`), volume extrusion distance | read REShadowVolume 0x582cd6 / 0x584c6d and ShadowVolumeVS |
 | Alpha-test enable flag (`tex+0x1c` bit 0) = "diffuse has alpha" | read Texture finalize 0x538184 |
-| When Simple3DRA (vertex-lit) is chosen; shadow-map mode | read the RA factory and the options class |
+| When Simple3DRA (vertex-lit) is chosen; whether the shadow-map mode (`shadowmode`) reads `castShadow` / `receiveShadow` | read the RA factory and the options class; read REShadowMap |
 | MainVS ×2, SimpleLightVS ×1 define sets | more vocabulary; all in unused effects |
 | Head node drawing, target highlight, decals on characters | trace `CharacterHeadModel` / FxHighlightCtrl / DecalManager |
 | Validation of the 7.2 mapping | render a GLB next to a capture frame of the same character with the grade applied |
 
 ## 9. Files
 
-- `findings/wp1_renderer.md` (this file), `findings/wp1_renderer.json`
-- `work/wp1/`: `rtti.py`, `props.py`, `xref.py`, `ctors.py`, `bf.c` / `bf`, `rf.sh`, `ptr2name.json`
-- on the PC, scratch only: `~/scratch/wp1/` (`c.txt.gz`, `compact.py`, `summ.py`, `ev.py`, `lod2.py`,
-  `sheets.py`, `lod.json`, `sheets.json`)
+Kept with the decompilation outside this repository (`ghidra_kapow_out/engine/engine_notes/`,
+see `README.md`):
+
+- `findings/wp1_renderer.md` (this note), `findings/wp1_renderer.json`
+- `work/wp1/`: `rtti.py` (vtable / RTTI reader), `props.py` (property registration → member offset),
+  `xref.py`, `ctors.py`, `bf.c` / `bf` (define-set search), `rf.sh`, `ptr2name.json`
+- on the PC, scratch only, outside `mnt/`: `~/scratch/wp1/` (`~/scratch/wp1/c.txt.gz` compacted
+  UTF-8 copy of the dump, `compact.py`, `summ.py` frame → pass / target / shader / state summary, `ev.py` constants of
+  one pass, `lod2.py`, `sheets.py`, `lod.json`, `sheets.json`)

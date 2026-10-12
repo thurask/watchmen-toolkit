@@ -826,7 +826,7 @@ def parse(data, order=None):
             out = _parse(data, bo, False)
         except ParticleError as ex_untyped:
             ex.add_note(f"particle_asset: the untyped record layout fails too: {ex_untyped}")
-            raise ex
+            raise ex  # noqa: B904
     else:
         s = out["summary"]
         if s["unknown_classes"] or s["unknown_properties"] or s["ignored_records"]:

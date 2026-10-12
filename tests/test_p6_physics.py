@@ -8,7 +8,10 @@ Cloth-only rig  a model with cloths but no ragdoll (Curtains_01)
 Ragdoll values  CharacterVisual.command_update_ragdoll 0x6bc3e2 (anim_meta conventions)
 Synthetic fixtures only (the builders of test_ragdoll_rig)."""
 
-import math, os, struct, sys
+import math
+import os
+import struct
+import sys
 
 import pytest
 

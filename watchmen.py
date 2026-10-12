@@ -2,8 +2,7 @@
 """watchmen — CLI for the Watchmen: The End Is Nigh asset-extraction toolkit
 (Parts 1 & 2; PC, Xbox 360, PS3).
 
-The master-script functionality without the spaghetti. All real logic lives in
-wlib/ (see watchmenlib.py facade); this is just the CLI.
+All real logic lives in wlib/ (see watchmenlib.py facade); this is just the CLI.
 
 Commands
 --------
@@ -18,7 +17,8 @@ Commands
                                  Music streams are written one file per track
                                  (<name>_track<k>...) with a <name>.json sidecar
                                  (tracks, cue points, MusicSetup track states);
-                                 --flat-music gives the single file of 1.3.0,
+                                 --flat-music writes one file per stream instead
+                                 (the output of releases before 1.4.0),
                                  --music-track-labels adds the MusicStreamSlot
                                  track names to the file names, --smpl-loops adds
                                  a RIFF smpl loop to looping sounds.  Sound facts
@@ -130,21 +130,23 @@ Commands
                                  Jiggle bones are baked with the PhysX soft-limit
                                  `solver` model (default; the `PhysicsWorld` values
                                  of EXTRACT_OUT), the linear `pivot` model or
-                                 `pinned`, the default up to 1.3.0; each has its
-                                 own cache directory.
+                                 `pinned` (the model of releases before 1.4.0);
+                                 each has its own cache directory.
                                  --face-rule (also $WATCHMEN_FACE_RULE):
                                  `engine` (default): every body clip carries the
                                  face track the game plays with it, read from the
                                  face animation classes (see anim_meta.json "face");
-                                 `legacy`: the rule of 1.3.0 (pose guessed from the
+                                 `legacy`: the rule of releases before 1.4.0 (pose
+                                 guessed from the
                                  clip name, synthetic blinks, no face rig on the
                                  Thug / Gimp characters).  --no-face-idle (also
                                  $WATCHMEN_FACE_IDLE=0) leaves the seeded idle
                                  cycle (the game's random blink / fidget) out of
                                  the baked track.  --jiggle-model pinned
                                  --face-rule legacy --no-vertex-attrs together give
-                                 the animation and mesh data of 1.3.0; textures
-                                 are still found by the path the model stores.
+                                 the animation and mesh data of releases before
+                                 1.4.0; textures are found by the path the model
+                                 stores in either case.
                                  --parts (also $WATCHMEN_PARTS): `game` (default)
                                  shows what the game shows for the variant: the
                                  models of the collection's first outfit (ONE
@@ -155,7 +157,7 @@ Commands
                                  `alternatives` outside the scene: viewers do not
                                  draw it, Blender imports it as the switched-off
                                  collection "Orphan Nodes".  `all`: every listed
-                                 model and every weapon at once, as before.
+                                 model and every weapon at once.
                                  Each GLB also carries the character's ragdoll
                                  rig (bodies, shapes, D6 joints of the skeleton
                                  model) as helper nodes under a node `ragdoll`
@@ -175,16 +177,18 @@ Commands
                                  test / blend / culling from renderType, alphaThreshold,
                                  opacity and twoSided; a <model>.model.json next to
                                  each extracted model (LOD distances).  `legacy`: the
-                                 materials as before (GLB and MTL byte-identical).
+                                 materials of releases before 1.4.0 (GLB and MTL
+                                 byte-identical to them).
   --rig hierarchy|flat           (all, extract, characters, char, charlibs, faces;
                                  also $WATCHMEN_RIG) The skeleton of the rigged
                                  GLBs.  `hierarchy` (default): one joint node per
                                  bone, named after it and parented as the skeleton
                                  says, with rest pose and animation channels local
                                  to the parent; the skinned mesh nodes are scene
-                                 roots.  `flat`: the 1.4.0 layout -- joint nodes
-                                 b0..bN, all children of `root`, each carrying the
-                                 joint's world transform (extract --glb: joints
+                                 roots.  `flat`: the layout of the 1.4.0 files --
+                                 joint nodes b0..bN, all children of `root`, each
+                                 carrying the joint's world transform (extract
+                                 --glb: joints
                                  without a transform, identity inverse binds).  The
                                  skinning and every pose are the same in both.
   --frame true|mirrored          (all, extract, characters, char, charlibs, faces,
@@ -197,9 +201,9 @@ Commands
                                  truthful.  Files carry coordinate_frame =
                                  "right-handed-true" (GLB: asset.extras.watchmen).
                                  `mirrored`: the engine's left-handed numbers
-                                 verbatim, a mirror image -- what 1.3.0 wrote; no
-                                 coordinate_frame key, files byte-identical to the
-                                 output before this option existed.  Raw engine
+                                 verbatim, a mirror image (the files of releases
+                                 before 1.4.0, byte-identical); no coordinate_frame
+                                 key.  Raw engine
                                  values (level world.pos, nav JSON, fragment /
                                  particle JSON) are engine coordinates in both.
   --names canonical|stored       (all, extract, characters, char, charlibs, faces,
@@ -235,9 +239,10 @@ Commands
                                  float32 values.  `exact` (default): the shortest
                                  decimal that reads back as the same float32, bit
                                  for bit (1.2345e-05, not 1.2e-05); NaN / infinity
-                                 as null.  `rounded`: the 1.4.0 output (6 places
-                                 for property values, 5 for sequence keys, 3 / 4
-                                 for transform pos / quat), byte for byte.  Derived
+                                 as null.  `rounded`: the output of the 1.4.0
+                                 files (6 places for property values, 5 for
+                                 sequence keys, 3 / 4 for transform pos / quat),
+                                 byte for byte.  Derived
                                  numbers (yaw_deg, a sequence key's quat) are
                                  rounded in both.
   grademeta EXTRACT_OUT OUT.json The levels' post-process grade (contrast, tint,
@@ -291,7 +296,7 @@ Commands
                                  same extras as in `characters` and looping clips
                                  are jiggle-baked as closed laps.
                                  --no-meta (or a fragment elsewhere): no extras,
-                                 every clip baked as non-looping, as in 1.3.0.
+                                 every clip baked as non-looping.
                                  The GLB has flat materials: no textures, no
                                  tangents, no face rig or face channels, no weapons
                                  and no ragdoll helpers (use `characters` for the
@@ -319,7 +324,10 @@ Examples
   python3 watchmen.py char Gimp.fragment.json Gimp2 CHAR_Gimp2.glb
 """
 
-import os, sys, json, struct
+import os
+import sys
+import json
+import struct
 
 #: The oldest Python the toolkit runs on (pyproject.toml: requires-python).
 MIN_PYTHON = (3, 13)
@@ -380,7 +388,7 @@ def _version():
 VERSION = _version()
 
 
-from wutil import read_bytes as _read_bytes  # one copy, in wlib/wutil.py
+from wutil import read_bytes as _read_bytes  # one copy, in wlib/wutil.py  # noqa: E402
 
 
 def _wl():
@@ -930,8 +938,7 @@ def main(argv):
     # hash + gendata are dispatched BEFORE _wl(): neither needs the facade
     # (numpy, Pillow, the pickled tables), and `gendata keys-import` is the
     # documented recovery path when kapow_fragment_keys.pkl is MISSING -- it
-    # must not die on the very import error it exists to fix (2026-08-17;
-    # previously both ran after _wl() and paid/failed the full import).
+    # must not die on the very import error it exists to fix.
     if cmd == "hash":
         import kapow_props
 
@@ -960,7 +967,7 @@ def main(argv):
                 "error: the extract step failed (exit code %d); binds and characters not run" % rc
             )
             return rc
-        # binds + character glbs work on console too (2026-07-15): the
+        # binds + character glbs work on console too: the
         # skeleton/mesh/skin decoders are byte-order aware (X360/PS3 = BE).
         print("[2/3] binds -> %s/binds" % out)
         wl.ensure_binds(naz, os.path.join(out, "binds"), extract_dir=out)
@@ -1236,9 +1243,9 @@ def cli():
         sys.exit(130)
     except (OSError, ValueError, struct.error, ImportError) as ex:
         # bad path / wrong file type / truncated asset / missing data table:
-        # an actionable line, not a traceback (struct.error + ImportError
-        # added 2026-08-17: truncated propbags raise struct.error, and
-        # kapow_fragment now raises ImportError for a missing key table).
+        # an actionable line, not a traceback (truncated propbags raise
+        # struct.error, and kapow_fragment raises ImportError for a missing
+        # key table).
         # WATCHMEN_DEBUG=1 prints the traceback first: where it happened.
         # The notes of the error (where it happened: archive entry, offset, asset)
         # go under the `error:` line; the traceback already ends with them, so they

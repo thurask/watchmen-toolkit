@@ -793,9 +793,9 @@ def test_jiggle_resample_never_extrapolates_past_the_last_sim_sample(tmp_path):
     assert len(tail) == 4, tail
     # the sim really moved (the tail assertion is not satisfied by a zero deviation)
     assert np.linalg.norm(dev[tail[0]]) > 1e-4
-    assert (
-        np.linalg.norm(dev[tail[0]] - dev[tail[0] - 4]) > 1e-5
-    ), "deviation must vary frame to frame"
+    assert np.linalg.norm(dev[tail[0]] - dev[tail[0] - 4]) > 1e-5, (
+        "deviation must vary frame to frame"
+    )
     for i in tail[1:]:
         assert np.allclose(dev[i], dev[tail[0]], atol=1e-6), "frame %d extrapolated past x[N-1]" % i
 

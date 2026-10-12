@@ -13,7 +13,7 @@ name), record application 0x510e5f, record writer 0x5015d7, data types 0x501f6a.
 Evidence marks: **[R]** read from the executable (address given), **[D]** read from the game data,
 **[I]** inferred, **[wp7]** taken over from `re/wp7_fx_camera_hud.md` section 2 without re-reading.
 
-Coverage on real data (2026-10-04, seven extracts, 746 files): Part 2 PC / X360 / PS3 89 files
+Coverage on real data (seven extracts, 746 files): Part 2 PC / X360 / PS3 89 files
 each, Part 1 PS3 130, Part 1 PC 130, Part 1 X360 130 — every file parses to the last byte with no
 unknown class, no unknown property hash and no ignored record, and `build(parse(x)) == x`.
 
@@ -198,7 +198,7 @@ not enforced by the setters unless stated.
 | `particleTypeNr` | `0bb2bb7d` | integer | 0 | +0x50 | 0..100 | index of the particle type whose events are listened to (read, 0x559d33); events of the spawner's own type are ignored |
 | `minBurstAmount` | `541d54f7` | integer | 10 | +0x40 | 0..100 | particles per event |
 | `maxBurstAmount` | `79446477` | integer | 10 | +0x44 | 0..100 |  |
-| `inheritedVelocity` | `9c9b29c3` | number | 0.0 | +0x454 | 0..100 | 0..1 (setter clamps, 0x556f57): new velocity = blend of own and source velocity by this factor (0x4af4f7, not re-read) |
+| `inheritedVelocity` | `9c9b29c3` | number | 0.0 | +0x454 | 0..100 | 0..1 (setter clamps, 0x556f57): new velocity = blend of own and source velocity by this factor (0x4af4f7; not verified) |
 
 ### `SurfaceSpawner` (spawner; base `ParticleSpawner`; RegisterMembers 0x55384e, constructor 0x552a85)
 
@@ -430,7 +430,7 @@ the script classes (`GFXParticleEffectType.m_eparticlesoundreference`).
 - **Spawning** (`ParticleSpawner::vfunc_15` 0x55f512): the spawner returns a count (vfunc 19);
   per particle: allocate, default state (0x5560c1: colour white, fade 1, size = `particleSize`,
   angles = Euler of `particleOrientation`, velocity = `particleSpeed` x `localOrientation` applied to
-  **+Y (0, 1, 0)** - constant 0x9e807c; wp7 said Z - life = time left = `particleLife`), position
+  **+Y (0, 1, 0)**, not Z - constant 0x9e807c - life = time left = `particleLife`), position
   (0x5563a3, interpolated along the emitter's motion by `i / count`: particle i of n uses t = i / n;
   world-simulated type: orientation = slerp(current, previous, t), base = lerp(current position,
   previous position − dt × initial velocity, t); local type: base 0 and the type's own
@@ -442,7 +442,7 @@ the script classes (`GFXParticleEffectType.m_eparticlesoundreference`).
   clears the alive flag (and raises PARTICLEDIE if enabled). `immortalParticles` uses 0x555456.
 - **Random numbers** (0x54833c): 32-bit LCG `s = s x 0x19660d + 0x3c6ef35f`, value `s x 2^-32`;
   `U(a, b)` = `a + (b - a) x value` (0x54836d). Seeds: low dword of QueryPerformanceCounter (0x405d53), per instance or per function; not reproducible.
-- **VarianceInitializer** (0x54964e; closes the wp7 item): `angles += U(-1,1) x orientation` and
+- **VarianceInitializer** (0x54964e): `angles += U(-1,1) x orientation` and
   `rate += U(-1,1) x rotation` per axis (both converted from degrees by the setters, 0x54d70e /
   0x54d760, factor at 0xc8cdb0 = pi/180); speed `s = s0 + speed/100 x U(-1,1) x s0` with `s0 = |v|`
   (0x5484e5, divisor 100.0 at 0x9e5bd0); direction: spread = conj(q)·(0, s, 0)·q with q = qx(a)⊗qz(c), a and c = U(−1,1) × spread
@@ -453,7 +453,7 @@ the script classes (`GFXParticleEffectType.m_eparticlesoundreference`).
   too; `life += U(-1,1) x life`; `size.x` and `size.y` `+= U(-1,1) x sizeVariance` (one draw for
   both); `alpha = 1 - U(0,1) x alpha`; `pos += R x (U(-1,1) x position)` per axis, R = the type's
   `localOrientation` (and the emitter orientation in world mode).
-- **GeometryCollisionAffector** (0x54bfab; closes the wp7 item): per live particle that moves this
+- **GeometryCollisionAffector** (0x54bfab): per live particle that moves this
   frame, a line check (0x50a384, mask `collisionMask`) from `pos` to `pos + dt x vel + radius x dir`.
   On a hit with `safetyRadius > 0` three more line checks, offset by `safetyRadius` along the two
   surface tangents and spanning +-`safetyRadius` along the travel direction, must each hit a surface
@@ -466,14 +466,14 @@ the script classes (`GFXParticleEffectType.m_eparticlesoundreference`).
 - Other affector bodies: LinearForce `v += dt x force` (0x555b81); Dampening `v -= damp x dt x v`
   when `damp > 0` (0x555c4c); Growth `size += growth x dt` (0x55f332); SizeSequence
   `size.x = size.y = factor x curve(t)` (0x55f3fe, replaces `particleSize`); OpacitySequence
-  `alpha = curve(clamp01(t))` (0x5552d3); the rest as in wp7 section 2.2.
+  `alpha = curve(clamp01(t))` (0x5552d3); the rest as in `re/wp7_fx_camera_hud.md` section 2.2.
 - **PositionInitializer** (0x5553d0): `pos += U(-1,1)` per axis (a 2 m cube). Not used in data.
-- **Emitter auto-delete** (closes the wp7 item): `ParticleSystemSlot.CreateEmitter(vector,
+- **Emitter auto-delete**: `ParticleSystemSlot.CreateEmitter(vector,
   quaternion, entity, truth)` 0x55d059 stores the truth at emitter +0x14; the per-frame sweep
   0x55c16c deletes every emitter with +0x14 set whose active flag (+0x68) is clear. Emitter fields:
   clock +0x00, position +0x04, orientation +0x18, auto-delete +0x14, loop +0x15 (copied from the
   asset), active +0x68, parent entity +0x6c.
-- **Rendering**, draw 0x5892c1 and vertex-shader choice 0x583a62 (closes the wp7 item):
+- **Rendering**, draw 0x5892c1 and vertex-shader choice 0x583a62:
   - blend states by `blendMode`: Normal `srcAlpha, invSrcAlpha, add`; Additive `srcAlpha, one, add`;
     Subtract `srcAlpha, one, subtract`; Multiply `dstColor, zero, add`; Custom `srcBlend, dstBlend,
     blendOp`. So `srcBlend` / `dstBlend` / `blendOp` matter only for Custom.
@@ -612,25 +612,24 @@ a file that does not parse: {file, asset, json, bytes, parsed: false, error}
   `textures` / `models` list and each key that has a `stored_name` (383 on PC and PS3 Part 2,
   386 on Xbox 360 Part 2, 486 on each Part 1 set, measured on the six-set export).
   `--names stored`: every string as the file stores it, no `stored_name`,
-  no `stored`, no `asset_names`. Measured on the files of PC Part 2 and PS3 Part 1 (2026-10-07): 49 of 56 and 56
+  no `stored`, no `asset_names`. Measured on the files of PC Part 2 and PS3 Part 1: 49 of 56 and 56
   of 66 texture strings are stored in another letter case than their folder has (`/Art/Effects/`
   against `art/Effects/`), 176 of 208 and 229 of 286 type rows; spelled as written, every
   string names its folder exactly.
 - A file that is not a complete tree still gets its JSON (the generic block walk with a `warn`, as
   `extract` writes it), a row with `parsed: false` and an entry in `errors`; the command then exits
   with status 1. Without any `.particle` it writes nothing and exits with status 1.
-- On real data (2026-10-04, Part 2 PC extract): 89 files, 89 parsed and rebuilt byte-exact, 208
-  types, 1,464 objects, 51 looping systems, 56 distinct textures, all 56 found (in the tree
-  extracted with 1.4.0 and in the older one), no model string, 71 types with a UV grid. The 89
-  JSON files are byte-identical to those written by calling `particle_asset.to_json` per file.
-  Six-set export of 2026-10-05 (measured, the six `particlemeta` logs): 89 files, 208 types, 1,464
+- On a Part 2 PC extract: 89 files, 89 parsed and rebuilt byte-exact, 208 types, 1,464
+  objects, 51 looping systems, 56 distinct textures, all 56 found, no model string, 71 types
+  with a UV grid. The 89 JSON files are byte-identical to those written by calling
+  `particle_asset.to_json` per file.
+  Six-set export (measured, the six `particlemeta` logs): 89 files, 208 types, 1,464
   objects, 56 of 56 textures on each Part 2 set (PC, Xbox 360, PS3); 130 files, 286 types, 2,052
   objects, 66 of 66 textures on each Part 1 set; every file parsed and rebuilt byte-exact.
 
-## 7. What changed in `<name>.particle.json`
+## 7. The generic property-bag walk beside this parser
 
-Up to 1.3.0 the file was the flat `blocks` list of the generic property-bag walk
-(`kapow_props.parse`), without a `format` key:
+The generic walk (`kapow_props.parse`) writes a flat `blocks` list without a `format` key:
 
 ```json
 {"blocks": [{"class": "ParticleType", "pre": [1], "owner": "d23b8f41", "schema": 197,
@@ -639,28 +638,27 @@ Up to 1.3.0 the file was the flat `blocks` list of the generic property-bag walk
  "trailing_bytes": 0}
 ```
 
-- The flat list is now the tree `system` -> `types[]` -> `affectors[] / spawners[] /
-  initializers[]`. `pre` was the list counts, `owner` is `id`, `schema` was the payload length in
-  dwords.
-- Record key `key` -> `name`, in the engine's spelling: `texture`, `duration`, `position`, `speed`,
-  `force`, `ambient`, `factor` (were capitalised), `open`, `life`, `numX`, `numY`, `damp` (were
-  hex).
-- Values: `truth` is a JSON boolean (was 0 / 1); `number` is the shortest decimal that packs to the
-  same float32 (0.01, was 0.009999999776482582); a null string is `null` (was `""`); `vector` /
-  `quaternion` are plain lists (were `{"raw_type", "floats", "hex"}`).
-- A file that is not a complete tree still gets the old `blocks` output plus a `warn` line. No
+Against the tree of section 6: `pre` is the list counts, `owner` is `id`, `schema` is the payload
+length in dwords; a record's `key` is the tree's `name`; `truth` is 0 / 1 there and a JSON boolean
+in the tree; `number` is the float32 printed in full there (0.009999999776482582) and the
+shortest decimal in the tree (0.01); a null string is `""` there and `null` in the tree; `vector`
+/ `quaternion` are `{"raw_type", "floats", "hex"}` there and plain lists in the tree.
+
+- The tree spells names as the engine registers them: `texture`, `duration`, `position`, `speed`,
+  `force`, `ambient`, `factor` (the capitalised forms are editor captions), `open`, `life`,
+  `numX`, `numY`, `damp`.
+- A `.particle` that is not a complete tree gets the `blocks` output plus a `warn` line. No
   shipped file is one.
-- `.grass`, `.detailmesh`, `.pb`, `.terrain` JSON are still written by the generic walk; the five
-  names added to `kapow_props.namedict()` (`life`, `numX`, `numY`, `damp`, `open`) now resolve
-  there too. `wlib/prop_hash_dict.pkl` spells the seven names above in lower case as well since
-  2026-10-05: every class that registers them does so in lower case (`.grass` included), and the
-  capitalised forms were editor captions. The `.particle.json` files are byte-identical with
-  either dictionary (49 staged files compared).
+- `.grass`, `.detailmesh`, `.pb`, `.terrain` JSON are written by the generic walk; the names
+  `life`, `numX`, `numY`, `damp`, `open` are in `kapow_props.namedict()` and resolve there too.
+  `wlib/prop_hash_dict.pkl` spells the seven names above in lower case: every class that
+  registers them does so in lower case (`.grass` included). The `.particle.json` files are
+  byte-identical with either dictionary (49 staged files compared).
 - `fx_meta.particle_facts` (the `fx.particles` table of `anim_meta.json`) reads the files through
   this parser and falls back to the generic walk; on the 49 Part 2 PC files checked the two give
   the same facts.
 
-## 8. Not established
+## 8. Limits and open items
 
 - The untyped Part 1 PC / X360 record layout is read from data only (no Part 1 executable). The
   older build stores every registered property except `simulationMode`, `renderInstanced`,

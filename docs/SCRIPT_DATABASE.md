@@ -85,7 +85,7 @@ the Part 1 exports, so none of them occurs in a fragment.
 ### The seven Part 1 fragment keys
 
 All seven are in the three Part 1 databases with exactly the spelling and type the toolkit
-uses, so none is an inferred spelling any more:
+uses, so none is an inferred spelling:
 
 | Key | Name | Type |
 |---|---|---|

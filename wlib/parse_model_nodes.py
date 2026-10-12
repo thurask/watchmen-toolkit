@@ -4,20 +4,27 @@
 Engine ground truth (FUN_00545927 = Node::Deserialize, game executable):
 each node record is
     [pos f32x3][quat f32x4 XYZW][u32 namelen][name..\0][u32 f1][u32 parent][aux ...]
-The old decode_skeleton_model.py attributed the 28-byte transform to the PREVIOUS
-name (off-by-one) and guessed parents from biped names. This parser anchors on the
-length-prefixed names and takes the 28 bytes immediately BEFORE each name, plus the
-parent index from the record itself.
+This parser anchors on the length-prefixed names and takes the 28 bytes immediately
+BEFORE each name (the transform belongs to the name that follows it, not to the one
+before), plus the parent index from the record itself; parents are never guessed from
+biped names.
 
 Node 0 is the unnamed root (empty name, parent -1) == GamePivot slot.
 """
 
-import os, struct, sys, numpy as np
+import os
+import struct
+import sys
+import numpy as np
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
 
-from wutil import order_name, qmat_xyzw, read_bytes as _read_bytes  # one copy, in wlib/wutil.py
+from wutil import (  # noqa: E402  (one copy, in wlib/wutil.py)
+    order_name,
+    qmat_xyzw,
+    read_bytes as _read_bytes,
+)
 
 
 def _detect_order(mb):
@@ -150,7 +157,7 @@ def parse(mb, order=None):
         quat.append(q)
         parent.append(par)
     # parent values index the true node array (0 = root).  If the file told us how
-    # many nodes it has and we kept a different number, the indices below no longer
+    # many nodes it has and a different number was kept, the indices below do not
     # line up -- fail loudly rather than emit a plausible but wrong hierarchy.
     n = len(names)
     if cn is not None and n != cn[1] and (n - 1) != cn[1]:
@@ -177,9 +184,9 @@ def qmat_wxyz(q):
 def rest_by_name(mb, order=None):
     """-> {name: {'pos': (3,), 'quat_wxyz': (4,)}} for every named node.
 
-    Convenience view over parse() for callers that key by bone name.  Replaces
-    the superseded decode_skeleton_model.decode(), which attributed each 28-byte
-    transform to the PRECEDING name (off-by-one) and dropped the last node."""
+    Convenience view over parse() for callers that key by bone name; each
+    28-byte transform belongs to the name that FOLLOWS it, and the last node
+    is kept."""
     names, pos, quat, _par = parse(mb, order)
     out = {}
     for i, nm in enumerate(names):
@@ -210,10 +217,9 @@ if __name__ == "__main__":
 #   [u32 n2] n2 x surface  particle emission meshes (MeshParticleData, 0x561d1c):
 #                          29 in 19 of the 738 distinct staged PC Part 2 models
 # The volume records are read by skeleton_records.parse_node_tail (box 52 B,
-# sphere 44 B, capsule 48 B, mesh variable).  Until 2026-10 this function read
-# them itself as fixed 48-byte "joints" [type][0][pos][a][a'][quat], which only
-# tiles capsule-only nodes with an empty second list, and put the capsule's
-# (diameter, height, x) in `pos`; the quaternion was right.
+# sphere 44 B, capsule 48 B, mesh variable).  They are not fixed 48-byte "joints"
+# [type][0][pos][a][a'][quat]: that reading only tiles capsule-only nodes with an
+# empty second list and puts the capsule's (diameter, height, x) in `pos`.
 def _skeleton_records():
     try:
         import skeleton_records as _sr
@@ -235,8 +241,8 @@ def parse_node_aux(mb, start, end, order="<", meshes=False):
     volumes  [scene 0 list, scene 1 list] as skeleton_records.parse_node_tail
              returns them (type, kind, base, pos, quat, blob + size | radius |
              diameter, height | mode, verts, indices)
-    joints   the same volumes flattened in file order under the keys older
-             callers use: type, pos (3,) f32, quat (4,) f32 xyzw, blob, scene,
+    joints   the same volumes flattened in file order under the flat keys
+             type, pos (3,) f32, quat (4,) f32 xyzw, blob, scene,
              and a / a2 = a capsule's diameter / height (None for other types)
     order: '<' PC (default) / '>' X360+PS3."""
     tail = _skeleton_records().parse_node_tail(mb, start, end, order, meshes=meshes)

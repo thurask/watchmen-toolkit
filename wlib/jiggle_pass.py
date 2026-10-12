@@ -6,7 +6,8 @@ Sim always runs on a 30fps grid (resample in/out) so params stay valid.
 Usage as module: apply_jiggle(P, fps, bind_npz_path, bones=None) -> P modified copy.
 """
 
-import numpy as np, os
+import numpy as np
+import os
 from wutil import load_npz
 
 _PDIR = os.path.dirname(os.path.abspath(__file__))
@@ -64,8 +65,8 @@ def apply_jiggle(P, fps, bindpath, bones=None, gain=None, model=None, loop=False
     loop (the game's loop flag of the clip, 'solver' only) are used
     when no capture-fit jiggle_params.npz is present; ignored on the AR(2) path."""
     if not os.path.exists(os.path.join(_PDIR, "jiggle_params.npz")):
-        # fresh install: jiggle_d6 (file-only, capture-parity 2026-07-12e)
-        # replaces the old _engine_ar2 approximation entirely.
+        # fresh install: jiggle_d6 (file-only, capture parity), not the
+        # _engine_ar2 approximation.
         from jiggle_d6 import apply_jiggle as _d6
 
         return _d6(P, fps, bindpath, bones=bones, gain=gain, model=model, loop=loop)
@@ -126,8 +127,8 @@ def apply_jiggle(P, fps, bindpath, bones=None, gain=None, model=None, loop=False
         # back to original grid + apply: B_new = A·R(x)·A^T·B (rotate deviation in parent frame)
         for i, ti in enumerate(t_o):
             j = min(int(ti * 30.0), N - 2)
-            # 2026-08-17: clamp w -- clips faster than the 30fps sim grid
-            # extrapolated past the last sim sample (see jiggle_d6).
+            # clamp w: clips faster than the 30fps sim grid would
+            # extrapolate past the last sim sample (see jiggle_d6).
             w = min(ti * 30.0 - j, 1.0)
             xi = (1 - w) * x[j] + w * x[j + 1]
             Ai = A_o[i]

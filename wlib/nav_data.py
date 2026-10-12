@@ -867,8 +867,7 @@ EVIDENCE = {
     "path_object.flags": "code 0x92d380, 0x92dfa0, 0x48a559: bit 0 = entry created at run "
     "time (dynamic path objects), bits 1-2 equal to 2 (value 4) = per-entity pass bits, "
     "bit 3 = starts passable; 8 in every shipped entry (flags_decoded)",
-    "mesh header": "code 0x918940, 0x91b0d0 (cell size, bounds, grid, margin), "
-    "0x91c1d0 (radius)",
+    "mesh header": "code 0x918940, 0x91b0d0 (cell size, bounds, grid, margin), 0x91c1d0 (radius)",
     "mesh.sector": "measured on data; equality use read in code: signed bytes 1 and 3 of "
     "the word are the z and x index of the mesh in the level-wide lattice; mesh links name "
     "their target by this word, which the runtime only compares for equality (0x91060d, "

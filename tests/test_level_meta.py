@@ -10,7 +10,10 @@ Trigger graph   TriggerConditionBase 0x8632fa, TriggerActionBase 0x84afa9,
                 TriggerActionDelay 0x852ecd, TriggerActionCheckpoint 0x85d2de
 Synthetic binary fixtures only: every file below is built in the test."""
 
-import json, os, struct, sys
+import json
+import os
+import struct
+import sys
 import pathlib
 
 import pytest

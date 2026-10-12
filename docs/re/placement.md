@@ -1,22 +1,22 @@
-# Paired (master/slave) animation placement — open questions
+# Paired (master/slave) animation placement
 
 Target `KapowMultiDEDRM.exe`. Extends `toolkit/docs/ANIMATION_META.md` and the section
-"2026-10-02 — dual (master/slave) animation placement" of `ENGINE_CONSTANTS.md`.
+"dual (master/slave) animation placement" of `ENGINE_CONSTANTS.md`.
 Evidence levels: **read** = traced in decompile and/or disassembly, **data** = measured in the
-shipped Part 2 PC files (user's PC, read-only), **inferred**, **not established**.
+shipped Part 2 PC files (read-only), **inferred**, **not established**.
 Machine-readable constants and data tallies: `findings/placement_constants.json`.
 
-## 0. What changes against the existing docs
+## 0. Summary
 
-| Doc statement | What the code/data says |
+| Question | What the code/data says |
 |---|---|
-| "whether the placement block runs once or every frame" is open | It runs **every tick** (§1). |
-| The partner "plays its own absolute animation from the computed start" | True only after the slave's `ABSOLUTE_GOTO_TARGET_POS` event. Until then the slave's start frame is **its own pose when it entered the state**; the placement block's output is ignored (§1.3). After the event it blends in over the blend time. |
-| "how the master's own start frame is chosen" is open | In shipped data **no master state is an absolute animation** (0 of 123). The master never gets a start frame; it keeps moving under the normal character controller (§2). |
-| `get_slave_pos_at_time` (0x5b0698) "has no caller by hash" | It is called by hash 0xe873fd55 from `CharacterRoot.StateActive` (auto-align block, decompile line 3549 of the function, between yield points 0x60 and 0x61). |
+| Does the placement block run once or every frame? | It runs **every tick** (§1). |
+| Does the partner play its own absolute animation from the computed start? | Only after the slave's `ABSOLUTE_GOTO_TARGET_POS` event. Until then the slave's start frame is **its own pose when it entered the state**; the placement block's output is ignored (§1.3). After the event it blends in over the blend time. |
+| How is the master's own start frame chosen? | In shipped data **no master state is an absolute animation** (0 of 123). The master never gets a start frame; it keeps moving under the normal character controller (§2). |
+| Who calls `get_slave_pos_at_time` (0x5b0698)? | It is called by hash 0xe873fd55 from `CharacterRoot.StateActive` (auto-align block, decompile line 3549 of the function, between yield points 0x60 and 0x61). |
 | "Δ = track0(t) − track0(0)" | Confirmed, the index is the literal 0 (0x5af938 `and [ebp-0x30],0`), not clip+0x48. In all 234 primary master clips file track 0 is `GamePivot` (data), so it equals the GamePivot displacement — assuming runtime track index = file order (inferred). |
-| "CharacterRoot +0x24 = master node" | CharacterRoot data +0x24 is the **CharacterVisual** node (it receives `get_ragdoll_pelvis_position` 0x637ab144 at 0x6b95b0), +0x28 is the CollisionCapsuleNode. M / Q_M are the master's *visual* node world transform. |
-| start frame = capsule +0x10 / +0x28 | Those are only properties. The frame actually used per tick is a `PivotNode` named `worldstartnode` created at state init (0x6a1e1d); it is refreshed from the properties only by `command_update_world_data` 0x6b201d, which runs only while capsule +0xb8 ≠ 0 (§1.2). |
+| What is CharacterRoot +0x24? | CharacterRoot data +0x24 is the **CharacterVisual** node (it receives `get_ragdoll_pelvis_position` 0x637ab144 at 0x6b95b0), not the master node; +0x28 is the CollisionCapsuleNode. M / Q_M are the master's *visual* node world transform. |
+| Is the start frame capsule +0x10 / +0x28? | Those are only properties. The frame actually used per tick is a `PivotNode` named `worldstartnode` created at state init (0x6a1e1d); it is refreshed from the properties only by `command_update_world_data` 0x6b201d, which runs only while capsule +0xb8 ≠ 0 (§1.2). |
 
 ## 1. Once or every frame? What re-anchors the slave?
 
@@ -97,8 +97,9 @@ Data (all AnimationClass fragments, Part 2 PC): 161 of 166 absolute slave states
 3. At `ABSOLUTE_GOTO_TARGET_POS`: +0xb8 = 1. From the next update on, `update_world_data` copies
    the freshly written start into `worldstartnode` every tick, and the blend timer starts.
 4. Blend (0x67fd…, `absolute_update`): timer `T` = state local +0x48, initialised to the blend time
-   passed to `goto_phys_absolute_mode` (args[1]; `SetupNewPage` passes page +0xc — which page
-   field that is, **not established**; the state's ease-in is 0.2–0.21 s on these states).
+   passed to `goto_phys_absolute_mode` (args[1]; `SetupNewPage` passes page +0xc = the page's ease duration,
+   which is the partner state's own `m_neaseinduration`: `goto_slave_mode` 0x5b32a2 → `ForceToState` 0x5b4933 with
+   ease −1; 0.2–0.21 s on these states).
    Each update `T -= clamp(dt, 0, 0.1)`; while `T > 0`: `w = T / blend`,
    `pos = w·entry_pos + (1−w)·abs_pos`, orientation = quaternion blend (0x41fd54) of the
    absolute orientation and the entry orientation with weight `w`. `entry_pos/orient` are the
@@ -151,7 +152,9 @@ Whether the non-absolute master's node orientation follows the GamePivot rotatio
 primary pairs the master's GamePivot yaw changes by more than 2° inside the slave's
 [`ABSOLUTE_GOTO_TARGET_POS`, first `LEAVE_ABSOLUTE_MODE`] window (up to 180° for
 `RSH_COM_ATT_throw_EN1`, 87° for `NTO_COM_ATT_counter_EN1_E`); if the node did follow it, the
-anchor would drift by 0.16–1.45 m from the authored marker in those pairs. In the data the
+anchor would drift by 0.16–1.45 m from the authored marker in those pairs. (The `anim_meta` export counts 39 such
+pairs: it takes the largest turn from t = 0 anywhere inside the partner's anchored window, threshold 2° in both, over
+its 240 primary pairs rather than the 234 here; the case both name, `RSH_COM_ATT_throw_EN1`, drifts 1.447 m.) In the data the
 `interact` track is a child of GamePivot including rotation and is world-fixed
 (`GP(t) + R_GP(t)·interact(t)` is constant: e.g. `RSH_COM_ATT_finish_EN1_B` gives (0.000, 0.856) at
 t = 0 and (0.001, 0.855) at the end, with GP turned 180°). A consumer should therefore keep the
@@ -222,7 +225,7 @@ use as `want`) and `data+0x26c = now + value1` (until when), and zeroes the gain
 involved; facing is handled by heading/target-lock code that was not traced
 (`LOOK_AT_TARGET`, `SET_HEADINGS_FROM_ALIGNEMENT` — **not established**).
 
-No "snap to victim" exists for the master: **not found** in any of the functions named in the task.
+No "snap to victim" exists for the master: **not found** in any of the functions traced here.
 
 ## 3. `get_interact_initial_pos`, `get_slave_pos_offset`, `get_slave_alignment`
 
@@ -349,8 +352,9 @@ Do pairs loop? **No** (data): every master state and every absolute slave state 
   group whose id = the master's `Master of`, asking each `get_valid_state` 0x499d201a, after
   0x676172 has published the partner's model type and weapon type. Ignored if the receiver is dead
   or already a slave.
-- **Timing:** both clips run on their own controllers; the slave is not time-synced to the master
-  in the code read here (the slave's Δ uses the *master's* clip time).
+- **Timing:** the slave is time-synced to the master: `goto_slave_mode` stores the master's first animation
+  source in the partner's controller, and `UpdatePagePlayPos` 0x5b5756 copies that source's play position into the
+  partner's top page every frame until it reaches 1 (the slave's Δ uses the *master's* clip time).
 - **Blend, not snap:** the slave is never teleported. Expect it at its own spot for the first
   ~20 % of the clip, then a blend of `blend` seconds onto the marker.
 
@@ -387,7 +391,7 @@ anchor           = P_m + R(Q_m)·I0,                     rot = r * Q_m
 partner_world(t) = anchor.pos + R(r * Q_m)·(GP_p(t) − GP_p(0)),   rot = qGP_p(t) * r * Q_m
 ```
 
-This is what `ANIMATION_META.md` already implements and what the authored data supports (the
+This is what `ANIMATION_META.md` implements and what the authored data supports (the
 `interact` marker is world-fixed). For a faithful reproduction of the first part of the move, hold
 the partner at its own pose until `ABSOLUTE_GOTO_TARGET_POS` and blend; for showing the authored
 choreography, apply the anchor from t = 0. Do not carry the partner past its first
@@ -398,7 +402,7 @@ engine lets physics/ragdoll take over.
 
 - Whether a non-absolute master's visual node turns with its GamePivot rotation during the clip
   (decides whether the anchor swings in the 33 pairs of §1.5).
-- Value of the quaternion tolerance at 0xd91bf8; which page field supplies the slave's blend time.
+- Value of the quaternion tolerance at 0xd91bf8.
 - The DCC joint's parameters and exactly how much it constrains the slave vs. the master.
 - Visual-node vs capsule-node origin offset; decay of the offset stored at exit.
 - `KILL_ANIMATION_PARTNER`, `DIE`, `LOOK_AT_TARGET`, `SET_HEADINGS_FROM_ALIGNEMENT` handlers.
@@ -412,6 +416,6 @@ engine lets physics/ragdoll take over.
 
 Decompile dump (`fn.py`), disassembly (`xdis.py`) for 0x6b8ff0–0x6b95e3, 0x5af8e0–0x5afa6d,
 0x5b0890–0x5b08ee, 0x67f727–0x67f7af, 0x6a41f4–0x6a4298, the CRT sin/cos bodies; constants read
-with `rd`. Game data read on the user's PC with the toolkit's `anim_meta`/`bake_v4` (read-only):
+with `rd`. Game data read with the toolkit's `anim_meta`/`bake_v4` (read-only):
 state property tallies over 5 AnimationClass fragments, track order and GamePivot/interact keys of
 all 234 primary pairs. Nothing was run in the game, so every "read" item is static analysis.

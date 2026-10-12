@@ -1,33 +1,33 @@
 #!/usr/bin/env python3
 """build_bind_file.py — ENGINE-EXACT file-only bind from a skeleton ModelRes header.
 
-TWO conventions, both engine-verified (2026-07-08):
+TWO conventions, both engine-verified:
   POSITIONS (tb): Wp(child)=Wp(par)+rot(Wq(par),p_local), Wq=qmul(Wq(par),q_local)
       with q_local AS-STORED -> matches live-dump scenegraph Wt BIT-EXACT
       (KapowMulti.DMP char49/ref65).
   PALETTE-GAUGE ROTATIONS (Rb, the skinning bind): FK with q_local CONJUGATED,
       R = R_par @ R_child.  Verified on captured female palettes (femctl
-      protocol): p5 1.39deg, 527 frames <2deg (v14b: 524) -- same gauge as the
-      capture-solved v14b but exact for ALL bones (v14b arms/fingers were
-      approximate).  File quats store the bind conjugate -- same conjugate
-      convention as the clips (--conj in bake_v4).
+      protocol): p5 1.39deg, 527 frames <2deg; exact for ALL bones.  File quats
+      store the bind conjugate -- same conjugate convention as the clips
+      (--conj in bake_v4).
 
-Output npz schema == existing binds (Rb,tb,tloc,names,par,mask), slot order taken
+Output npz schema: Rb,tb,tloc,names,par,mask; slot order taken
 from a template bind (palette order is a per-skeleton empirical convention).
 """
 
-import sys, numpy as np
+import sys
+import numpy as np
 
 import os as _os
 
 _D = _os.path.dirname(_os.path.abspath(__file__))
 if _D not in sys.path:
     sys.path.append(_D)  # append, never insert(0): flat module names must not shadow the stdlib
-from parse_model_nodes import parse
-from wutil import load_npz, qmat_xyzw
+from parse_model_nodes import parse  # noqa: E402
+from wutil import load_npz, qmat_xyzw  # noqa: E402
 
 
-from wutil import read_bytes as _read_bytes  # one copy, in wlib/wutil.py
+from wutil import read_bytes as _read_bytes  # one copy, in wlib/wutil.py  # noqa: E402
 
 
 def qmul(a, b):
@@ -124,7 +124,7 @@ def build(header_path, template_npz, out_npz):
             p = parent[p]  # skip unnamed root
         par[k] = tn.index(names[p]) if p >= 0 else -1
     # tb = FK in the PALETTE gauge: tb_k = tb_p + Rb_p @ tloc_k (engine palette
-    # joints; verified == v14b tb / fixed points).  Roots at their tloc.
+    # joints; verified against fixed points).  Roots at their tloc.
     tb = np.zeros((NS, 3))
     order = []
     seen = set()

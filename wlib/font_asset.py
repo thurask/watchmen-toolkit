@@ -96,7 +96,7 @@ def _named(d, name, alias):
 FALLBACK_CODE = 64
 
 
-from wutil import read_bytes as _read_bytes  # one copy, in wlib/wutil.py
+from wutil import read_bytes as _read_bytes  # one copy, in wlib/wutil.py  # noqa: E402
 
 
 class FontError(ValueError):
@@ -153,7 +153,7 @@ def parse(data, order=None):
     try:
         w, h, en, x, typ, alpha, mips, size = struct.unpack_from(bo + _DESC, data, 1)
     except struct.error:
-        raise FontError("truncated texture descriptor")
+        raise FontError("truncated texture descriptor")  # noqa: B904
     tex = {
         "width": w,
         "height": h,
@@ -174,7 +174,7 @@ def parse(data, order=None):
         ghv, f24 = struct.unpack_from(bo + "2f", data, p + 32)
         (count,) = struct.unpack_from(bo + "I", data, p + 40)
     except struct.error:
-        raise FontError("truncated font fields at %d" % p)
+        raise FontError("truncated font fields at %d" % p)  # noqa: B904
     p += 44
     if p + count * _GLYPH_LEN != len(data):
         raise FontError(

@@ -18,11 +18,10 @@ Armature modifier on the body armature `root` and follow every clip; the `RJ` em
 children of the empty `ragdoll` and stay at the bind pose.
 
 The extras name the joint node each body and joint belongs to: `body.joint_node`,
-`parent_joint_node` / `child_joint_node`, and `joint_nodes` in the sidecar. Since 1.5.0 these
-are the GLB's own node names — the bone names of the hierarchical rig — with the palette index
-beside them (`joint_index`, `parent_joint_index`, `child_joint_index`; `joint_indices` in the
-sidecar). A file written with `--rig flat` names the nodes `b<k>` as 1.4.0 did and carries no
-index keys.
+`parent_joint_node` / `child_joint_node`, and `joint_nodes` in the sidecar. These are the
+GLB's own node names — the bone names of the hierarchical rig — with the palette index beside
+them (`joint_index`, `parent_joint_index`, `child_joint_index`; `joint_indices` in the
+sidecar). A file written with `--rig flat` names the nodes `b<k>` and carries no index keys.
 
 The rig comes from the model in slot 0 of the character's model list: the skeleton model for the
 enemies, the body model for Rorschach and Nite Owl, `BS2_WithoutWeapon` for the Twilight Lady.
@@ -131,7 +130,7 @@ stretching stiffness, damping coefficient, pressure, collision response coeffici
 min adhere velocity and solver iterations are the cloth's properties. **Friction is that of the
 owning node's pivot sheet** (0x4f5d6a), 0 if none; it is not a cloth property (0.6 for both
 players through `Ragdoll_All` of `default.pb`: inferred, the sheet assignment was not
-re-measured). Constants (`physx`): tear factor and attachment tear factor 1.5, attachment
+measured). Constants (`physx`): tear factor and attachment tear factor 1.5, attachment
 response 0.2, to / from fluid response 1, wake-up counter 0.4, sleep linear velocity −1, scene
 1 (the cloth scene). The mesh data is the position buffer with flags 1 (16-bit indices; the
 name is from the SDK header, inferred). Group mask 0 at creation, set afterwards. The NxCloth is created only

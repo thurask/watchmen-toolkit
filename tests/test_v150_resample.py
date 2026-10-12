@@ -38,7 +38,9 @@ def test_resample_keys_is_a_linear_ramp_not_a_step():
     r = bake_v4.resample_keys(y, 19)
     assert np.array_equal(r[0], y[0]) and np.array_equal(r[-1], y[-1])
     assert np.allclose(r[3], y[1])  # 3 * 6/18 = key 1 exactly
-    assert bake_v4.resample_keys(y, 7) is not None and np.array_equal(bake_v4.resample_keys(y, 7), y)
+    assert bake_v4.resample_keys(y, 7) is not None and np.array_equal(
+        bake_v4.resample_keys(y, 7), y
+    )
 
 
 def _clip(arm_keys):

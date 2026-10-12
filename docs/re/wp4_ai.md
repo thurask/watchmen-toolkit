@@ -4,7 +4,7 @@ Target `KapowMultiDEDRM.exe`. Evidence marks: **read** = traced in the lifted sc
 disassembly (handler and address given), **data** = value read from the binary fragments on the PC
 (parsed with `tk160/wlib/kapow_fragment.py`), **inferred** = stated with the reason, **not established**.
 Units: metres, seconds, radians for headings, speeds as a fraction 0..1 of full move speed.
-Tables: `findings/wp4_ai_tables.json`. Scratch and tools: `work/wp4/` (section 11).
+Tables: `findings/wp4_ai_tables.json`. Scratch and tools: `work/wp4/` (section 12).
 
 ## 0. Result in one page
 
@@ -34,8 +34,9 @@ Tables: `findings/wp4_ai_tables.json`. Scratch and tools: `work/wp4/` (section 1
 - **Navigation data** is not in the block archives: `.aipathdata` (12 kB) is only the Kynapse world
   configuration ("KS BIG FILE"); the graph and AI mesh are in loose `data/levels/.../*.hpd` files
   (Bordello 204 kB) which the extractor does not touch.
-- **Difficulty**: settled - nothing reads it (section 5.6).
-- Corrections to `dominatrix_audit.md` are collected in section 9.
+- **Difficulty**: nothing reads it (section 5.4).
+- Statements that the code rules out (including several in `dominatrix_audit.md`) are collected in
+  section 9.
 
 ## 1. Architecture
 
@@ -62,7 +63,7 @@ Tables: `findings/wp4_ai_tables.json`. Scratch and tools: `work/wp4/` (section 1
 `BehaviorMovementTest`, `AiSheetChanger`, `DoorPathObject`, `TriggerStaticPathObj` are registered but
 never created by script and have no instance in the PC fragments (data + grep of the creation strings).
 
-Classes covered in this pass (lifted lines): Enemy 4127, CombatOrchestrator 4600, AttackEnemy 2163,
+Coverage (lifted lines per class): Enemy 4127, CombatOrchestrator 4600, AttackEnemy 2163,
 CircleTargetEnemy02 2603, SecondaryAttackerEnemy 2397, Perception 2745, BehaviorHandler 1651,
 BehaviorChase 1068, hangback 1437, AILib 2323 (12 of 35 methods), AiDef 504, EnemyDef 2257 (getters and
 `initialize_local`), CharacterAIBrain 1028, AIWorld 683, BehaviorBrainlessAutotarget 844,
@@ -109,10 +110,10 @@ Engine: 22 functions of `ai.glue` (addresses in section 6).
 | tactical bits | every `m_ntacticalinformationupdatetime` (enemy 0.5 s, heroes 0.01 s; data) and on demand | 0x7d730a, 0x7dd352 |
 | orchestrator | every frame | 0x6e8231 |
 | Kynapse world | every frame, `Update(dt)` with the frame time | 0x529433 -> 0x9258c0 |
-| only the 16 nearest enemies run at all | `CharacterLodCtrl` | audit c2 |
+| only the 16 nearest enemies run at all | `CharacterLodCtrl` | `dominatrix_audit.md` c2 |
 
-Random numbers all come from the script builtin `rand_number` / `rand_integer` (0x47b03e family); no
-seed handling was looked at (**not established**: seed and generator).
+Random numbers all come from the script builtin `rand_number` / `rand_integer` (0x47b03e family);
+seed and generator are **not established**.
 
 ## 2. `Enemy.StateActive` and `Enemy.Evaluate`
 
@@ -154,24 +155,25 @@ seed handling was looked at (**not established**: seed and generator).
 | 13 | `dist <= 2 x` engagement distance, already `ATTACKING`, and not allowed to start moving (`m_imovingcharacterslastframe >= m_irunningcharactersclamp` (5) and own speed 0) | stay `ATTACKING` |
 | 14 | otherwise | `CHASING` |
 
-Rule 12 uses the orchestrator's engagement distance, not the definition's attack distance (the audit said
-attack distance; `Entity_GetScriptPropertyByIndex(orchestrator, 2)` = `m_nengagementdist`, lines 3743-3757
-of `Enemy.c`).
+Rule 12 uses the orchestrator's engagement distance, not the definition's attack distance
+(`Entity_GetScriptPropertyByIndex(orchestrator, 2)` = `m_nengagementdist`, lines 3743-3757 of
+`Enemy.c`).
 
 ### 2.3 Being attacked (read)
 
 - **At attack start**: `CombatOrchestrator.command_attack_animation_stated` 0x6e6495 (called from
   `CharacterRootLogic` x3 and `CharacterPhysics`) sends `BehaviorHandler.command_react_to_attack(attacker)`
   to the *target*. For players this goes to `PlayerCtrl.command_you_are_attacked`; for enemies to
-  `Enemy.command_react_to_attack` 0x721958: the Deterministic Reaction System described in the audit
-  (c3), confirmed. Gate details settled here: she force-locks the target onto the attacker, ignores
-  unblockable attacks, and does nothing when `Perception.command_tactical_query(attacker, 0x400)` is
-  true - 0x400 is `TACTICAL_INFO.PLACEMENT_REAR`, i.e. **attacks from behind (more than 90 degrees off
-  her facing) are never blocked, dodged or countered**. The first reaction also sets a `PASSIVE` enemy
-  `AGGRESSIVE`. No random number is involved; `m_nprobofreactatt`, `m_nprobofdodge`, `m_nprobofblock`,
+  `Enemy.command_react_to_attack` 0x721958: the Deterministic Reaction System (`dominatrix_audit.md`
+  c3). Gates: she force-locks the target onto the attacker, ignores unblockable attacks, and does
+  nothing when `Perception.command_tactical_query(attacker, 0x400)` is true - 0x400 is
+  `TACTICAL_INFO.PLACEMENT_REAR`, i.e. **attacks from behind (more than 90 degrees off her facing) are
+  never blocked, dodged or countered**. The first reaction also sets a `PASSIVE` enemy `AGGRESSIVE`.
+  No random number is involved; `m_nprobofreactatt`, `m_nprobofdodge`, `m_nprobofblock`,
   `m_nprobofcounteratt` have no reader outside `EnemyDef`'s own editor-time `Justify*` handlers
   (measured: a displacement scan of the whole code section finds no reader outside `Justify*` /
-  `FilterExposedProperties`; `enemydef_consumers` in `wp4_ai_tables.json` is superseded by it).
+  `FilterExposedProperties`; the `enemydef_consumers` table in `wp4_ai_tables.json` is superseded by
+  that scan).
   `m_nprobblockthrow` / `m_nprobdodgethrow` are read in `CharacterRootLogic.FireAttackBasedOnAttackID`
   0x68d870 (throw defence; combat-resolution territory).
 - **Just before impact**: `CharacterRoot.command_hit_soon` 0x6903ea -> `BehaviorHandler.command_when_attacked`
@@ -256,7 +258,7 @@ Runs only while the target is within 4.5 m (`command_check_preconditions` 0x6dcd
   `command_set_movement(heading, facing, speed)`.
 - No path for 1 s (velocity below 0.01 after having moved, or target unreachable): agent type 3 for a
   frame, then `GOTO` again.
-- Consequence (read, arithmetic mine): in the band `IWhantToMove` is true for only two consecutive frames
+- Consequence (inferred from the read code): in the band `IWhantToMove` is true for only two consecutive frames
   per wait period, and with a 0.5/s ramp the speed stays far below the 0.1 threshold, so the "circle"
   step inside the band is practically a stand-still with a re-aim; real movement happens when she is
   outside the band (approach, back off).
@@ -383,7 +385,7 @@ clamp 5, cooldown 2.0 s, max attacks 3, frequency 0.2 s, idle 0.1 s. Presets
 `combatorchestratordefaults.fragment` "Level 001".."Level 006" (engagement 8/8/12/12/8/8, cooldown
 4/4/3/2/2/2, max 2/2/3/3/3/4, frequency 0.5/0.5/0.2/0.2/0.2/0.2, idle 1.5/1.0/0.75/0.5/0.1/0.1) are
 applied by `CombatOrchestratorParameters.command_trig` 0x6d9128 -> `command_set_parameters` 0x6e2e73 (a
-trigger action or "trig from start"); which levels fire which preset was not traced.
+trigger action or "trig from start"); which levels fire which preset is not established (section 11).
 
 **Targets** (read):
 
@@ -427,13 +429,18 @@ trigger action or "trig from start"); which levels fire which preset was not tra
   between the two eye points (refresh periods not read). The ray reports every shape whose pivot-sheet
   `collisionMask` shares a bit with `AIWorldNode.collisionMask` (8192 `KYNAPSE` in three and 8193 in
   two of the five PC Part 2 `AIWorld` nodes that store one; `nodeCollisionMask` 0). Sight is blocked
-  when the first reported hit belongs to a `CollisionNode` with `physicsType` 1 (RIGIDBODY). Sheets that share no bit with the level's mask are transparent to AI: `Character_Enemy` (258) and `Trigger` (16) everywhere, and `SolidCollisionAiCanSeeThrough*` (4095 / 4079 / 4075) where the mask is 8192. Where the mask is 8193 (NightClub, PlayerVsPlayer) those three sheets share bit 0 and are reported: 5 NightClub volumes on `SolidCollisionAiCanSeeThrough` with `physicsType` 1 export `blocks: true` (measured); Bordello's 8 export `false`. The 28 `visionblocker` boxes of PC Part 2 all store `physicsType` 1 and the
-  `collisionprimitives` `default` sheet (mask 9771) and so block at run time (measured: the "47 in
-  the data" counted earlier are 28 property records plus 19 creation records of the same nodes). `includeInAIVisibilityCache` (`CollisionNode`+0x189) only feeds the `Get*AIObjects`
-  natives, which no script calls: in 0x49ca65 the entity type is always `DynamicObstacle` and only
-  kinematic or dynamic nodes get one; its reader is 0x4a2b9f. There is no hearing:
-  `Kaim::CEntityHearingAcuteness` is never instantiated (class object 0xe4c698 has no reference
-  outside its own registration).
+  when the first reported hit belongs to a `CollisionNode` with `physicsType` 1 (RIGIDBODY). Sheets
+  that share no bit with the level's mask are transparent to AI: `Character_Enemy` (258) and `Trigger`
+  (16) everywhere, and `SolidCollisionAiCanSeeThrough*` (4095 / 4079 / 4075) where the mask is 8192.
+  Where the mask is 8193 (NightClub, PlayerVsPlayer) those three sheets share bit 0 and are reported:
+  5 NightClub volumes on `SolidCollisionAiCanSeeThrough` with `physicsType` 1 export `blocks: true`
+  (measured); Bordello's 8 export `false`. The 28 `visionblocker` boxes of PC Part 2 (47 records: 28
+  property records plus 19 creation records of the same nodes) all store `physicsType` 1 and the
+  `collisionprimitives` `default` sheet (mask 9771) and so block at run time (measured).
+  `includeInAIVisibilityCache` (`CollisionNode`+0x189) only feeds the `Get*AIObjects` natives, which
+  no script calls: in 0x49ca65 the entity type is always `DynamicObstacle` and only kinematic or
+  dynamic nodes get one; its reader is 0x4a2b9f. There is no hearing: `Kaim::CEntityHearingAcuteness`
+  is never instantiated (class object 0xe4c698 has no reference outside its own registration).
 - Tactical bits (`UpdateTacticalInfoForEnemy` 0x7dd352): attacking me; within/outside melee range (4.5 m);
   within attack range (`m_nattackdistance`); stunned / prone; placement front/rear (90 degrees to my
   facing) and left/right; current target; low health (< 40); primary target.
@@ -465,7 +472,7 @@ Enemies are placed with `_tstartactivated` false (461 of 476 records). Trigger v
 (Counts are action records in the three `Enemies.fragment` files and include the parser's duplicate
 rows; ratios are meaningful, absolute numbers are not.)
 
-### 5.6 Global difficulty - settled (read)
+### 5.4 Global difficulty (read)
 
 `PREFERENCES_GAMEDIFFICULTY` (NORMAL 0, EASY 1, HARD 2, ERROR 3) is only the return type of the native
 `PlatformNode.getdiffucultysettings` 0x4cd780 (reads the platform gamer profile, 0x4dfd58). That native
@@ -528,7 +535,7 @@ traverse callbacks for special links. Nothing else of the 534 kB library is cons
   `m_nmoveheading` / `m_nfaceheading` / `m_nmovespeed` with the `CharacterDef` heading speeds
   (Dominatrix 10 and 8 rad/s; data) and the speed clamps (`_nspeedclampwalk` 0.4, `_nspeedclampjog` 0.6;
   data) and feeds the animation values `SPEED` (1) and `DIRECTION` (2). From there on it is the
-  locomotion state machine (WP3); not traced here beyond locating the writes.
+  locomotion state machine (WP3); not traced beyond the writes.
 - No path / off mesh: `CharacterRoot.StateActive` keeps a **breadcrumb**, the last position for which
   `AIWorldNode.IsInsideMesh` was true (lines 7462-7745); pursuers aim at the target's breadcrumb; an
   enemy off the mesh for 2 s walks straight back to its own breadcrumb and is killed after 10 more
@@ -544,7 +551,8 @@ traverse callbacks for special links. Nothing else of the 534 kB library is cons
   the agent is in combat costs (10 x users + length) x 100; `TraversePathObject` 0x771392 takes the agent
   off the path finder and plays the climb through its own `StateActive`.
 - `KynapseArtificialDoor` (42), `PathBlocker` (49): collision boxes that exist only for path-data
-  generation (disabled at run time, 0x76ed53, 0x7dbbe3). `visionblocker` (47): the reverse (5.1).
+  generation (disabled at run time, 0x76ed53, 0x7dbbe3). `visionblocker` (47 records = 28 boxes): the
+  reverse (5.1).
 - `AIPathDataSeedPointNode` (118), `AIPathDataExplorationAreaNode` (2), `AIStaticPathObjectVertexNode` (96):
   generation inputs / link endpoints.
 - `aipathobjectinfo` = `AIPathObjectInfo(usepathfinder, doneusingpathobject, newdestination)`.
@@ -608,19 +616,22 @@ preconditions hold, else `FOLLOW_PARTNER` while the human hero lives, else idle.
 `CrowdControlPartner`, `CombatHelpPartner`), `UseBehavior`, `UberRageBehavior`, `BehaviorWaypointMove`,
 `BehaviorStepBack`. It registers in the orchestrator as faction 0, so enemies treat it as a hero, and it
 drives the character through the same `command_set_movement` / attack commands. The 75 kB of partner
-combat behaviours were not read.
+combat behaviours are not read (section 11).
 
-## 9. Corrections to earlier documents
+## 9. Ruled out
 
-| document | statement | what the code says |
-|---|---|---|
-| audit c2 | `ATTACKING` when within the attack distance | within the orchestrator's engagement distance (8 m); `m_nattackdistance` is the stand-off / request range inside `AttackEnemy` |
-| audit c9 | `KynapseCharacter.StateActive` turns the brain velocity into the movement request | it is a test class that integrates `worldPos += aiVelocity*dt` on a pivot; no instance in the data. The behaviours read `aiVelocity` themselves |
-| audit c3 | meaning of tactical flag 0x400 not established | `PLACEMENT_REAR` |
-| audit c3 | reaction comes from `PRE_IMPACT -> hit_soon -> when_attacked` | the reaction table is triggered at attack *start* by `CombatOrchestrator.command_attack_animation_stated`; `hit_soon -> when_attacked` is the separate face-the-attacker pause |
-| audit c4 | where `_tdocombo` is rolled, how frequencies weight | `AttackEnemy.StateActive` at request time; multiplicity in a uniform pick; weapon filter |
-| audit c12 | enum order EASY/NORMAL/HARD | NORMAL 0, EASY 1, HARD 2; no consumer exists |
-| brief | AI sheets / `AiSheetChanger` | registered, no instance; definitions are switched by the behaviour handler |
+Flat statements of what the code does not do; several supersede items of `dominatrix_audit.md`
+(c2, c3, c4, c9, c12), which is the older document.
+
+| not the case | what the code says |
+|---|---|
+| `ATTACKING` when within the attack distance | within the orchestrator's engagement distance (8 m); `m_nattackdistance` is the stand-off / request range inside `AttackEnemy` |
+| `KynapseCharacter.StateActive` turns the brain velocity into the movement request | it is a test class that integrates `worldPos += aiVelocity*dt` on a pivot; no instance in the data. The behaviours read `aiVelocity` themselves |
+| meaning of tactical flag 0x400 unknown | `PLACEMENT_REAR` |
+| reaction comes from `PRE_IMPACT -> hit_soon -> when_attacked` | the reaction table is triggered at attack *start* by `CombatOrchestrator.command_attack_animation_stated`; `hit_soon -> when_attacked` is the separate face-the-attacker pause |
+| `_tdocombo` rolled elsewhere / combo frequencies as weights | rolled in `AttackEnemy.StateActive` at request time; multiplicity in a uniform pick; weapon filter |
+| difficulty enum order EASY/NORMAL/HARD | NORMAL 0, EASY 1, HARD 2; no consumer exists |
+| AI sheets switched by `AiSheetChanger` | registered, no instance; definitions are switched by the behaviour handler |
 
 ## 10. Asset / format consequences
 

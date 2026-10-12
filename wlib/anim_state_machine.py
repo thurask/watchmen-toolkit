@@ -56,7 +56,7 @@ overlay stack is empty, EvaluateTransitions scans the candidates and pushes
 the first state whose criteria pass (groups: criteria + get_valid_state,
 scan continues; states: criteria only, scan breaks) via SetupNewPage.
 OVERLAY_PLAY_POS/REVERSE (criteria 7/8) read the TOP OVERLAY page playpos;
-they never occur in shipped fragments (all-data scan 2026-07-13).
+they never occur in shipped fragments (all-data scan).
 
 Input: extractor fragment JSON (kapow_fragment/kapow_json output), e.g.
 20260708/extracted/.../AnimationClassEnemy01.fragment.json. Nested
@@ -70,7 +70,11 @@ Interval test m_iintervaltype: 0=INTERVAL [min,max[  1=LESS_THAN (x < max)
 2=GREATER_THAN_OR_EQUAL (x >= min)
 """
 
-import itertools, math, os, random, struct
+import itertools
+import math
+import os
+import random
+import struct
 
 # ---------------------------------------------------------------- tree
 
@@ -176,9 +180,9 @@ def _base_cls(s):
 def _load_fragment_json(path):
     """Fragment JSON for `path` (a `.fragment.json` or a `.fragment`).
 
-    Prefers parsing the binary `.fragment` next to it: JSON written by an older
-    extractor carries `key_xxxxxxxx` names where the current key table has
-    `m_...` names, and every lookup in this module is by the current names.
+    Prefers parsing the binary `.fragment` next to it: a JSON may carry
+    `key_xxxxxxxx` names where the current key table has `m_...` names, and
+    every lookup in this module is by the current names.
     Falls back to the JSON on disk when the binary is not there.
     """
     import kapow_json as _kj
@@ -395,8 +399,8 @@ def _walk_path(children, ids):
 
 
 def _legacy_path(node, ids, index):
-    """Resolution without fragment headers (JSON written before the header was
-    exported, or a path whose singleton is not in the loaded tree): the first id
+    """Resolution without fragment headers (JSON without the header fields, or
+    a path whose singleton is not in the loaded tree): the first id
     that exists, nearest instance first, every further id inside it."""
 
     def at(i):  # a plain {id: node} index is accepted too
@@ -520,7 +524,7 @@ def inv_lerp_clamped(x, a, b):
     return (x - a) / (b - a) if b != a else 0.0
 
 
-# keys an extractor older than the corrected name hash wrote for the markers
+# alternative marker keys a JSON may carry (the markers under a mis-hashed name)
 _SYNC_LOCAL_OLD = ["key_ee2a40" + x for x in ("a0", "60", "e0", "00", "80", "40", "c0", "30")]
 _SYNC_REMOTE_OLD = ["key_4cadfb" + x for x in ("2b", "eb", "6b", "8b", "0b", "cb", "4b", "bb")]
 
@@ -529,7 +533,7 @@ def _marker(trans, i, local):
     v = trans.p((SYNC_LOCAL if local else SYNC_REMOTE)[i])
     if v is None:
         v = trans.p((_SYNC_LOCAL_OLD if local else _SYNC_REMOTE_OLD)[i])
-    if isinstance(v, (list, tuple)):  # pre-v1.3 JSON carried some markers as a mistyped list
+    if isinstance(v, (list, tuple)):  # a JSON may carry some markers as a mistyped list
         v = v[0] if v else None
     return float(v) if isinstance(v, (int, float)) else -1.0
 
@@ -781,7 +785,7 @@ def criteria_met(c, env, page, entry):
         r = any(criteria_met(k, env, page, entry) for k in c.kids(CLS_CRIT))
     elif kind == CRIT_ALL_OF:
         r = all(criteria_met(k, env, page, entry) for k in c.kids(CLS_CRIT))
-    elif kind == CRIT_OVERLAY_PP:  # 7: top OVERLAY page playpos (09j)
+    elif kind == CRIT_OVERLAY_PP:  # 7: top OVERLAY page playpos
         op = env.overlay_page
         r = interval_met(op.playpos if op else 0.0, it, lo, hi)
     elif kind == CRIT_REV_OVERLAY_PP:  # 8: 1 - overlay playpos
@@ -1254,7 +1258,7 @@ class Interpreter:
 
     seed / rng        the engine picks one blend node per layer list with rand % n;
                       the choice is drawn from `rng` (default random.Random(seed)).
-    done_fallback     pre-v2 behaviour: also run the fallback step whenever the top
+    done_fallback     also run the fallback step whenever the top
                       page has finished, even if the state's criteria still hold
                       (the engine only does so when they fail). Default False.
     """
@@ -1265,7 +1269,7 @@ class Interpreter:
         self.pages = []  # body page stack (Update flag 0), newest last
         self.opages = []  # OVERLAY page stack (Update flag 1)
         self._act_overlay = False  # which stack the current pass evaluates
-        self.rr_index = {}  # unused since the scan-start fix; kept for old callers
+        self.rr_index = {}  # unused; kept for compatibility
         self._tested = None  # tested list of the transition evaluation in progress
         self.log = log if log is not None else []
         self.rng = rng if rng is not None else random.Random(seed)
@@ -1722,7 +1726,7 @@ class Interpreter:
     def _slot_pos_weights(self, blend, slots):
         """Blend-position split inside one blend node: ctrl param
         m_iblendctrlparam mapped over the blend interval, slots placed at
-        m_nparentblendposition, linear between neighbours (09j blend trees).
+        m_nparentblendposition, linear between neighbours (blend trees).
 
         Without a control parameter (0 = NONE) a blend with two or more slots
         plays its FIRST child alone: weight 1.0 for the slot with the lowest
@@ -1851,7 +1855,7 @@ def main():
         ov = it.opage.state.name if it.opage else "-"
         if cur != last or i % 30 == 0:
             print(
-                f"t={i*args.dt:7.3f} state={cur:32s} ov={ov:12s} "
+                f"t={i * args.dt:7.3f} state={cur:32s} ov={ov:12s} "
                 + "  ".join(f"{os.path.basename(a)}:{x:.3f}" for a, x in top)
             )
             last = cur

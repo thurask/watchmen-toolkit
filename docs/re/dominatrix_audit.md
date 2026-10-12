@@ -1,7 +1,13 @@
 # The Dominatrix as a probe: what she touches in the engine, and how much of it is understood
 
 Audit of `KapowMultiDEDRM.exe` (Watchmen: The End Is Nigh, Part 2, PC) against one enemy type.
-Date 2026-10-04. Machine-readable twin: `dominatrix_audit.json` (same steps, same ids).
+Machine-readable twin: `dominatrix_audit.json` (same steps, same ids).
+
+Scope: this audit is the baseline the work packages of section 2 start from. Its verdicts
+("understood" / "partly" / "not understood") and the coverage figures of section 3 describe that
+baseline; the packages themselves are carried out in `wp0_script_names.md` … `wp7_fx_camera_hud.md`,
+which supersede the verdicts step by step. Where a wp report corrects a statement here, the
+corrected statement is given in place and marked (wp*).
 
 ## 0. Answer to the question
 
@@ -10,31 +16,30 @@ asset export needed: file formats, the animation state machine with its events a
 the jiggle joint, and the pixel and vertex shader math. Everything that makes her *behave* (the AI,
 the combat rules, the ragdoll), everything that puts her on screen above the shader level (the render
 pipe on the CPU), and everything she sounds like below the sound-definition level, is known only by
-name, by data, or by a first skim done in this pass.
+name, by data, or by a first skim done in the audit.
 
-Of the 100 steps in her life traced below: 13 understood from the documents, 18 understood in this pass, 44 partly understood, 25 not understood.
+Of the 100 steps in her life traced below: 13 understood from the documents, 18 understood in the audit, 44 partly understood, 25 not understood.
 By code volume, leaving the Kynapse library out: 2246 kB, about 19 % understood. Baked game script: 928 kB, about 30 %.
 Engine C++: 1313 kB, about 12 %. These percentages are estimates (section 3 says how they are made).
 
-Three things in the brief turned out different in the data, and one check of mine corrected itself:
+Ruled out on the data:
 
 - There are **nine** Dominatrix variants, not ten: `Dominatrix_1, 2, 4, 5, 6, 7, 8, 9, 10`. No
   `Dominatrix_3` node exists in `Dominatrices.fragment` (14 nodes, parsed lossless). The export
-  folder has a `Dominatrix_3.glb`; where it comes from was not followed up.
+  folder has a `Dominatrix_3.glb`; its origin is not established.
 - She has **no whip and no cattle prod**. Her weapon collection is `DominitrixWeapons_1H`: a police
   baton and a paddle, carried by 24 of the 92 placed Dominatrices; the other 68 are unarmed. The
   cattle prod belongs to the Twilight Lady (`BS2_COM_ATT_cattleprod_*`).
 - She owns no `CharacterSweepAttack` and no `FXLightning*` node, and no `CharacterSpawner` stands in
   her level. Those classes touch her only as a victim (area attacks, Nite Owl's electrified armour).
-- The `*.fragment.json` files that lie beside the fragments in the extract are stale: they were
-  written by an older parser and show the Dominatrix `EnemyDef` with unnamed keys and a desync after
-  `m_idrs03attack03`. The installed toolkit (1.4.0) parses the same file correctly. I first took
-  this for a parser defect; it is not one. The stale files should be regenerated or deleted.
+- `*.fragment.json` files written by an older parser (unnamed keys on the Dominatrix `EnemyDef`
+  and a desync after `m_idrs03attack03`) are stale, not evidence of a parser defect: the toolkit
+  parses the same binary fragment correctly. Such files must be regenerated or deleted.
 
 ## 1. Gap list, ranked
 
 Ranked by what the gap blocks for the two goals (a faithful asset export; understanding the engine).
-Sizes are exe bytes of the code that has to be read; "open" is my estimate of the unread share.
+Sizes are exe bytes of the code that has to be read; "open" is an estimate of the unread share at the audit.
 
 | # | gap | steps | size | what it unlocks | package |
 |---|---|---|---|---|---|
@@ -52,18 +57,18 @@ Sizes are exe bytes of the code that has to be read; "open" is my estimate of th
 One gap sits under all the script items and is listed separately because it is tooling, not reading:
 
 - **Names inside the baked scripts.** The 441 registration functions end in 840 kB of declaration
-  records that Ghidra still cuts off (`findings/submap.md` 0.1). This pass found what they are: the
+  records that Ghidra cuts off (`findings/submap.md` 0.1). They are the
   names of each handler's **local variables and parameters** (`etemplist`, `ecorpse`, `<return>` ...),
-  pushed per handler; and it found that a script object's **member block is its property list in
+  pushed per handler; and a script object's **member block is its property list in
   registration order** (4 bytes each, vectors 12, quaternions 16; a child class's list already
   contains the parent's). With both, `local_8[0x19]` reads as `m_nhealth` and `piVar6[2]` as
-  `ecreateparent`. I used the member half of this by hand in this pass; it made handlers of 1 - 5 kB
-  readable in minutes. Extracting both halves for all 441 classes is mechanical and should be done
-  first (WP0).
+  `ecreateparent`. Applying the member half by hand makes handlers of 1 - 5 kB
+  readable in minutes. Extracting both halves for all 441 classes is mechanical and is WP0
+  (`wp0_script_names.md`).
 
 ## 2. Work packages
 
-Each can go to one researcher. WP0 should start first; WP1, WP2 (engine half), WP5 and WP6 (engine
+Each is one report (`wp0_script_names.md` … `wp7_fx_camera_hud.md`). WP0 comes first; WP1, WP2 (engine half), WP5 and WP6 (engine
 half) do not depend on it. WP3 and WP4 share `CharacterRoot` and should agree on who documents which
 handlers (suggested split: WP3 owns `CharacterRoot` / `CharacterRootLogic`, WP4 owns everything under
 `BehaviorHandler`).
@@ -74,7 +79,7 @@ functions from the exe bytes (pattern: `0x598d0e(tmp, "name", typeGlobal)` then 
 the property lists, and write an annotated copy of the dump. Entry points: `ScriptClass_FinalizeLayout`
 0x47ed4b, any `*__register`. Deliverable: `members.json` (class, offset, name), `locals.json`
 (handler, slot, name), annotated dump. Small, mechanical, unlocks WP2 (script half), WP3, WP4, WP6
-(script half), WP7. Scratch tools of this pass that show the idea: `work/domaudit/rdx.py`, `calls.py`.
+(script half), WP7. Scratch tools of the audit that show the idea: `work/domaudit/rdx.py`, `calls.py`.
 
 **WP1. Renderer frame.** 2208 functions, 438 kB (script 10 kB, engine 424 kB); about 420 kB of it open. Read in this order: `RenderEffectManager` 0x572a7b and the
 `RenderEffect` base 0x57d030 (which effects exist, their pass ids); `RenderPipe` 0x56f057 and
@@ -109,7 +114,7 @@ then the unread two thirds of `CharacterRoot.StateActive` (heading, rotation, sp
 exporter, per-state combat values.
 
 **WP4. Enemy AI and navigation.** 960 functions, 264 kB (script 221 kB, engine 43 kB); about 235 kB of it open. Read `Enemy.Evaluate` 0x72587d and `StateActive`
-0x724071 line by line (this pass skimmed them); `BehaviorChase`, `AttackEnemy.StateActive` 0x5ff3d6
+0x724071 line by line (the audit skimmed them); `BehaviorChase`, `AttackEnemy.StateActive` 0x5ff3d6
 and `FindUsableCombo` 0x600730, `hangback`, `BehaviorStepBack`, `CircleTargetEnemy02`,
 `SecondaryAttackerEnemy`, `ReturnToCombatZone`; `Perception`; `CombatOrchestrator.StateActive`
 0x6e8231 with `command_request_attack` / `command_register_attack` / `LockTarget`;
@@ -142,7 +147,7 @@ an effect id becomes particles, sound and camera motion; lowest priority for the
 
 ## 3. Coverage figures
 
-| area | understood | understood now | partly | not | code (without the Kynapse library) | understood, estimate |
+| area | understood (documents) | understood (audit) | partly | not | code (without the Kynapse library) | understood, estimate |
 |---|---|---|---|---|---|---|
 | a. Level load and spawn | 1 | 5 | 7 | 0 | 436 kB | 28 % |
 | b. Per-frame update | 1 | 1 | 3 | 2 | 109 kB | 28 % |
@@ -155,35 +160,33 @@ an effect id becomes particles, sound and camera motion; lowest priority for the
 | i. FX and feedback | 0 | 2 | 4 | 4 | 234 kB | 9 % |
 | j. Game flow | 0 | 2 | 2 | 1 | 101 kB | 5 % |
 
-Totals: 13 understood from the documents, 18 understood in this pass, 44 partly understood, 25 not understood. All code she touches including the Kynapse library: 2780 kB, about 16 % understood.
+Totals: 13 understood from the documents, 18 understood in the audit, 44 partly understood, 25 not understood. All code she touches including the Kynapse library: 2780 kB, about 16 % understood.
 Without it: 2246 kB, about 19 % understood.
 
 How the byte figures are made, and their limits:
 
 - A step's size is the sum of the exe bytes of the functions named for it, from
-  `findings/submap.json`. For script classes I counted handlers and left out editor and debug
+  `findings/submap.json`. For script classes the handlers are counted, leaving out editor and debug
   handlers by name (`FilterExposedProperties`, `*debug*`, `Annotate*`, `fill_debug_view`, `_root`).
-  For engine subsystems I took the whole subsystem from the map. Handlers shared between a class
+  For engine subsystems the whole subsystem from the map is taken. Handlers shared between a class
   and its base are counted once by hand; expect errors of 10 - 20 % per step.
-- "Understood" bytes are size times a fraction I assigned per step: 1.0 only where the code was read
+- "Understood" bytes are size times a fraction assigned per step: 1.0 only where the code was read
   and checked, 0.7 - 0.9 where it was read, 0.3 - 0.6 where it was skimmed and the mechanism is
   clear, 0.1 - 0.25 where only call lists and data are known, 0 - 0.05 for names only. The
   fractions are judgement, not measurement.
 - The engine figures count whole subsystems although one character does not exercise all of each
   (for example all 104 kB of the particle runtime). That makes the engine percentage look worse
-  than a strictly reachable set would; I did not attempt a reachability cut inside engine
-  subsystems.
+  than a strictly reachable set would; no reachability cut inside engine subsystems was attempted.
 - Shader bytecode has no exe bytes and is not in the percentages; shader steps count as steps only.
 
 ## 4. Method, evidence, limits
 
 - Data first: `Dominatrices.fragment`, `En4CharVisual.fragment`, the nine `Enemy04*` animation
-  fragments (local copies, parsed with the 1.4.0 toolkit), and on the PC (read-only) the level and
+  fragments (parsed with the toolkit), and (read-only) the level and
   game-essential fragments: `Enemies.fragment`, `MissionStructure.fragment`, `Bordello.fragment`,
   `Art.fragment`, `gameplay.fragment`, `GameEssentials.fragment`, `CharacterRootTemplate_Enemy`,
   `CharacterDef`, `CharacterVisual`, `combatorchestratordefaults`, `EffectDb`, `WeaponDB`,
-  `AllBodelloTypes`, one `SoundEvents/SE_EN4_*`. The PC shell was unreachable for the first part of
-  the session and came back later; nothing was written under `mnt/`.
+  `AllBodelloTypes`, one `SoundEvents/SE_EN4_*`.
 - Code: the repaired dump through `fn.py`, the registry `reg_dump.json`, sizes from `submap.json`,
   constants from exe bytes. Scratch tools in `work/domaudit/`: `rdx.py` (prints a handler with
   hashes resolved to command and property names, coroutine boilerplate folded, members named),
@@ -194,7 +197,7 @@ How the byte figures are made, and their limits:
   list** (only the ordered commands a handler sends were extracted), **data** (read from the game
   files), **inferred**, **not established**.
 - A verdict of "understood" cites the document. "Understood now" means the explanation is in this
-  report. "Partly" says what is and is not known. A handler that is merely named counts as not
+  audit. "Partly" says what is and is not known. A handler that is merely named counts as not
   understood.
 - Not done: no Ghidra run, no dynamic trace. Reachability of debug code is by name.
 
@@ -285,16 +288,16 @@ on every behaviour, `Debug*` handlers and `m_bdebug*` properties on `CharacterRo
 | a3 | Encounter scripting: trigger conditions and actions that activate, steer and re-phase her *Known: the action vocabulary and which command each action sends. Not read: condition evaluation, delay chains, zone enter/leave, force-move.* | TriggerActionCharacter.ActionExecute 0x85b858 (5.1 kB), RecursiveSetCharActivationState 0x85cd2d<br>TriggerActionCharacterForceMove, TriggerActionDelay, TriggerActionGeneral, TriggerActionBase, TriggerConditionCollision/Character/Logical/Toggle, TriggerCharacter | Enemies.fragment: 208+43 TriggerActionCharacter, 128 TriggerConditionCollision, 72 TriggerActionDelay; m_iactiontype histogram DEACTIVATE 68, FOLLOW_PIVOT 57, ACTIVATE 45, SET_AI_STATE 20, PLAY_SPECIFIC_ANIMATION 15, DAMAGE_MODE 11, SET_AI_DEF_PHASE 8, FREEZE_ACTIVE_RAGDOLLS 7<br>enum TRIGGER_ACTION_CATEGORY_CHARACTER (35 actions) | **partly understood** | data read; ActionExecute call list read; FRAGMENT_FORMAT.md (encounter content) | 142 fn, 32 kB |
 | a4 | Character definition lookup (type -> CharacterDef -> EnemyDef) and stats *Understood now: the def table is indexed by _icharactertype; health comes from the def. Not read: EnemyDef handlers that build the DRS tables and copy properties.* | CharacterRoot.initialize_external 0x6b3164<br>CharacterRoot.FindCharacterDef 0x6977dd<br>CharacterDef (reg 0x66ee9b), AiDef, EnemyDef (reg 0x731622; 27 handlers), GlobalAiParameters<br>AILib.RegisterAiDef 0x5988c5 | Dominatrices.fragment: CharacterDef (health 100, critical 44, finish icon 3.0 s, heading speeds 10/8 rad/s, damage modifier 1.5), two EnemyDef (BASE_DEF and PHASE_1)<br>GameEssentials.fragment: GlobalAiParameters (g_nfullspeed 1.0, g_nwalkspeed 0.5, m_nmeleemaxdistance 4.5) | **partly understood** | read from code (lookup) + data | 38 fn, 10 kB |
 | a5 | Variant choice (which of the nine bodies) *Least-used balancing, no randomness.* | CharacterDef.command_get_override_model 0x666d03<br>CharacterModelCollection.command_get_model 0x66ca15, command_decrease_model_ref 0x66ccad | CharacterRoot.m_iprioritymodel (0 on all 92 placements)<br>CharacterHeadModel.m_iprioritymodel (0 on all nine) | **understood now** | read from code | 5 fn, 917 B |
-| a6 | Head choice and attachment | CharacterHeadCtrl.command_activate 0x669496<br>CharacterModelCollection.command_get_model_by_id 0x66cbdd | m_iheadmodeltype per variant: 21,18,24,23,25,23,24,21,23<br>BordelloFace.fragment (head collection) | **understood** | read from code (earlier round); ENGINE_CONSTANTS.md 2026-10-04; findings/face.md | 2 fn, 2 kB |
+| a6 | Head choice and attachment | CharacterHeadCtrl.command_activate 0x669496<br>CharacterModelCollection.command_get_model_by_id 0x66cbdd | m_iheadmodeltype per variant: 21,18,24,23,25,23,24,21,23<br>BordelloFace.fragment (head collection) | **understood** | read from code; ENGINE_CONSTANTS.md; findings/face.md | 2 fn, 2 kB |
 | a7 | Weapon given at spawn *Known from data what she can carry and from InstantiateSubSystems that the weapon hangs on "Attach RHand". Not read: set_weapon, durability, break, pick-up/drop.* | CharacterRoot.command_set_weapon 0x694378<br>WeaponBase (reg 0x8ba89a), WeaponLib, WeaponSpawner | CharacterDef.m_emodelcollbash1h -> WeaponDB DominitrixWeapons_1H: PoliceBaton (durability loss 0.16/hit, priority 1), Paddle (0.2/hit, priority 2)<br>CharacterRoot._iweapontype: -1 on 68 placements, 0 (BASH_1H) on 24 | **partly understood** | data read; code not read; ENGINE_CONSTANTS.md (weapon attachment) | 20 fn, 10 kB |
 | a8 | Block file -> assets (model, texture, animation, sound), streaming *Understood: container, directory, asset headers, model and texture payloads. Not read: AssetStreamManager (what is resident vs streamed, the .stream mip policy), block memory setup, asset reference counting.* | LoadBlock state machine 0x4a36d8, start 0x4ae0fd, header 0x49dd0e<br>AssetManager 0x550eb5, AssetStreamManager 0x4e0e5d, AsyncFileBuffer 0x43fb3f | *.block_h_z / *.block_s_z, "loadblock fragment" trailer<br>*.model + .model.stream, *.bmp + .stream | **partly understood** | file side read and validated; runtime side not read; KAPOW_NAZ_FORMAT.md, re/formats.md | 1300 fn, 188 kB |
 | a9 | Level activation script *Bordello has no StreamBlock nodes: one load block per level.* | MasterSceneCtrl.StateActivateScene 0x7a63b2, StateWaitForLoad 0x78f8dc<br>LevelSceneCtrl (reg 0x7784b9)<br>StreamBlockManager.command_get_streamblock_for_loading 0x841166 | Bordello.fragment: SceneSettings, LevelSceneCtrl, FragmentNodes Art / gameplay / Sound, CharacterDB folder (AllBodelloTypes, AnimationClassEnemy04, AnimationClassEnemy04Face) | **partly understood** | call order skimmed | 66 fn, 23 kB |
-| a10 | Fragment instantiation: bytes -> entity tree with typed properties *The file format is fully parsed. How FragmentNode expands an assetName, resolves cross-fragment references ("xref") and constructs script objects is not read. New in this pass: a script object's member block is its property list in registration order, 4 bytes per member, 12 for vectors, 16 for quaternions (checked on five classes).* | Fragment asset 0x542c1a<br>Entity / property / message system (script.database)<br>scene.core (Node, PivotNode, Folder, FragmentNode)<br>ScriptClass_FinalizeLayout 0x47ed4b | *.fragment | **partly understood** | file format read; instancing code not read; FRAGMENT_FORMAT.md; findings/submap.md 3.4 | 1234 fn, 149 kB |
+| a10 | Fragment instantiation: bytes -> entity tree with typed properties *The file format is fully parsed. How FragmentNode expands an assetName, resolves cross-fragment references ("xref") and constructs script objects is not read. A script object's member block is its property list in registration order, 4 bytes per member, 12 for vectors, 16 for quaternions (checked on five classes).* | Fragment asset 0x542c1a<br>Entity / property / message system (script.database)<br>scene.core (Node, PivotNode, Folder, FragmentNode)<br>ScriptClass_FinalizeLayout 0x47ed4b | *.fragment | **partly understood** | file format read; instancing code not read; FRAGMENT_FORMAT.md; findings/submap.md 3.4 | 1234 fn, 149 kB |
 | a11 | Building one Dominatrix: CharacterRoot.InstantiateSubSystems | CharacterRoot.InstantiateSubSystems 0x67884e<br>ProjectLib.InitializeHierarchy<br>AILib.CreateRootBehavior 0x5974f0<br>BehaviorHandler.command_add_root_behavior 0x6184f1<br>CharacterVisual.command_set_override_model 0x69c8e3, command_activate_model 0x69e354<br>characterlib.AddToUpdateList 0x66afc4 | CharacterRootTemplate_Enemy.fragment (via CharacterDef.m_echaracterfragment)<br>En4CharVisual.fragment (via CharacterDef.m_emodelfragment) | **understood now** | read from code | 8 fn, 6 kB |
 | a12 | Activation and the 16-enemy budget *Level 2 builds the sub-systems, levels 0 and 1 delete them: only the 16 nearest activated enemies exist as full characters.* | CharacterRoot.command_character_activate 0x68f1e1<br>CharacterLodCtrl.command_register_enemy 0x66b6b8, StateActive 0x66bb68<br>CharacterRoot.command_set_lod_level 0x694e04, SetLODLevel 0x69715b, EnableSubSystems 0x696fac, DisableSubSystems 0x6763e7 | GameEssentials.fragment: CharacterLodCtrl _imaxenemycount 16, m_ncharacterenabledist 40 | **understood now** | read from code (StateActive skimmed) | 19 fn, 6 kB |
-| a13 | CharacterSpawner (respawning folder) *Not part of her life in the shipped level; read because the brief names it.* | CharacterSpawner.StateActive 0x697ddc, EraseBody 0x679694 | not present in Bordello | **understood now** | read from code | 14 fn, 4 kB |
+| a13 | CharacterSpawner (respawning folder) *Not part of her life in the shipped level.* | CharacterSpawner.StateActive 0x697ddc, EraseBody 0x679694 | not present in Bordello | **understood now** | read from code | 14 fn, 4 kB |
 
-Read in this pass:
+Read in the audit:
 
 **Variant choice (a5, read from code).** `CharacterDef.command_get_override_model(priority)`
 0x666d03 forwards to the override collection's `command_get_model` 0x66ca15. If `priority` is not 0
@@ -358,9 +361,9 @@ in the frustum, and unconditionally beyond that count plus five. Bordello contai
 | b4 | CharacterRoot.StateActive: order of work inside one character | CharacterRoot.StateActive 0x6b367a (31.4 kB) | - | **partly understood** | call order read; placement block read earlier; heading math not read; re/placement.md | 1 fn, 31 kB |
 | b5 | CharacterRootLogic per-frame state handling | CharacterRootLogic.StateCharacterRootLogic 0x68abab, command_do_special_state_handling 0x687bc5 | - | **not understood** | names only | 2 fn, 2 kB |
 | b6 | Native node update phases and worker jobs (skin, physics, particles, occlusion, sound obstruction) *Which node classes sit in the first and second list, and when the skin job runs relative to script, decide the frame of lag between logic and picture.* | SceneNode node update 0x495fec (two node lists, vtable +0x44)<br>core.threading scheduler 0x444813 | - | **not understood** | structure seen; membership and ordering not established | 217 fn, 31 kB |
-| b7 | Physics step (accumulator, substeps) | 0x4f4ddc | - | **understood** | read from code (earlier round); ENGINE_CONSTANTS.md 2026-10-03; re/physx_d6.md | 1 fn, 600 B |
+| b7 | Physics step (accumulator, substeps) | 0x4f4ddc | - | **understood** | read from code; ENGINE_CONSTANTS.md; re/physx_d6.md | 1 fn, 600 B |
 
-Read in this pass (b1 - b4):
+Read in the audit (b1 - b4):
 
 - `SceneNode::Update` 0x496294: frame time from the millisecond clock, clamped to 0.1 s; game time
   step = that times the scene's time multiplier (`SceneNode+0x2dc`, the value
@@ -437,8 +440,10 @@ stays unreachable for another 10 s is killed (`command_uberkill`, then `command_
 100000)*; constants 2.0 at 0xc3cc78, 10.0 at 0x9e5c60, 100000 at 0x9eba80.
 
 **Deterministic Reaction System (c3, read from code; data decoded).** `Enemy.command_react_to_attack`
-0x721958 is called when an attack is about to land on her (attacker's `PRE_IMPACT` ->
-`command_hit_soon` -> `BehaviorHandler.command_when_attacked`). The Twilight Lady branches to her own
+0x721958 is called when the attacker enters an attack state
+(`CombatOrchestrator.command_attack_animation_stated` 0x6e6495; wp3 "Corrections" 1, wp4 §9). The
+chain attacker's `PRE_IMPACT` -> `command_hit_soon` -> `BehaviorHandler.command_when_attacked` is
+the separate face-the-attacker pause, not the reaction table. The Twilight Lady branches to her own
 routine. For everyone else: if more than `m_nreactiontoattackdecaytime` (4.0 s) passed since the last
 entry, the history is cleared. If she is not stunned or prone, the `ANIMATION_TYPE` of the attacker's
 current state (4 `LIGHTATTACK`, 5 `HEAVYATTACK` ...) is written into a 9-entry ring (`_ihithistory`).
@@ -460,8 +465,8 @@ So the third identical attack in a row is dodged, and if a fourth attack follows
 ones she blocks it and counters, and the count starts again. The gate in front of the table (read): she force-locks her
 target onto the attacker (`command_force_lock_target`, self slot 0x58) and reacts only if that
 succeeded, the attacker is not doing an unblockable attack (`m_tdoingunblockableattack`), and
-`Perception.command_tactical_query(attacker, 0x400)` returns 0 (meaning of flag 0x400 not
-established). No random number is drawn in this handler; where `m_nprobofreactatt` (0.62) and
+`Perception.command_tactical_query(attacker, 0x400)` returns 0 (flag 0x400 = `PLACEMENT_REAR`,
+0x200 = `PLACEMENT_FRONT`; wp3 "Corrections" 2, wp4 §9). No random number is drawn in this handler; where `m_nprobofreactatt` (0.62) and
 `m_nprobofdodge` (1.0) are used was not found.
 
 **Attack choice (c4, `AttackEnemy.command_may_attack` 0x600246, read).** When `AILib.MayAttack`
@@ -494,7 +499,7 @@ orchestrator presets, `SET_INCOMING_DAMAGE_FACTOR`, `SET_MIN_HEALTH`). An enum
 |---|---|---|---|---|---|---|
 | d1 | Attack start, attack queue, combo timing | CharacterRootLogic.command_start_animation_state 0x688961 (6.7 kB), InitializeNextAttack 0x68bf6f, FireAttackBasedOnAttackID 0x68d870, ExecuteAttack 0x68b351, AddAttackToCombo 0x68bca8, command_update_combo_timing 0x68810a, StartUpSpecialAction 0x68cec1<br>CharacterRoot.command_attack_fast / _slow / command_perform_combo, SendAttackDistToAnimationCtrl 0x69640d | CharacterDef m_nheadattackdistance 0.04, m_nbodyattackdistance 0.1 | **not understood** | names only | 16 fn, 24 kB |
 | d2 | Animation events that make a hit (PRE_IMPACT, IMPACT, IMPACT_EFFECTS, BRANCH ...) | CharacterRootLogic.command_animation_event_received 0x6a525e (37.7 kB)<br>sender CheckPlayPosEvents 0x5b51f3 | AnimationEventWM nodes in Enemy04AttackFragment (277 events) | **understood** | read from code (ten cases skimmed); re/events.md | 1 fn, 38 kB |
-| d3 | Building the damage record at impact *Known: inputs and order (pose from the state, turned by direction, size and height; electrified armour; block branch; counter branch; weapon durability). Not read: the exact damage formula and the three pose manipulators.* | CharacterRootLogic.SetCloseCombatDamageToTarget 0x6ae57f (5.1 kB)<br>ProjectAnimationLib.DirectionManipulateDamage 0x802ae8, SizeManipulateDamagePose, HeightManipulateDamagePose<br>CharacterRoot.command_get_damage_modifier 0x6931a4 | AnimationStateWM.m_idamagepose; CharacterComboDatabase default damages (fast 5 / heavy 10 unarmed, 12 / 20 with 1H weapon); damage modifier 1.5 | **partly understood** | skimmed; ENGINE_CONSTANTS.md 2026-10-04 (inputs of the face) | 4 fn, 6 kB |
+| d3 | Building the damage record at impact *Known: inputs and order (pose from the state, turned by direction, size and height; electrified armour; block branch; counter branch; weapon durability). Not read: the exact damage formula and the three pose manipulators.* | CharacterRootLogic.SetCloseCombatDamageToTarget 0x6ae57f (5.1 kB)<br>ProjectAnimationLib.DirectionManipulateDamage 0x802ae8, SizeManipulateDamagePose, HeightManipulateDamagePose<br>CharacterRoot.command_get_damage_modifier 0x6931a4 | AnimationStateWM.m_idamagepose; CharacterComboDatabase default damages (fast 5 / heavy 10 unarmed, 12 / 20 with 1H weapon); damage modifier 1.5 | **partly understood** | skimmed; ENGINE_CONSTANTS.md (inputs of the face) | 4 fn, 6 kB |
 | d4 | Applying a hit to her | CharacterRoot.command_give_damage 0x691b10 (4.4 kB)<br>CharacterRoot.command_hit_soon 0x6903ea<br>CharacterRoot.command_set_stun_time 0x691389, command_set_push_back_data 0x691325, command_do_recoil 0x6902c0 | - | **understood now** | read from code | 5 fn, 7 kB |
 | d5 | Health, critical state and the finisher prompt | CharacterRoot.DecreaseHealth 0x695632 (3.0 kB)<br>CharacterRoot.IsAIPartner 0x678254<br>CharacterRoot.UpdateHealth 0x678288 (1.5 kB, not read: regeneration, end of the finisher window) | CharacterDef m_ncriticalhealth 44, m_nfinishicontime 3.0, m_nmaxhealth 100, regen 0<br>template sprites FastSprite / HeavySprite / ThrowSprite / DodgeBlockSprite + SpriteWobbler | **understood now** | DecreaseHealth read; UpdateHealth not read | 3 fn, 5 kB |
 | d6 | Her block, dodge and counter moves; the player's counter window against her *When she decides to block or dodge is understood (c3); what the move then does (windows, block breaker, counter eligibility) is not.* | CharacterRootLogic.command_block 0x686e56, command_dodge 0x686a17, TestForCounterAttack 0x68d36a, command_force_counter_attack 0x6867b7<br>CharacterRoot.command_give_block_damage 0x692c3f, command_block_timed 0x690c0e, command_delayed_counter_attack 0x68fe34 | EnemyDef m_nprobdodgethrow 0.4 / 0.8 | **not understood** | call lists only | 8 fn, 9 kB |
@@ -502,8 +507,8 @@ orchestrator presets, `SET_INCOMING_DAMAGE_FACTOR`, `SET_MIN_HEALTH`). An enum
 | d8 | Stun, knockdown, prone, getting up | dynamic_getup_logic (reg 0x72abb8): command_start_getup 0x728e00, solveStaticObject 0x71b44c, VerifyCharacterLocation 0x7156e4<br>CharacterVisual.VerifyCharacterLocation 0x6a01d4, solveStaticObject 0x6a10cb, staticDynamicOverlap 0x6a0a60<br>Enemy.command_got_up 0x722e07 | Enemy04RagdollGroup.fragment (prone states, get-up clips) | **not understood** | names only | 14 fn, 12 kB |
 | d9 | Death, corpse, clean-up | CharacterRoot.StateDead 0x6bb12a (4.6 kB)<br>CharacterRoot.deinitialize 0x69476d, command_delete 0x69498f, DeleteSubSystems 0x696e73<br>CullingCtrl.command_get_culling_visibility_group 0x70d69a | - | **understood now** | skimmed | 5 fn, 6 kB |
 | d10 | Ragdoll hand-over and recovery (animation <-> physics, powered ragdoll) *Known: what a state asks for (muscle power per joint, blend-in time, which bones are physics-driven). Not read: how the ragdoll update and the muscle-orientation handlers apply it, the transfer in both directions, impact thresholds.* | CharacterVisual.command_update_ragdoll 0x6bc3e2 (10.1 kB), StateRagdollDriven 0x69ed7c, command_activate_ragdoll 0x69eac6, ModelCollisionContactAdded 0x69d00a, command_start_transfer_to_animation_control 0x6b09d9<br>AnimationCtrlWM.CharacterTransferToRagdollControl 0x5b16ed (3.9 kB), MuscleOrientationRagdoll 0x5ba03b, MuscleOrientationAnim 0x5acd3c, CharacterRagdollAnimTransferControl 0x5b9c8f<br>BehaviorAnimation.StateActive 0x615ed3, LookupMusclePowerScale 0x614dd4<br>CharacterRoot.command_give_ragdoll_damage_increment 0x6914f2<br>characterlib ragdoll helpers 0x6650bf, 0x66b43d, 0x664e1a | CharacterVisualDef: ragdoll impact triggers 6000 / 2000 / 500, decrease 2500/s<br>BehaviorAnimation(WM) nodes on states: m_ndefaultmusclepower, m_nextramusclepower, m_nmuscleblendintime, m_iselectedbones, 16 joint scales | **partly understood** | BehaviorAnimation read; the rest call lists | 22 fn, 32 kB |
-| d11 | Ragdoll construction (bodies, joints, limits, masses) *The per-joint limits and masses are in code, not data: a ragdoll export needs this function read.* | CharacterRagdollSetup: CreateJointInfo 0x6846e8 (7.6 kB), JointLimits 0x683d12, CreateBoneInfo 0x682c60, BoneMasses 0x683545<br>native ArticulatedBody (articulatedbody.cpp) | CharacterVisual.fragment: CharacterRagdollSetup m_ntotalmass 85, linear damping 0.5, angular 2.5<br>Female_Skeleton.model collision volumes (32) | **not understood** | names only; re/skeleton_blobs.md (the volumes) | 7 fn, 15 kB |
-| d12 | Paired moves on her: counters, finishers, throws, disarm *FinishOrStompEnemy 0x677c93 (who is allowed to start a finisher) not read.* | AnimationCtrlWM goto_slave_mode 0x5b32a2, UpdatePagePlayPos 0x5b56a9<br>CharacterRoot.command_goto_slave_mode 0x693b2e, command_leave_slave_mode 0x693a09, command_request_me_as_dual_animation_partner 0x693d5f | Master-of table; NTO_/RSH_ ..._EN4_* clips | **understood** | read from code (earlier rounds); re/placement.md; ANIMATION_META.md | 6 fn, 2 kB |
+| d11 | Ragdoll construction (bodies, joints, limits, masses) *The rig (bodies, joints, limits, masses) is data in the model file's articulated-body section; the code tables of `CharacterRagdollSetup` are an editor tool's authoring defaults (wp2 §0.1, `wp2_ragdoll_rigs.json`).* | CharacterRagdollSetup: CreateJointInfo 0x6846e8 (7.6 kB), JointLimits 0x683d12, CreateBoneInfo 0x682c60, BoneMasses 0x683545<br>native ArticulatedBody (articulatedbody.cpp) | CharacterVisual.fragment: CharacterRagdollSetup m_ntotalmass 85, linear damping 0.5, angular 2.5<br>Female_Skeleton.model collision volumes (32) | **not understood** | names only; re/skeleton_blobs.md (the volumes) | 7 fn, 15 kB |
+| d12 | Paired moves on her: counters, finishers, throws, disarm *FinishOrStompEnemy 0x677c93 (who is allowed to start a finisher) not read.* | AnimationCtrlWM goto_slave_mode 0x5b32a2, UpdatePagePlayPos 0x5b56a9<br>CharacterRoot.command_goto_slave_mode 0x693b2e, command_leave_slave_mode 0x693a09, command_request_me_as_dual_animation_partner 0x693d5f | Master-of table; NTO_/RSH_ ..._EN4_* clips | **understood** | read from code; re/placement.md; ANIMATION_META.md | 6 fn, 2 kB |
 | d13 | Sweep (area) attacks that can hit her *She does not own one; she is a potential target of the players' and the boss's area attacks.* | CharacterSweepAttack.StateActivePlayPos 0x698fe1 (5.5 kB), DoEnemyCheckAgainstTravelLine 0x69a57d, command_begin_sweep_attack 0x698a43<br>CharacterRootLogic.command_sweep_target_detected 0x6879ed | no CharacterSweepAttack node in the Enemy04 fragments | **partly understood** | hit test read; the stepping loop not read | 11 fn, 9 kB |
 | d14 | Remaining small CharacterRoot commands (queries, rage / electrify bookkeeping, movement setters, teleport, slave helpers) | CharacterRoot: ~150 handlers under 700 bytes | - | **partly understood** | about a third read in passing | 150 fn, 24 kB |
 
@@ -580,7 +585,7 @@ direction. All other melee hits are not geometric: `PRE_IMPACT` checks the locke
 | e1 | Character controller: script side *StateCharge and StateGrapplingHook (11.8 kB) are player-only and left out of the size.* | CharacterPhysics (reg 0x6beb83): command_attempt_move 0x67d52c -> native CharacterController::Move; DccUpdate 0x680654, DccJoint 0x6a3d71, command_detect_wall 0x67b508, command_goto_animation_mode 0x6a32ce / 0x67bd36, command_absolute_update 0x67f7b0, StateOnGround 0x67d2a5, StateRagdoll 0x68012e, FeedBack 0x681e7b, CollisionContactAdded 0x67c845, command_activate_collision 0x67cc00 | template: capsule width 0.8, height 2.0, m_ninitsteplimit 0.3, RigidBody mass 100, WorldJoint D6 (orient motor 5000) | **partly understood** | call lists; goto_animation_mode read earlier for pairs; re/placement.md (absolute mode flag) | 55 fn, 41 kB |
 | e2 | PhysX wrapper: controller, actors, joints, articulated body, queries, contact reports *The figure includes database code linked into the same block (submap section 2).* | kernel/collision 0x4f4ddc-0x524f47 (physx_charactercontroller.cpp, articulatedbody.cpp, physx_trigger.cpp ...)<br>NxCharacter.dll, PhysXCore.dll | - | **not understood** | not read (except the jiggle joint path and the step); re/jiggle.md; re/physx_d6.md | 1192 fn, 163 kB |
 | e3 | Expand volume and follow pivot (soft body pushing others away) | CharacterExpandVolume.updateJoint 0x66d0ec, Main 0x6680f4<br>CharacterVisual.command_init_expand_volume 0x69f924 | template: ExpandVolume capsule 0.08 x 0.2, FollowJoint (linear limit spring 200, damping 25), FollowPivot box | **not understood** | names only | 6 fn, 2 kB |
-| e4 | Auto-align and absolute mode in pairs *Bytes counted under b4.* | CharacterRoot.StateActive placement block | - | **understood** | read from code (earlier round); re/placement.md | - |
+| e4 | Auto-align and absolute mode in pairs *Bytes counted under b4.* | CharacterRoot.StateActive placement block | - | **understood** | read from code; re/placement.md | - |
 | e5 | Collision volumes on the skeleton | Node::Deserialize 0x545927 | Female_Skeleton.model: 32 volumes | **understood** | read from code, validated; re/skeleton_blobs.md | 2 fn, 3 kB |
 | e6 | Jiggle (breast, belly bones) *Hair is open in the docs (no capture).* | CharacterAddonCtrl 0x6574cd, 0x648858, 0x6563a0<br>PhysXCore.dll D6 soft limit | En4CharVisual.fragment AddOnCtrl | **understood** | read from code, validated on captures; re/jiggle.md; re/physx_d6.md | 6 fn, 9 kB |
 | e7 | Cloth *Inferred from the fragment that the cloth path is idle for her.* | CharacterRoot.initializeCloth 0x678021, setClothPhysicsBlendFactor 0x6780e3<br>physx_cloth.cpp, clothupdatejob.cpp | En4CharVisual.fragment has no cloth node | **partly understood** | data: she has none; code not read | 2 fn, 310 B |
@@ -591,7 +596,7 @@ direction. All other melee hits are not geometric: `PRE_IMPACT` checks the locke
 |---|---|---|---|---|---|---|
 | f1 | State machine, pages, transitions, sync, criteria, overlay pages *Not covered by the docs: PostUpdate 0x5cab6b (4.2 kB), command_model_changed 0x5b33d4, the ragdoll transfer handlers (counted in d10).* | AnimationCtrl / AnimationCtrlWM, AnimationState(WM), AnimationStateGroup(WM), AnimationTransition(WM), AnimationCriteria(WM), AnimationBlend(WM), AnimationSlot(WM), AnimationLib | AnimationClassEnemy04.fragment and the eight Enemy04* fragments: 270 states, 411 transitions, 668 events | **understood** | read from code, interpreter validated on captures; ENGINE_CONSTANTS.md; re/pages.md; re/sync.md; ANIMATION_META.md | 330 fn, 120 kB |
 | f2 | Native animation runtime: clip decode, layers, slots, blend sources, pose, bone controllers *Open in the docs: the pose term on type 1 / 3 tracks, AnimLayer / AnimBlendSource internals.* | kernel/animation 0x591225-0x596d7b | Animation/EN4/**.animation, FACE clips | **partly understood** | behaviour reproduced by the baker and checked against captures; internals not read; ENGINE_CONSTANTS.md; findings/submap.md 3.4 | 237 fn, 28 kB |
-| f3 | Face class and its inputs | CharacterHeadCtrl (reg 0x671099)<br>CharacterVisual.command_update_animation 0x69b988 | AnimationClassEnemy04Face.fragment | **understood** | read from code; findings/face.md; ENGINE_CONSTANTS.md 2026-10-04 | 25 fn, 11 kB |
+| f3 | Face class and its inputs | CharacterHeadCtrl (reg 0x671099)<br>CharacterVisual.command_update_animation 0x69b988 | AnimationClassEnemy04Face.fragment | **understood** | read from code; findings/face.md; ENGINE_CONSTANTS.md | 25 fn, 11 kB |
 | f4 | Head look-at *Bytes counted under f3.* | CharacterHeadCtrl.UpdateHeading 0x66a5ae, UpdatePitch 0x66ab44, ApplySteeringForce 0x6646c3 | HeadCtrl: _nmaxheading 1.3, pitch disabled, mass 0.05, max force 400, max speed 12 | **understood** | read from code; findings/face.md 1.5 | - |
 | f5 | Per-frame animation inputs from the character (values, enums, attack flag, LOD of the update) | CharacterVisual.command_update_animation 0x69b988 (3.9 kB), command_update_animation_fast 0x69b87d, UpdateAnimPoseAndCloth 0x6b015d<br>AnimationCtrlWM.IsShownOrClose 0x5ab2ac<br>CharacterRoot.UpdateAnimationValues 0x69620b | - | **partly understood** | face inputs read earlier; the rest call list; findings/face.md | 5 fn, 8 kB |
 | f6 | IK / foot placement / additive layers *Feet are not corrected; footsteps are events only.* | - | strings and class list searched: no IK class, no foot-plant string; BoneController only attaches | **understood now** | inferred from absence | - |
@@ -621,9 +626,9 @@ correction in the executable.
 | g13 | Target highlight *A cloned texture sheet per render instance, not an outline pass.* | FxHighlightCtrl: command_highlight_def 0x73d682, AssignOverrideSheets 0x73da49, BlendOverrideSheets 0x73613c, StateMain 0x73d0e5 | GameEssentials.fragment: two FxHighlightDef "Highlight_CharacterTarget" (ids 1, 2), blend in 0.001 s, out 0.2 s, self-illumination 0, bloom 0 | **partly understood** | AssignOverrideSheets read; blend not read | 10 fn, 4 kB |
 | g14 | Decals and blood on characters; fade on spawn / death *Nothing found that paints on a skinned mesh; not proven absent.* | DecalManager (decalmanager.cpp), GFXDecalEffectType | opacity 1.0 on the character nodes | **partly understood** | inferred from the API (world-space SetDecal) and from StateDead (no fade) | 176 fn, 38 kB |
 | g15 | Graphics device layer | Gfx / GfxDX9 0x42dd56-0x43509b, 0x456c6a-0x45c3d1; shader archive reader 0x43398e | derived_pc/precompiled_shaders/shader.archive | **not understood** | archive format read; device layer not; findings/vcolor.md 1 | 520 fn, 93 kB |
-| g16 | Textures and texture sheets on her parts *Bytes counted under a8.* | 0x5382aa, sheet lookup | textureSheetsDescription, *.bmp | **understood** | read from code, validated; ENGINE_CONSTANTS.md 2026-10-04; KAPOW_NAZ_FORMAT.md | - |
+| g16 | Textures and texture sheets on her parts *Bytes counted under a8.* | 0x5382aa, sheet lookup | textureSheetsDescription, *.bmp | **understood** | read from code, validated; ENGINE_CONSTANTS.md; KAPOW_NAZ_FORMAT.md | - |
 
-Read in this pass from the shader bytecode (`work/vcolor/dis`, the 243 shaders of the archive):
+Read in the audit from the shader bytecode (`work/vcolor/dis`, the 243 shaders of the archive):
 
 - **Skinning (g4).** `DepthVS[SKIN]`: bone indices = `COLOR1 x 256`, truncated, x 3; position =
   sum of four `$skinning` rows (c40 + index) weighted by `TEXCOORD3`. `$skinning` spans 210
@@ -675,7 +680,7 @@ Read in this pass from the shader bytecode (`work/vcolor/dis`, the 243 shaders o
 | h9 | Sound scene nodes (slots, groups, system node, stream player) *3D positioning lives here: X3DAudioCalculate is not imported, so panning and distance attenuation are the engine's own.* | kernel/scenegraph sound nodes 0x4d6524-0x4db801 | - | **not understood** | not read; findings/submap.md | 421 fn, 49 kB |
 | h10 | Low-level audio: XAudio2 voices, four custom effects, media streams, obstruction job | libs/adapter/sound 0x448336-0x453d31, 0x401000-0x4058be | *.wav (PCM / Vorbis payloads) | **not understood** | API surface listed; code not read; findings/submap.md 6; WATCHMEN_EXTRACTION_MASTER.md (containers) | 555 fn, 83 kB |
 
-Read in this pass: `SoundDef.ChooseChild` 0x82b53d. A `SoundDef` with children picks one by
+Read in the audit: `SoundDef.ChooseChild` 0x82b53d. A `SoundDef` with children picks one by
 `_iselectionmethod`: 0 = random start, then the first child that is not quarantined; 1 (the default,
 and the value on her voice lines) = the same but never the child played last; 2 = round robin.
 Quarantine times, delays, random pitch and volume ranges and 3D ranges are properties of the
@@ -698,10 +703,11 @@ read.
 | i9 | Sprites and text (engine) | Sprite, TextBox, TextSlot, Font, TextRes | art/Fonts/*.font, Localize/ | **not understood** | formats read; nodes not; FORMATS_MISC.md (.font) | 251 fn, 36 kB |
 | i10 | Slow motion on heavy hits and kills | CharacterRoot.command_give_damage (WorldLib.SetTimeMultiplier), CharacterRoot.StateActive (restore)<br>WorldLib.SetTimeMultiplier | CharacterRoot._nslomotimemultiplier, _nslomotime | **understood now** | read from code | 1 fn, 400 B |
 
-Read in this pass: `CharacterEffectDef.command_play_damage_effect` 0x6673d0. The definition holds
+Read in the audit: `CharacterEffectDef.command_play_damage_effect` 0x6673d0. The definition holds
 lists indexed by "upper or not" (`ProjectAnimationLib.IsUpperDamagePose`: head versus body). Choice:
 a rage hit takes the uber list; a killing hit the kill list; a weapon hit the weapon list by the
-weapon's effect type (wood, steel; a sharp weapon also fires its own effect); otherwise the fast list
+weapon's effect type (wood, steel; weapon type 2 SHARP only selects the sharp-weapon effect from the
+list — the extra effect belongs to type 3 TASER and is effect id 1, wp7 §1); otherwise the fast list
 for the light poses (1, 2, 5, 6, 23, 24) and the heavy list for the rest. Knockdown poses (17, 18,
 27, 28) add the knockdown effect, stun poses (19 - 22) the stun effect. Each effect is an
 `EffectBase` with children: `EffectParticle` (a `ParticleDb` entry and a placement), `EffectSound` (a
@@ -717,7 +723,7 @@ for the light poses (1, 2, 5, 6, 23, 24) and the heavy list for the rest. Knockd
 | j4 | Co-op target sharing *Bytes counted under c7 / c4.* | CombatOrchestrator.command_choose_target, ShouldSwitchTarget<br>AttackEnemy.command_may_attack (voice line per target) | - | **understood now** | read from code | - |
 | j5 | The AI partner fighting her (single-player) | Partner, CombatPartner, CombatHelpPartner, CrowdControlPartner, AttackKillTargetPartner, FollowPartner, PartnerDef | Bordello/Gameplay/PartnerAI.fragment | **not understood** | not read | 183 fn, 75 kB |
 
-Read in this pass: three `AchievementPart2Ctrl` handlers. A kill by the signed-in player counts
+Read in the audit: three `AchievementPart2Ctrl` handlers. A kill by the signed-in player counts
 toward Focus Fire (10 defeated while staying on one enemy at a time: hitting a different enemy
 resets the count, 0x59a23d) and, when the victim was knocked prone by that player less than 10 s
 before, toward Tag 'Em (10). The Gentleman achievement is specific to her: hitting a character of
@@ -751,7 +757,7 @@ type 33 (Dominatrix) or 35 (Twilight Lady) before a lady has hit the player in t
 ## 8. Not established (collected)
 
 - Whether the global difficulty preference changes anything for enemies.
-- The gate in front of the reaction table; the roll for combos; the orchestrator's grant rule.
+- The roll for combos; the orchestrator's grant rule.
 - Everything marked "partly" or "not understood" in the tables, in particular: the render pipe, the
   ragdoll rig, the character controller, block / dodge / counter windows, the damage formula, the
   sub-behaviours' geometry, the Kynapse services in use, the speak queue's priorities, 3D sound
@@ -762,10 +768,10 @@ type 33 (Dominatrix) or 35 (Twilight Lady) before a lady has hit the player in t
 
 ## 9. Files
 
-- `findings/dominatrix_audit.md` (this report)
+- `findings/dominatrix_audit.md` (this audit)
 - `findings/dominatrix_audit.json` (`meta`, `coverage`, `work_packages`, `steps`: id, area, step,
   code, data, verdict, evidence, doc_ref, size_estimate_functions, size_estimate_bytes,
   understood_fraction_estimate, code_kind, notes)
 - `work/domaudit/` scratch: `steps.py` (the source of both files), `gen.py`, `genmd.py`, `body.md`,
   `rdx.py`, `calls.py`, `cls.py`, `sz.py`, `dominatrices_fragment_tk150.txt` (her definition as the
-  1.4.0 parser reads it), `en4vis.txt`, `en_eval.txt`, `sa.txt`.
+  toolkit parser reads it), `en4vis.txt`, `en_eval.txt`, `sa.txt`.

@@ -198,9 +198,12 @@ def _model_headers():
     joints = [(0, 0, 0, 0)] * 8
     for order in "<>":
         yield order, tv.skinned_model(order, joints)[0]
-        yield order, tv.skinned_model(
-            order, joints, nsub=3, materials=["a", "b", "c"], piece_mats=[2, 0, 1]
-        )[0]
+        yield (
+            order,
+            tv.skinned_model(
+                order, joints, nsub=3, materials=["a", "b", "c"], piece_mats=[2, 0, 1]
+            )[0],
+        )
 
 
 def test_submesh_materials_equals_the_1_4_0_scan():
@@ -361,7 +364,9 @@ def test_the_rescue_gives_up_after_its_budget(monkeypatch):
     t0 = time.perf_counter()
     assert we._rescue_texture_plan(b"x" * 200, stream, log=logs.append, max_plans=5) is None
     assert time.perf_counter() - t0 < 30.0  # a hang only; the budget is checked below
-    assert logs == ["      ! texture plan rescue gave up after 5 candidate plans (RESCUE_MAX_PLANS)"]
+    assert logs == [
+        "      ! texture plan rescue gave up after 5 candidate plans (RESCUE_MAX_PLANS)"
+    ]
     assert we.is_warning_line(logs[0])
     # within the budget: the plan of the 1.4.0 search
     plan = we._rescue_texture_plan(b"x" * 200, stream, log=logs.append)
@@ -382,4 +387,6 @@ def test_the_rescue_picks_the_1_4_0_plan(monkeypatch, seed):
     size = sum(we._chain_bytes(e, w, h, m) for (e, w, h), m in zip(recs, ms))
     stream = bytes(rng.getrandbits(8) for _ in range(size))
     monkeypatch.setattr(we, "_coherence", lambda img: float(img.shape[0] * 7 % 5 + img.shape[1]))
-    assert we._rescue_texture_plan(b"x" * 200, stream) == old_rescue_texture_plan(b"x" * 200, stream)
+    assert we._rescue_texture_plan(b"x" * 200, stream) == old_rescue_texture_plan(
+        b"x" * 200, stream
+    )

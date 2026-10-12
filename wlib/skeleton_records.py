@@ -1,4 +1,4 @@
-"""File-only skeleton record parser (v14-era knowledge) + node collision volumes.
+"""File-only skeleton record parser + node collision volumes.
 
 Each bone record: [u32 namelen][name\0][body]; body starts [u32 f1][u32 parent]
 then the mesh-binding counts, one flag byte and the node's COLLISION VOLUMES
@@ -31,20 +31,20 @@ then the mesh-binding counts, one flag byte and the node's COLLISION VOLUMES
       type 6 sphere  : [f32 radius]                    (reader 0x521c3f)
       type 7 capsule : [f32 diameter][f32 height along local Y]  (0x52213d)
 
-These are what earlier notes called "EmbeddedJointNode joints, types 4/5/6/7";
-they are collision shapes, not joints.  `entries` (below) is the older
-byte-granular scan for [pos][quat] pairs and is kept unchanged: it finds the
-volume placements plus the NEXT node's rest transform at the body tail.
+The volumes (types 4/5/6/7) are collision shapes, not joints.  `entries` (below)
+is the byte-granular scan for [pos][quat] pairs: it finds the volume placements
+plus the NEXT node's rest transform at the body tail.
 Engine quats = conjugate of naive xyzw convention.
 """
 
-import struct, numpy as np
+import struct
+import numpy as np
 
 VOLUME_TYPES = {2: "concave_mesh", 4: "convex_mesh", 5: "box", 6: "sphere", 7: "capsule"}
 _MAX_VOLUMES = 4096  # sanity bound on a count field, not an engine limit
 
 
-from wutil import read_bytes as _read_bytes  # one copy, in wlib/wutil.py
+from wutil import read_bytes as _read_bytes  # one copy, in wlib/wutil.py  # noqa: E402
 
 
 def parse_volume_lists(mb, p, order="<", limit=None):
@@ -118,7 +118,7 @@ def parse_volume_lists(mb, p, order="<", limit=None):
                     normal=(vx, vy, vz),
                     area_weight=w,
                     material_id=ident,
-                    # names used before the consumer was read (kept one release)
+                    # alias keys of the same three values
                     vec=(vx, vy, vz),
                     value=w,
                     id=ident,
@@ -276,7 +276,7 @@ def parse_node_tail(mb, start, end=None, order="<", meshes=False):
     or do not tile [start, end) exactly.  end=None accepts wherever the record
     ends (last node of a file).
 
-    meshes=False (default) is the reader as it was before 1.4.0, unchanged:
+    meshes=False (default) returns
     None for a node with a non-zero submesh count, a non-zero shadow-GROUP
     count (even when every group is empty) or an occluder.  meshes=True walks
     the mesh section (_skip_node_meshes) and reads the lists behind it."""
@@ -352,8 +352,8 @@ def node_records(h, order="<"):
 
 def _detect_order(h):
     """'<' PC / '>' X360+PS3, same idiom as parse_model_nodes: the u32 namelen
-    only parses small in the header's real byte order (2026-08-17; this module
-    was LE-only, so console models yielded empty/garbage records)."""
+    only parses small in the header's real byte order (an LE-only read of a
+    console model yields empty/garbage records)."""
     return "<" if len(node_records(h, "<")) >= len(node_records(h, ">")) else ">"
 
 
@@ -372,8 +372,7 @@ def scan_note(reset=True):
     there were none.  They are not records: parse() tries every byte offset of a
     node's body as [pos f32 x3][quat f32 x4], so most positions read unrelated
     bytes; a window holding inf / NaN is rejected like any other non-unit window
-    (the entries found are the same as before -- only numpy's RuntimeWarning is
-    gone)."""
+    (without raising numpy's RuntimeWarning)."""
     st = SCAN_STATS
     if not st["nonfinite_windows"]:
         return None
@@ -436,7 +435,7 @@ def parse(h, maxpos=5.0, order=None):
                 parent=par,
                 body=body,
                 entries=ents,
-                # volumes: as before 1.4.0 (None where the pre-1.4.0 reader gave up)
+                # volumes: None where the meshes=False reader gives up
                 volumes=tail["volumes"] if tail else None,
                 # particle emission surfaces of any node the engine layout tiles
                 # (None: this name is not a node record or its bytes do not tile)
@@ -521,7 +520,8 @@ def untyped_record_types():
         try:
             import kapow_props as _kp
         except ImportError:
-            import os, sys
+            import os
+            import sys
 
             _d = os.path.dirname(os.path.abspath(__file__))
             if _d not in sys.path:

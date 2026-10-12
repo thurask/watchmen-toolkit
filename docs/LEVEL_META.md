@@ -84,7 +84,7 @@ origin 61 of 129 (full level tree) placed models above the terrain's footprint r
 surface (the others are on the floors above); shifted by (0, −24, 76) or by (0, 24, −76) none
 does. StreetsOfRiot and NightClub have `localPos` (0, 0, 0) and a world transform at the
 origin as well, so all three Part 2 terrains are placed with an identity transform and the
-GLBs were already in the right place. All 24 TerrainNodes of the six sets compose to the world
+GLBs need no placement. All 24 TerrainNodes of the six sets compose to the world
 origin, unrotated; only Bordello has a non-zero `localPos`. Placed models rest on the surface
 there: a 2 m vertical shift removes the fit on all eight terrains, and a horizontal shift or
 mirror removes it on Docks, Prison, StreetsOfRiot and ConstructionSite. NightClub and Streets2
@@ -100,7 +100,8 @@ Simple3DRA. The ray test 0x49c4ce uses the same matrix. The Xbox 360 images do t
 height and normal query (0x49f3e4 → asset +0x114 → 0x52a22f / 0x531002), whose grid is centred
 on it. All 24 shipped TerrainNodes compose to the origin, so `world` / `gltf` are the identity
 and equal the drawn position (`drawn_with`, `world_is_identity`); a TerrainNode moved off the
-origin would be drawn unmoved while its height query moved. `files.loose` is unchanged.
+origin would be drawn unmoved while its height query moved. `files.loose` lists the `.terrain`
+among the loose files as well.
 
 ## Sections
 
@@ -249,7 +250,7 @@ by several definitions (`HeaviesWeapons_1H` by three), so "least used" counts ac
 
 `counts`: `characters_variant_fixed` (fixed + fixed_scene_model), `characters_variant_candidates`,
 `weapons_fixed`, `weapons_candidates`, `weapons_none`. Part 2 PC, Bordello / NightClub /
-StreetsOfRiot as staged (2026-10-05): variant fixed 16 / 2 / 0, candidates 151 / 168 / 143; weapons
+StreetsOfRiot (staged fragments): variant fixed 16 / 2 / 0, candidates 151 / 168 / 143; weapons
 fixed 33 / 41 / 39, candidates 11 / 5 / 18. The full PC extract (all six levels, 488 placements):
 variant fixed 26 (12 of them `fixed_scene_model`), candidates 462; weapons fixed 113, candidates
 34, none 341. In shipped Part 2 data every body member has priority
@@ -511,7 +512,7 @@ entry's edges (the largest per-point distance counts), within 0.5 m, one entry p
 distance is computed for every id-joined pair as a cross-check (`distance_m`); a pair farther apart
 than the tolerance stays joined and is listed in `nav.id_position_disagree`.
 
-Part 2 PC (2026-10-05; staged fragments, and the same on the PC extract, where Tutorial 2 and
+Part 2 PC (staged fragments, and the same on the PC extract, where Tutorial 2 and
 PlayerVsPlayer 1 join by id as well): Bordello 61 by id + 1 by position, NightClub 48 by id,
 StreetsOfRiot 18 by id, `id_position_disagree` empty, largest distance 0.1558 m (NightClub id 16).
 Bordello entry 45 of the list is null (the single word `01 00 00 00` at offset 0x2026 of
@@ -624,8 +625,8 @@ from a definition with no 2H collection (`{COP_FAST}` 8, `{COP_LEADER}` 2, `{MER
 
 - **Block names.** `files.blocks` comes from the top fragment's path, not from the load block's
   name: Part 1 level `Streets2` is `Street2/Street2.block_h_z` and `Undergound` is
-  `Underground/underground.block_h_z` (the names were `streets2.block_*` / `undergound.block_*`
-  before). Checked against the archive directory and the loose Part 1 trees on all 39 levels.
+  `Underground/underground.block_h_z`, not `streets2.block_*` / `undergound.block_*`. Checked
+  against the archive directory and the loose Part 1 trees on all 39 levels.
   Not listed in any level file: the four stream-only Prison blocks
   (`BuildingPrisonShowerRoom`, `GeneratorRoom`, `hallway`, `PrisonYard`, each `.block_s_z`) and
   the common block (`WatchMen.block_*` in Part 1, `watchmenpart2.block_*` in Part 2); the
@@ -683,15 +684,15 @@ export's `--names` (default `canonical`) unless the option is given.
 Left alone: materials (as the importer builds them), lights, the world, the frame range.
 Not placed: lights, particles, volumes, cube maps, cameras; `opacity` is stored, not applied.
 
-Measured with Blender 3.6.0 (the `bpy` module on Linux, 2 cores, 3.9 GB of memory), six-set export of
-2026-10-07. Library collections: one per GLB, one more for every further outfit of a character GLB.
+Measured with Blender 3.6.0 (the `bpy` module on Linux, 2 cores, 3.9 GB of memory) on a six-set
+export. Library collections: one per GLB, one more for every further outfit of a character GLB.
 Blender 5.2.2 on Windows, background mode (measured): PC Part 2 Bordello imports as 3,070 instances
 from 264 GLBs in 40 s into a 260 MB file, NightClub as 3,811 instances from 277 GLBs in 42 s into a
 257 MB file, both without an error; every prop instance sits within 0.02 mm of the `gltf` placement
-of its level record. The table was measured before the
-`Host-offset copies` collection existed; the import was not run again with it. Inferred from the
-level file: the ten flagged records of StreetsOfRiot are among its 46 scene models, which were
-switched off before as well (`Characters` > `Scene models`), so the visible scene is the same.
+of its level record. The table was measured without the `Host-offset copies` collection; the
+ten flagged records of StreetsOfRiot are among its 46 scene models (`Characters` > `Scene
+models`), which are switched off as well, so the visible scene is the same (inferred from the
+level file).
 
 | Level | placements in the file | instances | library collections | import | `.blend` | peak memory |
 |---|---|---|---|---|---|---|
@@ -735,8 +736,8 @@ and 0.3 m): on what they stand was not looked up. `KnotTop_Large` has its soles 
 placement in its idle clip. In StreetsOfRiot 10 of the 46 enabled `CharacterSimple` nodes of
 `03_SOR_City_Block_C.fragment` have a `world` position that is higher and farther than their
 neighbours by (100, 50, −105), the translation of that fragment's host node, and hang 33 to 80 m
-above the nearest surface; their node ids are those of the Thug definition's members. Whether
-that is the data or the composition rule for these nodes is not established.
+above the nearest surface; their node ids are those of the Thug definition's members (the
+host-offset copies, above).
 
 ## Library
 
@@ -776,8 +777,8 @@ middle, right). The code that fills the map and the 256 offset were not read.
 ## Not established
 
 - For a placement with `variant.status` or `weapon.status` = `candidates`: which member comes
-  up in a given play session (it depends on the build / delete history). Also open: whether a
-  the order in which start-activated characters are built. (A restart or checkpoint restore from
+  up in a given play session (it depends on the build / delete history). Also open: the order
+  in which start-activated characters are built. (A restart or checkpoint restore from
   the in-game menu unloads the level block and resets the enemy collections' counts. The eight
   weapon collections of `WeaponDB.fragment` sit under `GameEssentials`, a scene-level
   `SceneScope(FragmentNode)` outside every load block (measured); the class has no game-event
@@ -792,9 +793,6 @@ middle, right). The code that fills the map and the 256 offset were not read.
   (inferred).
 - For `volumes[].ai_sight`: which shape PhysX reports first on a ray; that a property absent
   from a record leaves the constructor value (inferred).
-- Equal `siblingOrder` children are inserted in file order (read from code and measured, see
-  above). That ties keep insertion order is read from code (0x48f556); they are counted in
-  `counts.action_order_ties`.
 - Tag-3 references past the own fragment instance fall back to the nearest-instance rule (never
   used by shipped data: FRAGMENT_FORMAT.md).
 - Nodes below a node without a transform take the nearest ancestor with one: confirmed on
@@ -820,12 +818,11 @@ middle, right). The code that fills the map and the 256 offset were not read.
 - The pose of the terrain's collision body (0x4a8047 → 0x4f4f3d) was not read; PS3 was not read
   for the terrain draw.
 
-Real data (2026-10-04): Part 2 PC 6 levels and Part 1 PC 7 levels, 0 unresolved references in
-each. The six-set export of 2026-10-05 (PC, Xbox 360 and PS3, both parts): 6 and 7 levels per
-set, 0 unresolved references in all 39 level files; `nav` is filled in every level but MainMenu,
-and the `stable_uid` sets of a level are equal on the three platforms but for the nodes one
-platform's data lacks (NightClub 2, StreetsOfRiot 1). The keys added on 2026-10-05 (`variant`, `weapon`, `ai_start`,
-`combat_presets`, `cube_maps`, `zone_trigger`, `ai_world`, the id join) were measured on the
-staged Part 2 PC fragments of Bordello, NightClub and StreetsOfRiot and then on the full Part 2 PC
-extract (six levels, 0 unresolved references); their values were not compared across Part 1 and
-the console extracts.
+Measured: Part 2 PC 6 levels and Part 1 PC 7 levels, 0 unresolved references in each. Six-set
+export (PC, Xbox 360 and PS3, both parts): 6 and 7 levels per set, 0 unresolved references in
+all 39 level files; `nav` is filled in every level but MainMenu, and the `stable_uid` sets of a
+level are equal on the three platforms but for the nodes one platform's data lacks (NightClub 2,
+StreetsOfRiot 1). The keys `variant`, `weapon`, `ai_start`, `combat_presets`, `cube_maps`,
+`zone_trigger`, `ai_world` and the id join were measured on the staged Part 2 PC fragments of
+Bordello, NightClub and StreetsOfRiot and on the full Part 2 PC extract (six levels, 0
+unresolved references); their values were not compared across Part 1 and the console extracts.

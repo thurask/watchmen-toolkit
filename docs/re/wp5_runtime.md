@@ -6,8 +6,8 @@ Scratch and helper scripts: `work/wp5/`.
 Evidence marks used on every item:
 
 - **read** - traced in the decompilation or disassembly; address given.
-- **data** - measured on the user's extracted game files (906 `.fragment` files, the `.scene`
-  file, `SaveData/Profile1`), parsed from the binary files with the toolkit's parser.
+- **data** - measured on the extracted game files (906 `.fragment` files, the `.scene` file,
+  `SaveData/Profile1`), parsed from the binary files with the toolkit's parser.
 - **inferred** - plausible, reason given.
 - **not established** - collected in section 8.
 
@@ -115,7 +115,7 @@ Entity
 - The entity manager (`DAT_00e15124`, ctor 0x4edd94) keeps a table of all entities (+0x14) and a
   parallel flag byte per entity (+0x20): bit 2 (4) "has a task", bit 3 (8) "script may run". The
   first free index is tracked at +0x2c (0x4edf59). **read.** That new entities take the lowest free
-  index is **inferred** from that hint; the allocating function was not read.
+  index is **inferred** from that hint; the allocating function is not read (section 8).
 
 ### 1.2 Enable, visible, runScript, runFrameUpdate
 
@@ -148,7 +148,7 @@ Entity
   The block is allocated when a node of a scripted type is created (0x47dfed: class+0x4c slots,
   each member default-constructed). Get by hash tries the script class first (0x47c42d), then the
   native table (0x4ff93b). **read.**
-- A per-entity dynamic property bag was looked for and **not found**: set (0x510737 -> 0x50e94c)
+- There is **no per-entity dynamic property bag** on the paths read: set (0x510737 -> 0x50e94c)
   and get (0x4ff93b) only consult the script class and the native type table, and the fragment
   reader skips a key the node's type does not have (0x545e1b, typed mode). **read** for those
   three paths; a bag elsewhere is not excluded.
@@ -203,7 +203,7 @@ Entity
 - Children are a singly linked list (first child, next sibling). Position among siblings is the
   property `siblingOrder`; the parent is the property `logicalParent`. Both are ordinary serialised
   properties (0x494142), so a fragment builds its tree by setting them. **read** (registration);
-  the insertion routine was not read.
+  the insertion routine is not read (section 8).
 - Script code walks trees directly through +0x4c / +0x50 (e.g. 0x7fe7e9). Order of children is
   therefore the order every recursive initialisation, activation and "find child" uses.
 
@@ -224,8 +224,8 @@ u32  chunkCount
 chunks: [u32 size <= 0x2800][payload]       payloads concatenate into one stream
 ```
 
-The toolkit documents "17 bytes, or extended with a name when a flag bit is set". The engine
-reads it as above: 16 + nameLen bytes, 17 with the empty name. Counts: 527 plain, 239
+The header is 16 + nameLen bytes, 17 bytes with the empty name (there is no flag bit that
+selects a name-extended form; the name length is always present; `FRAGMENT_FORMAT.md`). Counts: 527 plain, 239
 `smartSelectable`, 129 singleton, 11 `reapplyable` (**data**).
 
 - `reapplyable` selects the allocator of the stream buffer (0x54306d) and is the condition for
@@ -350,19 +350,22 @@ and is where a class enters its main state (`CALL_STATE(StateActive)`).
 - A placed `CharacterRoot` is thus a light placeholder until activation; only the 16 nearest
   activated enemies own sub-systems (audit a12).
 
-### 2.6 Toolkit `anim_state_machine.load_tree` / `resolve_ref` against the engine
+### 2.6 Reference-resolution rules for an extractor
 
-| # | toolkit | engine | effect |
-|---|---|---|---|
-| 1 | `{'xref': ids}` (tag 5) is treated as a path whose first id is "looked up next to the referring node" | `ids[0]` is the name hash of a singleton fragment, looked up in a global map | The toolkit cannot resolve a tag-5 reference into another file except by accident; with the name-hash rule all of them resolve (checked on Bordello). |
-| 2 | `{'xref4': ids, 'a': a}` (tag 4) is not handled by `resolve_ref` (only `xref` and `ref`) | relative path from the referrer's enclosing fragment instance, `a - 1` instances up | 17 references in the corpus are dropped. |
-| 3 | candidates with one id are disambiguated by "nearest common ancestor", then "shallowest inside the current node" | deterministic: depth-first in sibling order inside one fragment instance, never entering a nested instance | Same answer when ids are unique inside an instance (true for version-4 files); the toolkit's fallback "last id that exists anywhere" can return a node the engine would not. |
-| 4 | `{'ref': id}` is a node of the same fragment instance | also falls back to the host's scope and to the scene-wide id map | Differences only for references that leave the instance. |
-| 5 | nested fragments are spliced only under `AnimationStateGroup` nodes with `assetName` | any `FragmentNode`-derived node; existing children are deleted first | Fine for animation classes; a general level loader must splice every `FragmentNode`, `TriggerUseFragment`, `SaveFragment`, `CharacterRootFragment`, ... |
-| 6 | children sorted by `siblingOrder`; top-level nodes are those whose `logicalParent` is not in the file | same data; a top-level node's `logicalParent` is tag 2 = the host | Agrees. |
-| 7 | `{'etag': 2}` = the instancing state group (`fragment_host`) | the apply target | Agrees. |
-| 8 | key `key_0991b0d4` typed as an integer | it is `CharacterGroup.m_ezonetrigger`, an entity reference (hash of the name is 0x0991b0d4; **data**: the key occurs only on `CharacterGroup`, 119 times as tag 1 and 22 times as tag 3) | This is the source of the 22 "unknown key" residues in `FRAGMENT_FORMAT.md`: `[3][id]` read as integer 3, then the id read as a key. Fix: type the key as entity. |
-| 9 | `.scene` files are not accepted by `kapow_json.load_fragment` (extension check) | a scene is a fragment | Parses with the same code once the extension test is relaxed (**data**: `WatchMenPart2.scene`, 39 nodes). |
+The engine rules an extractor has to follow; `anim_state_machine.load_tree` / `resolve_ref`
+implement them.
+
+| # | engine rule | consequence for an extractor |
+|---|---|---|
+| 1 | tag 5 (`{'xref': ids}`): `ids[0]` is the name hash of a singleton fragment, looked up in a global map | needs a singleton index `hash(fragmentName or file base name) -> file`; with the name-hash rule every tag-5 reference resolves (checked on Bordello). Treating `ids[0]` as an id "looked up next to the referring node" resolves a reference into another file only by accident. |
+| 2 | tag 4 (`{'xref4': ids, 'a': a}`): relative path from the referrer's enclosing fragment instance, `a - 1` instances up | 17 references in the corpus; a resolver that handles only `xref` and `ref` drops them. |
+| 3 | search for a single id is deterministic: depth-first in sibling order inside one fragment instance, never entering a nested instance | ids are unique inside an instance in version-4 files, so a "nearest common ancestor" / "shallowest inside the current node" disambiguation gives the same answer; a fallback "last id that exists anywhere" can return a node the engine would not. |
+| 4 | tag 3 (`{'ref': id}`) is a node of the same fragment instance, with fallbacks to the host's scope and to the scene-wide id map | differences only for references that leave the instance. |
+| 5 | a nested fragment is applied by any `FragmentNode`-derived node when its `assetName` is set; existing children are deleted first | a general level loader must splice every `FragmentNode`, `TriggerUseFragment`, `SaveFragment`, `CharacterRootFragment`, ...; splicing only under `AnimationStateGroup` nodes with `assetName` suffices for the animation classes alone. |
+| 6 | children are ordered by `siblingOrder`; a top-level node's `logicalParent` is tag 2 = the host | top-level nodes are those whose `logicalParent` is not in the file. |
+| 7 | `{'etag': 2}` is the apply target, i.e. the instancing node (`fragment_host`) | - |
+| 8 | key `key_0991b0d4` is `CharacterGroup.m_ezonetrigger`, an entity reference (hash of the name is 0x0991b0d4; **data**: the key occurs only on `CharacterGroup`, 119 times as tag 1 and 22 times as tag 3) | typed as an integer it produces 22 "unknown key" residues (`[3][id]` read as integer 3, then the id read as a key); the key must be typed as entity. |
+| 9 | a `.scene` file is a fragment | parses with the fragment code (**data**: `WatchMenPart2.scene`, 39 nodes); `kapow_json.load_fragment` accepts the extension. |
 
 ---
 
@@ -387,11 +390,11 @@ and is where a class enters its main state (`CALL_STATE(StateActive)`).
    (+0x2e4) is set.
 6. Clean-up, camera selection.
 
-`playMode` (scene+0x2d4): 0 play, 1 stop, 2 pause. Correction to `dominatrix_audit.md` b1 ("in
-pause mode only the script update runs"): that sentence describes the branch taken when the flag
-at scene+0x2d8 is set, which is not the pause mode. In pause mode (2) the game time step is forced
-to 0 and neither the script update nor (unless a node's virtual slot 19 says so) the native update
-runs. The game's own pause does not use this mode at all (3.6).
+`playMode` (scene+0x2d4): 0 play, 1 stop, 2 pause. The branch in which only the script update
+runs is taken when the flag at scene+0x2d8 is set; that flag is not the pause mode (it supersedes
+`dominatrix_audit.md` b1, which calls that branch the pause mode). In pause mode (2) the game time
+step is forced to 0 and neither the script update nor (unless a node's virtual slot 19 says so)
+the native update runs. The game's own pause does not use this mode at all (3.6).
 
 Which classes are in which native list (**read** from the vtables; table in the JSON
 `frame_update_classes`): a node is updated only if its class's virtual slot 18 returns true.
@@ -425,7 +428,7 @@ freed indices re-used (1.1). Objects that need a defined order opt out of this l
 
 ### 3.3 Tasks, frames, states
 
-Layouts are in `wp0_script_names.md` section 2; additions from this pass (**read**):
+Layouts are in `wp0_script_names.md` section 2; additions (**read**):
 
 - One `Task` per scripted entity, created by the first command (1.5). The task's frame array is a
   stack of **state** frames; `_root` is at the bottom. A state is a coroutine function; commands
@@ -472,7 +475,7 @@ Layouts are in `wp0_script_names.md` section 2; additions from this pass (**read
 
 ### 3.5 `ScriptUpdateCtrl`: ordered updates and manual resume
 
-Read in the audit (b3) and re-checked here: `preScriptUpdate` 0x815030 resets `characterlib`'s
+`dominatrix_audit.md` b3, re-checked (**read**): `preScriptUpdate` 0x815030 resets `characterlib`'s
 update list and runs `Update(order)` for orders 0..`m_idefaultscriptordering` (5);
 `postScriptUpdate` 0x8150d9 runs the higher orders. `Update` 0x812ab5 resumes the entities
 registered with `command_register_manual_resume(order, entity)` (0x8148cb) and sends
@@ -569,7 +572,8 @@ table order (enemies, triggers, controllers), then buckets above 5.
 A worker thread loop: wait on a signal (1 s timeout), take a request, open the asset's stream file,
 seek to the request's per-language offset, read the per-language size into the asset's buffer, and
 move the request to a "done" list consumed on the main thread ("[AssetManager] Loaded stream
-data: %s"). What decides which assets request stream data and when it is dropped was not read.
+data: %s"). What decides which assets request stream data and when it is dropped is not read
+(section 8).
 
 ### 4.5 Asset types (RTTI + vtables, read; type names from the toolkit's block table)
 
@@ -595,8 +599,8 @@ data: %s"). What decides which assets request stream data and when it is dropped
 | `AIAsset` | `aipathdata` | 0x52945d | `.aipathdata` / `.hpd` | **not decoded** (Kynapse path data) |
 
 `ModelEffects(ModelRes)` and `TextureEffects(Texture)` are script classes on asset classes, the
-same `Class(Native)` mechanism as for nodes. Whether the toolkit's extraction of each type is
-complete was taken from the toolkit docs, not re-tested here.
+same `Class(Native)` mechanism as for nodes. The toolkit column comes from the toolkit docs and is
+not re-tested.
 
 ### 4.6 Language slots
 
@@ -605,8 +609,7 @@ object's override at +0x88, or the detected language at +0x84 when the override 
 the `LANGUAGE` enum registered in `builtin.cpp` 0x47ff8c with explicit values: **0 English,
 1 French, 2 Italian, 3 German, 4 Spanish, 5 Danish**. **read** for the enum and the index;
 **inferred** that the block slots use the same numbering (the loader prints the slot through the
-language-name function 0x437c91). This fills the gap "which language each slot number means" in
-`KAPOW_NAZ_FORMAT.md`.
+language-name function 0x437c91). `KAPOW_NAZ_FORMAT.md` documents the block-header slots.
 
 ---
 
@@ -849,8 +852,8 @@ records: [u32 entity fragmentID][u32 property name hash][u32 type id][u32 nWords
   (it becomes the AI partner). **read** (call list only).
 - Level data branches on the mode with `TriggerConditionGameMode` / `TriggerActionGameMode`
   (flags) and `GameModeSelector`.
-- No drop-in join was found: nothing switches a running level from single player to co-op
-  (**inferred** from the above; the menu scripts were not read).
+- There is no drop-in join: nothing switches a running level from single player to co-op
+  (**inferred** from the above; the menu scripts are not read).
 - Slow motion is suppressed in co-op (3.6).
 
 ---
@@ -945,15 +948,18 @@ Lady. The ACTIVATE actions under the checkpoint have the **same node ids** as th
 
 ---
 
-## 7. Extractor consequences
+## 7. Extractor requirements
 
-1. **Fix key `0x0991b0d4`**: name `m_ezonetrigger`, type entity. Removes the last 22 unknown-key
-   occurrences in the corpus and makes combat zones visible (2.6 row 8).
+What the engine findings require of an extractor (the toolkit's `levelmeta` / `savemeta` exports,
+`wlib/level_meta.py`, follow them):
+
+1. **Key `0x0991b0d4`**: name `m_ezonetrigger`, type entity (2.6 row 8); this makes combat zones
+   visible and leaves no unknown key in the corpus.
 2. **Fragment header fields**: expose `singleton`, `smartSelectable`, `fragmentName`,
    `reapplyable`, `chunkCount` (2.1) instead of an opaque header.
-3. **Reference resolution** (2.3, 2.6): implement tag 5 through a singleton index
+3. **Reference resolution** (2.3, 2.6): tag 5 through a singleton index
    `hash(fragmentName or file base name) -> file`, tag 4 with `a`, and the engine's search rule.
-   This makes every cross-file reference in a level resolvable; today they print as raw id paths.
+   With these every cross-file reference in a level is resolvable instead of a raw id path.
 4. **Accept `.scene`** in `kapow_json.load_fragment`.
 5. **`levelmeta` export**, one JSON per level, built from the scope's top fragment by splicing
    every `FragmentNode`:
@@ -974,11 +980,11 @@ Lady. The ACTIVATE actions under the checkpoint have the **same node ids** as th
    are children of the host). A derived `encounters` view (start trigger, groups, waves, end
    condition) can be computed from groups + toggles + logical conditions as in section 6.
 6. **Enum names** for `m_iactiontype`, `m_itrueon`, `m_iactivator`, GAME_EVENTS, SCENE_ID in
-   fragment JSON (the enums are already in `engine_enums.json`).
-7. **Save files**: a `watchmen save` reader for `*.kpw` (5.5) is 30 lines and uses the fragment
-   value decoders.
-8. **Language slots**: document slot 0..5 = English, French, Italian, German, Spanish, Danish
-   (4.6) and name the `--language` values.
+   fragment JSON (the enums are in `engine_enums.json`).
+7. **Save files**: a `*.kpw` reader (5.5; the `savemeta` command) is about 30 lines on top of
+   the fragment value decoders.
+8. **Language slots**: slot 0..5 = English, French, Italian, German, Spanish, Danish (4.6); the
+   `--language` values are named accordingly.
 9. **Not extracted**: `AIAsset` path data (`.hpd` / `.aipathdata`). The AI world's source
    parameters and seed points are in `gameplay.fragment` (`AIWorld(AIWorldNode)`), so a nav-mesh
    could be rebuilt from collision instead of decoding the Kynapse format.
@@ -1007,7 +1013,7 @@ Lady. The ACTIVATE actions under the checkpoint have the **same node ids** as th
 | Game-event table completeness (senders found by a 40-line heuristic; CHARACTER_DEAD sender missing) | argument tracking in `lift.py` for `command_broadcast_gameevent` |
 | `TriggerActionDelay` children beyond the 20th (fire immediately, **inferred** from the shape of 0x852ecd) | disassemble the loop |
 | `TriggerUse` (100 handlers) and `TriggerActionCharacterForceMove.RunningState` details | read them; not needed for the export |
-| The numbering of the codes in `m_emetadevicebuttonmap` | the shape is settled (type id 0x2bf20fb4 = `list(list(list(list(integer))))`: save device `SAVE_DEVICES` 0–5, resized in `SettingsState.initialize_local` 0x82bc77; player, `GameStateCtrl.command_has_any_input_map` 0x74d04e; logical button 0–40 and three alternative codes inferred from the content of one profile). Keyboard codes look like DirectInput scan codes (MENU_UP 200, MENU_DOWN 208, MENU_SELECT 28, MENU_BACK 1; not read from the game's code); pad buttons 0–15 and the 257+ codes are not established |
+| The numbering of the codes in `m_emetadevicebuttonmap` | the shape is established (type id 0x2bf20fb4 = `list(list(list(list(integer))))`: save device `SAVE_DEVICES` 0–5, resized in `SettingsState.initialize_local` 0x82bc77; player, `GameStateCtrl.command_has_any_input_map` 0x74d04e; logical button 0–40 and three alternative codes inferred from the content of one profile). Keyboard codes look like DirectInput scan codes (MENU_UP 200, MENU_DOWN 208, MENU_SELECT 28, MENU_BACK 1; not read from the game's code); pad buttons 0–15 and the 257+ codes are not established |
 | Which movies belong to which level | read `MovieDbPart2.fragment` and resolve the scope's movie references |
 | Everything about Part 1 levels (extracted `Game_Levels` folder) | same analysis; the scripts are shared |
 
@@ -1017,6 +1023,5 @@ Lady. The ACTIVATE actions under the checkpoint have the **same node ids** as th
 - `work/wp5/`: `cond.py` (condensed view of a lifted class), `summ.py` (per-handler send list),
   `hn.py` (hash annotator), `khd.py` (name hash), `game_events.json`, `node_rtti.json`,
   `frameupdate_classes.json`, `lb_sm.c` (load block state machine text), `msc_activate.c`.
-- The data scripts ran on the user's PC in a scratch directory outside the mounted folder and
-  were removed afterwards; they only used `kapow_json.load_fragment` plus the header layout of
-  section 2.1 and the save layout of section 5.5.
+- The **data** measurements use only `kapow_json.load_fragment` plus the header layout of
+  section 2.1 and the save layout of section 5.5; the measuring scripts are not kept.

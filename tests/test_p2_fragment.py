@@ -11,7 +11,9 @@ was lost, and a `localPos` whose value starts a new chunk was read one word earl
 Synthetic fixtures only: every fragment below is built in the test, in both byte
 orders and with the chunk boundaries the test needs."""
 
-import os, struct, sys
+import os
+import struct
+import sys
 
 import pytest
 

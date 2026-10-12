@@ -139,7 +139,11 @@ def _named(d, name, alias):
     return d[name] if name in d else d[alias]
 
 
-from wutil import GlbPacker, glb_bytes, read_bytes as _read_bytes  # one copy, in wlib/wutil.py
+from wutil import (  # noqa: E402  (one copy, in wlib/wutil.py)
+    GlbPacker,
+    glb_bytes,
+    read_bytes as _read_bytes,
+)
 
 
 class TerrainError(ValueError):
@@ -219,7 +223,7 @@ class _Rd:
         return raw.removesuffix(b"\0").decode("latin1")
 
     def ident(self):
-        """u64 id: raw bytes as hex (as the JSON always had it) and the value, which
+        """u64 id: raw bytes as hex and the value, which
         is stored as two u32, low word first."""
         self._need(8)
         raw = self.b[self.p : self.p + 8]
@@ -896,7 +900,7 @@ def build_glb(doc, lay):
             N.append(np.where(ln > 1e-6, n / np.maximum(ln, 1e-6), [[0.0, 1.0, 0.0]]))
             UV.append(v["uv"][used])
             C.append(v["color"][used])
-            # mirrored-frame documents wind against the file (as 1.3.0 wrote them);
+            # mirrored-frame documents wind against the file;
             # frame.finish_gltf turns the true frame back to file order
             I.append((inv.reshape(-1, 3)[:, [0, 2, 1]] + base).astype(np.uint32))
             base += len(used)

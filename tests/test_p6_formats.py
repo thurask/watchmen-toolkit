@@ -9,7 +9,10 @@ Native messages   registration-string normaliser 0x4f9504, hash 0x423d30
 PS3 sounds        segment dword 4 = byte length of two MP3 frames
 Synthetic fixtures only."""
 
-import json, os, struct, sys
+import json
+import os
+import struct
+import sys
 
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wlib"))
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))

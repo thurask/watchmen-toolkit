@@ -5,7 +5,8 @@ parents places it.  Bordello's node has localPos (0, -24, 76) under a fragment h
 (0, 24, -76), so its world placement is the origin: the fixture repeats that shape.
 Synthetic binary fixtures only."""
 
-import os, sys
+import os
+import sys
 
 import pytest
 

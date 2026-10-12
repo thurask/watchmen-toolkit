@@ -14,7 +14,9 @@ Groups          CharacterGroup.initialize_local 0x668a0e / initialize_external 0
 Cube maps       nearest CubeMapNode 0x4d1299
 Synthetic binary fixtures only: every file below is built in the test."""
 
-import os, struct, sys
+import os
+import struct
+import sys
 
 import pytest
 

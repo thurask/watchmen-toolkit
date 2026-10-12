@@ -1,12 +1,14 @@
 # Animation events at run time
 
-Target: `KapowMultiDEDRM.exe`. Read 2026-10-02. Machine-readable table:
+Target: `KapowMultiDEDRM.exe`. Machine-readable table:
 `findings/events_table.json` (93 ids). Scratch: `work/events/` (annotated
 disassembly `handler.asm`, case map `casemap.json`, enum dump `enum_raw.txt`).
+Toolkit: `wlib/anim_meta.py` (event export: trigger kind, `time_s` / `playpos`),
+`wlib/engine_enums.json` (`event_semantics` with per-event `evidence` strings).
 
 Evidence tags: **[R]** read from code, **[I]** inferred, **[N]** not established.
 
-## 0. What matters for the pair-placement tool
+## 0. What matters for pair placement
 
 1. **`ABSOLUTE_GOTO_TARGET_POS` (28) only sets one flag** on the character's own
    collision capsule (`capsule.data+0xb8 = 1`, 0x6a9dca–0x6a9ddf) [R]. It computes
@@ -18,9 +20,9 @@ Evidence tags: **[R]** read from code, **[I]** inferred, **[N]** not established
    events have trigger type 3 (`TOTAL_PLAY_TIME`), so their `m_nplaypos` 0.2 /
    0.21 is **0.2 s of play time, not 20 % of the clip** (measured on the Part 2
    PC fragments; sender logic in section 1) [R].
-   `anim_meta.json` currently exports only `on_enter` (type == 1) and presents
-   `playpos` as 0..1 for every event; that is wrong for type-3 events and it
-   hides type 2 (`LEAVE_STATE`).
+   `anim_meta.json` exports every event with its trigger kind (`trigger`,
+   `trigger_id`, `on_enter` for type 1) and a `TOTAL_PLAY_TIME` event's
+   `m_nplaypos` as seconds (`time_s`), not as a 0..1 play position.
 3. **Victim timeline that follows from the code** [R for each step, the
    combination I]: the victim enters absolute mode at its *current* pose
    (special handling 3 → flag 0); `CharacterRoot.StateActive` writes the
@@ -28,8 +30,8 @@ Evidence tags: **[R]** read from code, **[I]** inferred, **[N]** not established
    `ANIMATION_META.md`) every frame, but the capsule ignores it while the flag
    is 0; at 0.2 s the event sets the flag, the capsule picks the new start up
    and eases from the pose it entered the state in to the placed track over the
-   state's blend time. The tool's placement rule is therefore the *settled*
-   pose, reached one blend time after 0.2 s.
+   state's blend time. The placement rule of `ANIMATION_META.md` is therefore the
+   *settled* pose, reached one blend time after 0.2 s.
 4. **`LOOK_AT_TARGET` (45) is a camera event.** It does not turn the character
    (section 4).
 5. **`LEAVE_ABSOLUTE_MODE` (19)** ends track-driven placement for the character
@@ -52,11 +54,15 @@ time).
 - Trigger type = `m_ieventtype` (event data +0x00). Enum
   `ANIMATION_EVENT_TYPES`, registered at 0x5e54ed–0x5e5516:
   `PLAY_POS = 0`, `ENTER_STATE = 1`, `LEAVE_STATE = 2`, `TOTAL_PLAY_TIME = 3` [R].
-- Type 3: fires once when `m_nplaypos < page total play time (+0x34)`; here
-  `m_nplaypos` is a time (captions read "DIE at time 8.04") [R compare, I unit].
-- Type 0, non-looping state: fires once when `m_nplaypos <= current playpos`.
-- Type 0, looping state (`Is looping`, state data +0x34): fires when
-  `min(cur, prev) < m_nplaypos <= max(cur, prev)`.
+- Type 3: fires once when `m_nplaypos <= page total play time (+0x34)`
+  (0x5b52c1); here `m_nplaypos` is a time (captions read "DIE at time 8.04")
+  [R compare, I unit].
+- Type 0, normal play (looping — `Is looping`, state data +0x34 — or not): fires once per pass when
+  `m_nplaypos <= current playpos` and the slot has not fired yet (0x5b55c4);
+  a looping state clears the fired flags at the wrap (pages.md §2). An event at
+  or before the page's start position is created already fired (0x5b8f16).
+  The window test `min(cur, prev) < m_nplaypos <= max(cur, prev)` is used only
+  under the AnimationData debug play-position override.
 - Type 1: sent from `SetupNewPage` 0x5b7788 (second argument 0). Type 2: sent
   from `UpdatePagePlayPos` 0x5b56a9 and `SetupNewPage` (second argument 1.0) [R].
 - After each send the sender stores a fresh random number in event data +0x10
@@ -210,8 +216,8 @@ At entry (0x67bd36) [R]:
 - flag 1 and `capsule.data+0x48 != 0`: start is solved so the clip's `interact`
   track (clip data +0x4c) lands on `m_vAbsInteractPos (+0x4c)` /
   `m_qAbsInteractOrient (+0x58)`; start orient = `m_qAbsInteractOrient`.
-- flag 1 and `+0x48 == 0`: the stored start is kept. (This answers the "flag-1
-  branch" item left open in `ENGINE_CONSTANTS.md`.)
+- flag 1 and `+0x48 == 0`: the stored start is kept (the "flag-1 branch" of
+  `ENGINE_CONSTANTS.md`).
 
 Per frame, `command_absolute_update` 0x67f7b0 [R]:
 
@@ -223,7 +229,7 @@ Per frame, `command_absolute_update` 0x67f7b0 [R]:
    the flag the pivots stay where they were at state entry, so later writes to
    `m_vWorldStartPos` have no effect.**
 2. `pos = Start + R(Start orient)·(GP(t) + loop offset − GP(0))`,
-   `orient = q_GP(t) · Start orient` (unchanged from the existing doc).
+   `orient = q_GP(t) · Start orient` (as in `ANIMATION_META.md`).
 3. If the flag is set: `timer −= clamp(dt, 0, 0.1)`; while `timer > 0`,
    `w = timer / blend time`, `pos = lerp(pos, entry pos, w)`,
    `orient = slerp(orient, entry orient, w)`. Timer and entry pose are set once
@@ -238,10 +244,12 @@ sets the flag — the "target" the event name refers to [R writes, I naming].
 `StateAbsoluteAnimation` clears the flag on exit when the state has `Master of`
 set (0x6a1e1d case 5).
 
-Not established: the blend time value actually passed for victim states (the
-caller of `SendGotoPhysAbsoluteMode` 0x5ac79b was not traced; `Ease in
-duration` 0.21 s on these states is the likely source); whether
-`capsule.data+0x48` is ever non-zero in combat.
+The blend time passed for victim states is the victim state's own `Ease in
+duration` (0.21 s on these states): `goto_slave_mode` 0x5b32a2 →
+`ForceToState` 0x5b4933 with ease −1 → `SetupNewPage` takes the state's
+`m_neaseinduration` and passes page +0x0c to the absolute-mode message
+(`SendGotoPhysAbsoluteMode` 0x5ac79b) [R].
+Not established: whether `capsule.data+0x48` is ever non-zero in combat.
 
 ## 4. LOOK_AT_TARGET
 
@@ -322,18 +330,19 @@ non-zero but whose case never reads it: 24, 37, 48, 75.
 
 ## 8. Side observation for the extractor
 
-On the device, event nodes decode with keys such as `key_3eb33333`,
-`key_3f000000`, `key_00000000/1/2` — float bit patterns used as key names. The
-property-bag reader is losing alignment on some AnimationEventWM properties
-(most visibly on ids 9, 37, 56). The fields `m_ieventtype`, `m_nplaypos`,
-`m_ianimationevent`, `m_nvalue` come out consistent, but the extra floats,
-bools and vectors of those events should not be trusted until that is fixed.
+Event nodes decoded by a fragment parser without the name-hash fold and the
+type records come out with keys such as `key_3eb33333`, `key_3f000000`,
+`key_00000000/1/2` — float bit patterns used as key names: the property-bag
+reader loses alignment on some AnimationEventWM properties (most visibly on
+ids 9, 37, 56). The fields `m_ieventtype`, `m_nplaypos`, `m_ianimationevent`,
+`m_nvalue` come out consistent even then; the extra floats, bools and vectors
+of those events are trustworthy only from a parser with the fold and the type
+records (`kapow_fragment.parse`; this observation has not been re-checked
+against its output) [N].
 
 ## Not established
 
-- Blend time passed to the capsule for victim states (section 3).
 - Path from lethal damage to ragdoll.
-- Cases 23, 29/30, 31, 59, 70 and the footstep block were skimmed for commands
-  and field writes, not read instruction by instruction. *[All of them have
-  been read since: see "Corrections to these reports" in README.md and the
-  `evidence` strings of `event_semantics`.]*
+- Cases 23, 29/30, 31, 59, 70 and the footstep block: the table above gives
+  commands and field writes; the instruction-level reading is in the
+  `evidence` strings of `event_semantics` (`wlib/engine_enums.json`).

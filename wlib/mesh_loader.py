@@ -4,8 +4,7 @@
 Every character path reads its mesh pieces here: char_lib.load_parts (the
 `characters` / `faces` / `charlibs` bodies), variant_glb.load_parts (`char`),
 and characters_export's weapon and head attachments (_weapon_attach_parts,
-_rigid_attach_parts).  1.4.0 had four hand-synchronised copies of the same
-byte search.
+_rigid_attach_parts).
 
 Primary path: the model header (watchmen_extract.decode_model_mesh -- the
 header parsed by parse_model_header, every buffer located by
@@ -13,9 +12,9 @@ model_stream_layout, which must consume the stream exactly).  Each render
 buffer of vertex format 5 / 6 is one submesh, at the stream offset the header
 gives, its index run read with the buffer's primitive type (a triangle strip
 is decoded as a strip, watchmen_extract.index_triangles).  Positions are kept
-part-local, as stored (part_space=True), which is what the loaders always used.
+part-local, as stored (part_space=True).
 
-Fallback: the descriptor scan of 1.4.0 (find_descriptors, then the first
+Fallback: the descriptor scan (find_descriptors, then the first
 stream offset where _vb_ok and _ib_ok hold, then char_lib.flat_buffer for a
 planar piece), used only for a model whose header path does not apply or for a
 geometry descriptor the header does not list -- and every such submesh is
@@ -61,7 +60,7 @@ def _canon(name):
 
 def bind_slotter(bn):
     """name -> slot in the bind's bone list `bn`, or None.  Exact matches win;
-    then the 'BipNN '-prefix-insensitive match (2026-07-13: Thug / Heavies
+    then the 'BipNN '-prefix-insensitive match (Thug / Heavies
     models say 'RUpArmTwist' where the medium bind says 'Bip02 RUpArmTwist';
     KnotTop_Large says 'Bip01 Attach RHand' where the bind says 'Attach RHand')."""
     uslot = {n: i for i, n in enumerate(bn)}
@@ -107,7 +106,7 @@ def palette_remap(mh, order, bn, name="model", log=print):
     The engine's palette of a skinned piece is the model's node list rotated by
     one (palette index k is node k - 1, index 0 the last node).  Its names are
     taken in file order (extract_skeletons._ordered_names); those without a slot
-    in the bind (bind_slotter) are left out before the rotation, as in 1.4.0.
+    in the bind (bind_slotter) are left out before the rotation.
     remap[k] is the bind slot of palette index k (int64 array).
 
     `dropped`: [{"name", "where"}] for the names that are NODES of the model
@@ -250,7 +249,7 @@ def _header_path(mh, ms, order):
 
 
 def _scan_one(ms, off, nv, stride, ib, order):
-    """1.4.0's offset search for one descriptor -> (vbo or None, "strict" | "flat")."""
+    """The descriptor-scan offset search for one descriptor -> (vbo or None, "strict" | "flat")."""
     import watchmen_extract as we
     import char_lib
 

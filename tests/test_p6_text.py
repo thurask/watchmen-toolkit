@@ -6,7 +6,9 @@ audio_start_delay_s     the definition's start delay delays the audio only (0x44
 movie length            .bik header: frames x divisor / rate
 Synthetic fixtures only (the builders of test_text_assets / test_p1_formats)."""
 
-import os, struct, sys
+import os
+import struct
+import sys
 
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wlib"))
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))

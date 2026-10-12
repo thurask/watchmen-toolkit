@@ -9,7 +9,10 @@ blocks           block file names come from the top fragment's path
 no_collection    command_set_weapon 0x694440
 Synthetic binary fixtures only."""
 
-import json, os, struct, sys
+import json
+import os
+import struct
+import sys
 
 import pytest
 

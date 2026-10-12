@@ -9,16 +9,16 @@ Provenance of the data files shipped in wlib/ (see docs/INDEX.md):
                            Source: string harvest over the game EXE + all naz
                            block payloads (`gendata strings`; the string
                            sections are readable even in the DRM-packed retail
-                           KapowMulti.exe).  The shipped table is an earlier
-                           harvest, not the byte output of today's generator:
-                           from the Part 2 PC executable alone `strings` gives
-                           40,575 names, the shipped table has 23,753, and 675
-                           shared hashes differ in letter case.  Names the
-                           native classes register carry the registered
-                           spelling (registered_names.json); `gendata respell`
-                           applies that to a table without any game file and
-                           is how the shipped table got them (byte-stable:
-                           running it again changes nothing).
+                           KapowMulti.exe).  The shipped table is not the byte
+                           output of `gendata strings`: from the Part 2 PC
+                           executable alone `strings` gives 40,575 names, the
+                           shipped table has 23,753, and 675 shared hashes
+                           differ in letter case.  Names the native classes
+                           register carry the registered spelling
+                           (registered_names.json); `gendata respell` applies
+                           that to a table without any game file, and the
+                           shipped table carries it (byte-stable: running it
+                           again changes nothing).
   registered_names.json    The spelling of the 1,224 property / command hashes
                            the native classes register (research output from
                            the registration sites; each entry re-hashed on
@@ -49,9 +49,9 @@ Provenance of the data files shipped in wlib/ (see docs/INDEX.md):
                            `gen_data keys-export/keys-import` converts it
                            to/from readable JSON so it is at least transparent
                            and hand-maintainable.
-  jiggle_params.npz        RETIRED (capture-fit AR(2) legacy).  Not shipped:
-                           without it jiggle_pass delegates to the file-only
-                           jiggle_d6 model (the promoted default).
+  jiggle_params.npz        A capture-fit AR(2) table, not shipped: without it
+                           jiggle_pass delegates to the file-only jiggle_d6
+                           model (the default).
 
 Usage (via the CLI: `watchmen gendata SUBCMD ...`):
   gendata strings   EXE [NAZ_OR_DIR ...] [-o OUT.pkl]   rebuild prop_hash_dict
@@ -74,16 +74,16 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.append(_HERE)  # append, never insert(0): flat module names must not shadow the stdlib
 
-from kapow_props import kapow_hash, name_hash
-from wutil import restricted_load
+from kapow_props import kapow_hash, name_hash  # noqa: E402
+from wutil import restricted_load  # noqa: E402
 
-_REEXPORTED = (kapow_hash,)  # gen_data.kapow_hash stays importable for older callers
+_REEXPORTED = (kapow_hash,)  # gen_data.kapow_hash stays importable for compatibility
 
 
 # ---- PE helpers -------------------------------------------------------------
 
 
-from wutil import read_bytes as _read_bytes  # one copy, in wlib/wutil.py
+from wutil import read_bytes as _read_bytes  # one copy, in wlib/wutil.py  # noqa: E402
 
 
 def pe_sections(d):
@@ -135,9 +135,8 @@ def harvest_strings(data, minlen=3):
 
 
 def exe_string_map(d):
-    """{va: string} for every null-terminated string (len >= 5, matching the
-    Ghidra export reg_dump.json was first built with) in the exe's data
-    sections (replacement for the old Ghidra strings.tsv export)."""
+    """{va: string} for every null-terminated string (len >= 5) in the exe's data
+    sections -- the equivalent of a Ghidra strings.tsv export."""
     out = {}
     for nm, va, vsz, ro, rsz in pe_sections(d):
         if nm not in (".rdata", ".data"):
@@ -509,7 +508,7 @@ def build_reg_dump(exe_path, signatures=None, key_names=None):
                 "classId": a[1] if isint(a[1]) else None,
                 "native_base": native,
                 "parent": parent,
-                # legacy key: script parent if any, else a non-Node native base
+                # `base`, kept for compatibility: script parent if any, else a non-Node native base
                 "base": parent or (native if native != "Node" else None),
                 "props": [],
                 "commands": [],
@@ -705,7 +704,7 @@ def check(game_root):
         with open(reg_path) as fh:
             old = json.load(fh)
 
-        def norm(x):  # the original Ghidra string export trimmed trailing spaces
+        def norm(x):  # a Ghidra string export trims trailing spaces
             if isinstance(x, str):
                 return x.rstrip()
             if isinstance(x, list):

@@ -47,7 +47,11 @@
 # mark to 0 (0x498192).  Nothing fires on a falling position; a delay equal to the
 # duration never fires; a loop wrap skips the rest.  actions_fired() is that test.
 # The position advances by speedFactor x the node's frame step (0x49d7fe).
-import math, os, struct, sys, threading
+import math
+import os
+import struct
+import sys
+import threading
 from itertools import batched
 
 
@@ -122,7 +126,8 @@ def property_type(name):
         try:
             if _HERE not in sys.path:
                 sys.path.append(_HERE)  # append, never insert(0)
-            import kapow_fragment as _kf, kapow_props as _kp
+            import kapow_fragment as _kf
+            import kapow_props as _kp
 
             _TYPES["names"] = _kf.NAMES
             _TYPES["hash"] = getattr(_kp, "name_hash", None) or (
@@ -285,7 +290,7 @@ def evaluate(track, t):
     integer goes a + trunc((b - a) * u) (0x4fac1c); every other type -- truth,
     color, a non-spline track whose property is not in the name table -- holds
     key A (0x47fc01).  Tracks of the scanning fallback parser carry no
-    `value_type` and are blended as before."""
+    `value_type` and are blended as numbers."""
     keys = track["keys"]
     if not keys:
         return None
@@ -304,7 +309,7 @@ def evaluate(track, t):
     if mode == 2:
         vt = track.get("value_type", "number")
         # plain zip: every key stores its own dimension, and two keys of one track
-        # that differ blend the components both have (as since 1.4.0)
+        # that differ blend the components both have
         if vt in LERP_TYPES:
             return [x + (y - x) * u for x, y in zip(va, vb)]
         if vt == "integer":
@@ -463,7 +468,7 @@ def _objects(b, p, no, bo):
     nt = struct.unpack_from(bo + "I", b, p)[0]
     if nt > 256:
         raise _Bad("object")
-    # hosts_up is the same number as the older key `flag`
+    # hosts_up is the same number as the key `flag` (its other name)
     obj = {"class": cls, "flag": flag, "hosts_up": flag}
     if path:
         obj["path"] = path
@@ -497,8 +502,8 @@ def parse_exact(b, order=None):
     return {
         "format": FORMAT,
         "duration": dur,
-        "version": dur,  # historical name of the same float (it is seconds)
-        "h1": flags,  # older name of loop_mode
+        "version": dur,  # the same float under its other name (it is seconds)
+        "h1": flags,  # loop_mode under its other name
         "loop_mode": flags,
         "loop_mode_name": LOOP_MODES[flags] if flags < len(LOOP_MODES) else None,
         "nobjects": no,
@@ -510,7 +515,7 @@ def parse_exact(b, order=None):
 
 def parse(b, order=None):
     """Parse a .sequence.  Engine grammar first (parse_exact); buffers that do
-    not follow it to the last byte go through the older scanning parser, whose
+    not follow it to the last byte go through the scanning parser, whose
     result carries no "format" key."""
     out = parse_exact(b, order)
     if out is not None:
@@ -519,7 +524,7 @@ def parse(b, order=None):
 
 
 def _parse_scan(b, order=None):
-    """Pre-engine-read scanning parser: kept as the fallback for buffers that do
+    """Scanning parser: the fallback for buffers that do
     not follow the engine grammar (truncated / carved blobs)."""
     bo = order or detect_order(b)
     n = len(b)

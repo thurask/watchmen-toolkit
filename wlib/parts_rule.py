@@ -5,9 +5,9 @@ A character collection (`Thug.fragment`, `Heavies.fragment`, ...) holds MEMBERS:
 CharacterHeadModel nodes, each a complete outfit with its own model list (and
 texture sheets).  Several members can carry the same name -- the Heavy has 18
 "Heavy" nodes: one with an afro, one with long hair, one bald with sunglasses...
-The extractor's per-name instance record is the UNION of their model lists, and
-up to 1.3.0 the character GLBs showed that union: every hairstyle and every
-jacket of a variant at once.
+The extractor's per-name instance record is the UNION of their model lists; the
+`all` parts mode shows that union (every hairstyle and every jacket of a variant
+at once), the default `game` mode shows what the game shows.
 
 Engine (KapowMultiDEDRM.exe):
   CharacterModelCollection.initialize_local 0x66cd2a   lists the members in child
@@ -70,7 +70,7 @@ OUTFIT_RULE = (
 def mode(value=None):
     """The parts mode in force: `value`, else $WATCHMEN_PARTS, else "game".
     "all" = every model the variant's members list, all at once, and every
-    weapon in the hand (the files of 1.3.0 and earlier)."""
+    weapon in the hand (the GLBs of releases before 1.4.0)."""
     v = value or os.environ.get("WATCHMEN_PARTS") or "game"
     if v not in MODES:
         raise ValueError("parts mode must be one of %s, not %r" % (", ".join(MODES), v))

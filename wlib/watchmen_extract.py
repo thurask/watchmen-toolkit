@@ -3,7 +3,7 @@
 watchmen_extract.py  --  master asset extractor for
 *Watchmen: The End Is Nigh, Part 2* (Kapow engine, PC).
 
-Feed it game.naz and it walks the whole chain we reverse-engineered and writes:
+Feed it game.naz and it walks the whole reverse-engineered chain and writes:
 
     OUT/files/      every NAZ entry, decrypted & inflated (the raw asset tree)
     OUT/textures/   <asset>/<j>_<label>_<WxH>_<FMT>.png      (diffuse/normal/
@@ -20,7 +20,7 @@ Feed it game.naz and it walks the whole chain we reverse-engineered and writes:
                     (tracks, cue points, MusicSetup track states)
     OUT/extracted/  <asset> (+ .stream, + .json)             (every raw block asset)
 
-Pipeline (see docs/WATCHMEN_EXTRACTION_MASTER.md for the gory detail):
+Pipeline (see docs/WATCHMEN_EXTRACTION_MASTER.md for the detail):
   NAZ      obfuscated ZIP: filenames rotate-left-2 encrypted, custom EOCD/CD magics.
   BLOCK    <name>.block_h_z (TOC + per-asset header blobs) + <name>.block_s_z
            (per-asset zlib streams). Standalone _h_z/_s_z and .mediastream_s too.
@@ -36,7 +36,7 @@ Usage:
     python watchmen_extract.py game.naz -o OUT
         [--no-files] [--no-textures] [--no-models] [--no-audio]
         [--exact-audio]   sample-perfect Ogg granulepos (parses Vorbis modes)
-        [--flat-music]    music streams as ONE file each (the 1.3.0 output)
+        [--flat-music]    music streams as ONE file each (the output of releases before 1.4.0)
         [--music-track-labels]  MusicStreamSlot track names in the file names
         [--smpl-loops]    RIFF smpl loop chunk on sounds with the loop flag
         [--no-text]       no text/ (every text asset, every language)
@@ -47,7 +47,18 @@ Usage:
 Requires numpy + Pillow for textures/models (audio is pure-stdlib). Python 3.13+.
 """
 
-import argparse, functools, io, itertools, math, os, re, struct, sys, zlib, array, wave
+import argparse
+import functools
+import io
+import itertools
+import math
+import os
+import re
+import struct
+import sys
+import zlib
+import array
+import wave
 from pathlib import Path
 
 # the flat wlib modules import each other by name (`import kapow_props`); one path
@@ -248,7 +259,7 @@ def max_inflate():
         try:
             n = int(v, 0)
         except ValueError:
-            raise ValueError("WATCHMEN_MAX_INFLATE must be a number of bytes, not %r" % v)
+            raise ValueError("WATCHMEN_MAX_INFLATE must be a number of bytes, not %r" % v)  # noqa: B904
         if n <= 0:
             raise ValueError("WATCHMEN_MAX_INFLATE must be positive, not %r" % v)
         return n
@@ -507,7 +518,7 @@ class Toc:
         not a known asset type."""
         return asset_compressed(s.type_name)
 
-    # --- names used before the layout was read from the engine (read + write) --
+    # --- alias names of the same fields (read + write) --
     @property
     def flag(s):
         return 1 if s.has_stream else 0
@@ -637,10 +648,9 @@ def parse_block_header(h, order=None):
         # discards the result (0x4a3b5e): it is never compared with the file.
         # 0x79D3E0DA in every Part 2 block and PS3 Part 1, 0xEE1FB0A3 in PC / X360 Part 1.
         "version_signature": struct.unpack_from(bo + "I", h, 32)[0],
-        "unknown_327": h[327],  # the older name of fingerprint_display
+        "unknown_327": h[327],  # alias of fingerprint_display
         # the four bytes of fingerprint_crc as stored: 0a 88 3f 59 in every staged
-        # block, NOT byte-swapped on the consoles.  (Up to 1.3.0 this was returned as
-        # `version_signature`.)
+        # block, NOT byte-swapped on the consoles.
         "unknown_328": bytes(h[328:332]),
         "low_violence": bool(h[388]),  # OR-ed into the platform's flag (0x435c0b)
         "tables_size": tables_size,  # directory bytes, starting at 400
@@ -794,7 +804,7 @@ def parse_block_trailer(h, order=None):
         if got["end"] == end:
             return got
         loose = loose or got
-    if loose is not None:  # parsed, but short of the blob's end: as before 1.4.0
+    if loose is not None:  # parsed, but short of the blob's end
         return loose
     first_error.add_note(
         "block trailer at 0x%X, %d bytes, %s: read with 3-float and with 4-float stream-set "
@@ -851,7 +861,7 @@ def _maybe_inflate(blob, type_name=None, report=None):
     type decides (asset_compressed): raw for `mediastream`, zlib for every other
     type, and a blob that then does not inflate is reported through `report`
     (a callable taking the zlib error text) and returned as stored.  Without a
-    type the first byte is sniffed, as before 1.4.0."""
+    type the first byte is sniffed."""
     comp = asset_compressed(type_name)
     if comp is False:
         return blob
@@ -867,7 +877,7 @@ def _maybe_inflate(blob, type_name=None, report=None):
 def asset_class(header, order=None):
     if len(header) < 8:
         return "unknown"
-    for bo in ((order,) if order else ("<", ">")):
+    for bo in (order,) if order else ("<", ">"):
         tlen = struct.unpack_from(bo + "I", header, 0)[0]
         if 1 <= tlen <= 32 and 4 + tlen <= len(header):
             raw = header[4 : 4 + tlen]
@@ -954,7 +964,7 @@ def texture_sheet(header, order="<"):
     rt = H["renderType"]
     ti = H["integer"]
     # the first offset o (0 <= o < n - 20) with [renderType hash][integer hash] at
-    # o + 4: a bytes search (1.4.0 unpacked three words at every byte offset)
+    # o + 4: a bytes search
     p = header.find(struct.pack(order + "II", rt, ti), 4)
     if 0 <= p - 4 < n - 20:
         start = p - 4
@@ -1449,8 +1459,7 @@ def extract_specular(header, order="<"):
 
 
 # ---------------------------------------------------------------------------
-# Texture .header parser  (DETERMINISTIC — cracked 2026-06-24 from the bordello
-# block; replaces the old offset-scan in naz_textures.identify_from_header).
+# Texture .header parser  (DETERMINISTIC; no offset scan).
 #
 # Layout of a "Texture" asset header (the block_h_z blob), all little-endian:
 #   +0    u32  typeNameLen           (8 = "Texture\0")
@@ -1494,7 +1503,7 @@ TEX_FMT = {  # enum -> (D3D name, ('blk',bytes/block) | ('lin',bpp))
     8: ("DXT3A", ("blk", 8)),
     9: ("ATI2", ("blk", 16)),
     # enum 10 = X360's normal-map format: the SAME 2-channel BC5/ATI2 the PC
-    # stores under enum 9 (verified 2026-07-14: PC-9 -> X360-10 -> PS3-7 across
+    # stores under enum 9 (verified: PC-9 -> X360-10 -> PS3-7 across
     # 20 shared textures; BC5 decode of the X360 layer -> clean purple normal
     # coherence 1.3, vs 18.8 as DXT5). PS3 re-encodes the same normal as DXT5(7).
     10: ("ATI2", ("blk", 16)),
@@ -1660,7 +1669,7 @@ def parse_texture_frames(hdr, order="<"):
                         "type": typ,
                         "alpha": bool(alpha),
                         "usage": usage,
-                        # slot 7 is the record the stride walk used to reach through
+                        # slot 7 is the record the stride walk reaches through
                         # a 4-byte "drift" (four absent-slot bytes): the specSize map
                         "drift": k == 7,
                         "chain": _chain_bytes_exact(en, w, h, mip),
@@ -1697,7 +1706,7 @@ def _exact_texture_plan(hdr, stream_len):
         return None
     cube = any(d["type"] == 2 for d in L)
     if cube and (len(L) != 1 or len(sets) != 1):
-        return None  # layer order inside a multi-layer cube was never observed
+        return None  # layer order inside a multi-layer cube is not established
     S = sum(d["chain"] for d in L)
     count = 6 if cube else len(sets)
     if S * count != stream_len:
@@ -1766,7 +1775,7 @@ def _is_normal_layer(images, idx, order="<"):
     PS3 enum 7 is also the diffuse format, but enum 7 only ever appears as
     diffuse (idx 0) on PC, so a non-idx0 DXT5 layer on console is a normal
     (spec/glow are always DXT1/L8). Verified across 20 shared PC/console
-    textures, 2026-07-14."""
+    textures."""
     en = images[idx]["enum"]
     if en in (9, 10):
         return True
@@ -1786,7 +1795,7 @@ def texture_layer_label(images, idx, order="<"):
     specular-power map; L8, DXT1 on X360).
 
     Without a slot (the stride walk and the drift rescue, which see formats
-    only) the older format rule applies: idx0 => diffuse; normal by format; a
+    only) the format rule applies: idx0 => diffuse; normal by format; a
     `drift` record or L8 => specSize; the FIRST colour layer after the normal =>
     specMap; a further colour layer => glow.  That rule cannot tell a slot-4
     height map from a slot-7 specSize map, nor a glow map without a specular map
@@ -1812,8 +1821,8 @@ def texture_layer_label(images, idx, order="<"):
 
 
 # ---------------------------------------------------------------------------
-# DETERMINISTIC texture layer planner (cracked 2026-06-25).  Given a Texture
-# header and the (now byte-exact) bound stream length, return the exact layer
+# DETERMINISTIC texture layer planner.  Given a Texture
+# header and the byte-exact bound stream length, return the exact layer
 # layout that tiles the stream: a single multi-layer set, a 6-face cubemap, or
 # an N-frame animation/array.  Resolves 1190/1190 level-block textures.
 #
@@ -2077,7 +2086,7 @@ def standalone_preamble(raw, order=None):
     order None: the order in which the first word is a STANDALONE_SIGNATURES
     value ("build" then says which build; None for an unknown value, read
     little-endian).  The second word differs per file and per platform; that it
-    is the source CRC is read from code elsewhere and was not checked on files."""
+    is the source CRC is read from code elsewhere and is not checked on files."""
     if len(raw) < 10 or raw[0:1] == b"\x78" or raw[8:9] != b"\x78":
         return None
     known = {v: b for tab in STANDALONE_SIGNATURES.values() for v, b in tab.items()}
@@ -2170,7 +2179,7 @@ def _bc4_channel(blocks8, w, h):
     gt = e0 > e1
     # the interpolated entries are rounded to the nearest integer, as the D3D
     # reference decoder does (an integer / 7 or / 5 is never exactly x.5, so the
-    # rounding rule for ties does not matter); 1.4.0 truncated them (-1 LSB)
+    # rounding rule for ties does not matter); truncation would give -1 LSB
     for i in range(1, 7):
         pal[:, i + 1] = np.where(gt, np.rint(((7 - i) * e0 + i * e1) / 7.0), pal[:, i + 1])
     for i in range(1, 5):
@@ -2208,7 +2217,7 @@ def ati2_xy(blocks):
     match (d(first)/dv vs d(second)/du correlate 0.17), swapped they do (0.57);
     the X360 (enum 10) and PS3 (DXT5) copies of the same maps already come out
     X-first (0.78).  Y points along +v (the stored bitangent is +dP/dv).
-    Rechecked with the rounding BC4 decoder (1.5.0) on the first 12 Part 2 maps of
+    Rechecked with the rounding BC4 decoder on the first 12 Part 2 maps of
     at least 128 px per platform: correlation of d(X)/dv with d(Y)/du 0.36 with the
     PC blocks swapped against 0.08 in file order, and 0.36 in file order against
     0.08 swapped on Xbox 360 (measured; mean over the maps)."""
@@ -2233,8 +2242,8 @@ def _coherence(a):
 def header_dims(header):
     """Candidate (width, height) pairs of a texture header without a parseable
     plan: every power of two 32..4096 stored as a little-endian u32 at any byte
-    offset (a bytes search for each of the eight values; 1.4.0 unpacked a word
-    at every offset), largest first, squares then pairs within a factor 2."""
+    offset (a bytes search for each of the eight values), largest first,
+    squares then pairs within a factor 2."""
     pows = {v for v in (32 << k for k in range(8)) if struct.pack("<I", v) in header}
     pows = sorted(pows, reverse=True)
     dims = [(a, a) for a in pows]
@@ -2334,7 +2343,7 @@ def _decode_dxt3a(buf, w, h):
 
 
 # ---------------------------------------------------------------------------
-# Console texture streams (2026-07-13).
+# Console texture streams.
 #   PS3 : per-layer [36-byte header][data]; data size = u32be @ hdr+8 (self-
 #         describing; a layer may carry MORE mips than the PC plan, e.g. ATI2
 #         stored with the full chain). Pixel data is byte-identical to PC.
@@ -2396,14 +2405,13 @@ def _x360_packed_offset(kind, unit, w, h, we, he):
     """Element (x,y) offset of the BASE level inside an X360 packed-mip tile.
     Levels whose pow2-padded TEXEL dims are both >= 32 are stored normally at
     (0,0). Smaller bases live in the shared packed tail; empirically (P1
-    console audit 2026-07-16, brute-forced vs PC ground truth on all 55
+    console audit, brute-forced vs PC ground truth on all 55
     affected sub-32px textures, incl. 8x64 A8R8G8B8 / 64x16 DXT1 / 16x16 DXT1 /
     4x4 ATI2 classes): the base packs 16 TEXELS in from the tile edge along its
     short axis — x for taller-or-square, y for wider — i.e. 16//blk elements.
     4x4-texel single-block layers sit at special spots: element (1,0) for
     8-byte blocks (DXT1), (26,0) for 16-byte blocks (ATI2/DXT5).
-    Generalizes the old _thin_mip_yoff hack (wide blk we>=32 & he<=4 -> y 4),
-    which this reproduces."""
+    A wide blk layer (we>=32 & he<=4) comes out at y 4."""
     pw = 1 << max(0, (max(w, 1) - 1).bit_length())
     ph = 1 << max(0, (max(h, 1) - 1).bit_length())
     if min(pw, ph) >= 32:
@@ -2446,8 +2454,8 @@ def _x360_layer_bytes(en, w, h, mips):
     """Stored byte size of one X360 texture layer (see rule above). The packed
     tail is the current mip's block dims each aligned UP to 32 blocks (not a
     fixed 32x32) -- correct for wide/thin textures like 256x16 (64x4 blocks ->
-    64x32 tail = 16384, vs the old fixed 8192 which mis-planned them as 2x anim).
-    For square small mips (<=32 blocks) this stays 32x32, so no regression."""
+    64x32 tail = 16384; a fixed 8192 would mis-plan them as 2x anim).
+    For square small mips (<=32 blocks) this is 32x32."""
     _, (kind, unit) = TEX_FMT[en]
     blk = 4 if kind == "blk" else 1
     total = 0
@@ -2540,7 +2548,7 @@ def _console_recover_layers(header, stream, L, last, end, rs):
 def _rsx_unswizzle(buf, w, h, unit=1):
     """PS3/RSX Morton (Z-order) unswizzle for UNCOMPRESSED layers (L8 etc.).
     DXT layers are stored linearly on RSX; L8 is swizzled — verified byte-exact
-    vs the PC linear L8 across all Part-2 specSize maps (2026-07-16).  For
+    vs the PC linear L8 across all Part-2 specSize maps.  For
     non-square pow2 textures the remaining high bits of the larger dimension
     ride linearly above the interleaved low bits (standard RSX layout).
     Returns the linear top mip (w*h*unit bytes); extra chain bytes ignored."""
@@ -2583,9 +2591,8 @@ def _rsx_unswizzle(buf, w, h, unit=1):
 
 def _texel32_to_pc(data, src):
     """Reorder console 32bpp (A8R8G8B8/X8R8G8B8) texel bytes to the PC little-
-    endian D3D layout (B,G,R,A) the shared decoder expects (2026-07-16, P1
-    console audit — 6 lightprojector/lensflare maps per console were channel-
-    scrambled).
+    endian D3D layout (B,G,R,A) the shared decoder expects (P1 console audit:
+    6 lightprojector/lensflare maps per console).
       src='ps3'  : RSX stores big-endian A,R,G,B      -> reverse each texel.
       src='x360' : stream holds PLAIN BE A,R,G,B (NOT GPU 8-in-16 swapped);
                    the unconditional _bswap16 turns it into R,A,B,G -> [2,3,0,1].
@@ -2617,8 +2624,8 @@ def _x360_base_level(raw, en, w, h):
     we = max(1, (w + blk - 1) // blk)
     he = max(1, (h + blk - 1) // blk)
     # width aligned UP to 32 like every consumer (_xg2d/_x360_layer_bytes);
-    # max(we,32) under-sized the tile buffer for non-pow2 widths > 32
-    # blocks, zero-filling the tail of the untiled layer (2026-08-17).
+    # max(we,32) would under-size the tile buffer for non-pow2 widths > 32
+    # blocks and zero-fill the tail of the untiled layer.
     need = ((we + 31) & ~31) * ((he + 31) & ~31) * unit
     buf = _bswap16(raw[:need])
     xo, yo, hswap = _x360_packed_offset(kind, unit, w, h, we, he)
@@ -2819,7 +2826,7 @@ def carve_texture_console(stream, header, out_dir, log=None):
     PNG.  The layer plan comes from the exact header (parse_texture_frames, big-
     endian) -- on X360 with each layer's stored size, on PS3 with one stream
     segment per layer; file names follow the PC carve (faceN_ / frameN_).  A
-    header or stream that does not fit falls back to the older stride walk; that,
+    header or stream that does not fit falls back to the stride walk; that,
     and every layer or face that could not be written, is logged as one
     "WARNING: texture <name>: ..." line and listed in sheet.json under
     TEXTURE_DECODE_KEY.  Returns #PNGs written > 0."""
@@ -2973,9 +2980,8 @@ def _exact_mip_sums(recs, total):
 
 def _rescue_texture_plan(hdr, stream, order="<", log=None, max_plans=None):
     """Last-resort planner for headers with serializer DRIFT (a record slips a
-    byte, corrupting its mip/dim fields; written for a Part 1 texture that the
-    layer planner now reads: no texture of the PC sets reaches this function,
-    0 of 3,469, measured in 1.5.0).
+    byte, corrupting its mip/dim fields; no texture of the PC sets reaches this
+    function, 0 of 3,469, measured).
     Strategy: (1) take the FORMAT/dim sequence from a full-offset scan of valid
     power-of-two records; (2) for candidate record subsequences (all, all-minus-
     one corrupt record, each single record), find the per-layer mip counts whose
@@ -3039,10 +3045,9 @@ def _rescue_texture_plan(hdr, stream, order="<", log=None, max_plans=None):
 
 
 #: PC cube maps: True = mip LEVELS one after another, six faces per level; False =
-#: the 1.3.0 reading (six face mip chains one after another).  Measured: read level
-#: by level, all six faces of all 110 + 200 PC cube maps equal the PS3 and X360
-#: copies pixel for pixel; read face by face only face 0 does (faces 1-5 of every
-#: PC cube map were wrong in 1.3.0).  Set False to get the 1.3.0 files back.
+#: six face mip chains one after another (the files of releases before 1.4.0).
+#: Measured: read level by level, all six faces of all 110 + 200 PC cube maps equal
+#: the PS3 and X360 copies pixel for pixel; read face by face only face 0 does.
 PC_CUBE_LEVEL_MAJOR = True
 
 
@@ -3081,7 +3086,7 @@ def _carve_texture(stream, header, out_dir, log):
     if not callable(log):
         log = lambda *a, **k: None
     S = len(stream)
-    if S < 16:  # was 256, which silently skipped 12 tiny valid textures
+    if S < 16:  # a bound of 256 would silently skip 12 tiny valid textures
         return False
     if not _is_texture(header, "<") and _is_texture(header, ">"):
         return carve_texture_console(stream, header, out_dir, log)
@@ -3192,11 +3197,9 @@ def _carve_texture_legacy(stream, header, out_dir, log):
             c = _coherence(db)
             if c < 60 and (best_coh is None or c < best_coh):
                 best_coh, chosen = c, (w, h, dfmt, dsize)
-    # File names follow the standard <j>_<label>_<WxH>_<FMT>.png scheme
-    # (2026-08-17): the old diffuse.png/normal.png/specular.png names matched
-    # neither build_texture_index's *_diffuse_*.png rglob nor _find_layer's
-    # *_<label>_*.png globs, so legacy-carved textures could never be linked
-    # from any OBJ/MTL.
+    # File names follow the standard <j>_<label>_<WxH>_<FMT>.png scheme:
+    # build_texture_index's *_diffuse_*.png rglob and _find_layer's
+    # *_<label>_*.png globs link legacy-carved textures from OBJ/MTL too.
     out_dir.mkdir(parents=True, exist_ok=True)
     if chosen is None:
         for w, h in ordered:
@@ -3321,7 +3324,7 @@ def find_descriptors(header, order="<"):
     Integers are in block byte order (LE PC / BE X360+PS3).  The consoles use
     SMALLER vertex strides for the same G: rigid G=5 -> 32B (PC 44), skinned
     G=6 -> 44B (PC 56): the console layout packs normal/tangents as 11:11:10
-    u32s instead of half3s (verified vs PC ground truth, 2026-07-13)."""
+    u32s instead of half3s (verified vs PC ground truth)."""
     out = []
     last = -100
     n = len(header)
@@ -3355,8 +3358,8 @@ def _ib_ok(stream, vbo, nv, stride, ib, order="<", maxdeg=0.4):
     (< maxdeg repeated-index). A false-positive VB offset (positions look sane so
     it passes _vb_ok) typically lands ~4 bytes before the real one and yields a
     ~50% repeated-index IB, while every real submesh is ~0%. Used to make the VB
-    search prefer the real offset (recovered the X360 TwilightLadyHair and the
-    rorschachspots decals, 2026-07-15d)."""
+    search prefer the real offset (the X360 TwilightLadyHair and the
+    rorschachspots decals need it)."""
     ibo = vbo + nv * stride
     nt = ib // 6
     if nt == 0 or ibo + ib > len(stream):
@@ -3372,7 +3375,7 @@ def _ib_ok(stream, vbo, nv, stride, ib, order="<", maxdeg=0.4):
 def _vb_ok(stream, vbo, nv, stride, ib, order="<"):
     """STRICT carve validation: every index in range AND positions finite/bounded/
     non-degenerate (all 3 axis spans > eps). Rejects false offsets that squish a
-    submesh flat (the old lenient check accepted those)."""
+    submesh flat (a check without the span test accepts those)."""
     ibo = vbo + nv * stride
     if ibo + ib > len(stream):
         return False
@@ -3403,7 +3406,7 @@ def _vb_ok(stream, vbo, nv, stride, ib, order="<"):
 
 def _vb_ok_flat(stream, vbo, nv, stride, ib, order="<"):
     """FALLBACK for planar decals (signs/graffiti: legit meshes with one flat
-    axis; 56 models, 2026-07-09 batch sweep).  Same checks as _vb_ok but only
+    axis; 56 models in the batch sweep).  Same checks as _vb_ok but only
     requires TWO non-degenerate axes.  Only use when the strict scan found
     nothing -- relaxing the primary gate shifts 174 offsets on good models
     (validated; the strictness is load-bearing)."""
@@ -3607,9 +3610,9 @@ def _rows3(A):
 
 
 def _decode_sub_loop(stream, vbo, nv, stride, be=False, restored=None, notes=None):
-    """_decode_sub as a per-vertex struct loop (the 1.4.0 code with the
-    non-finite rule): used when numpy is missing, and the reference the tests
-    hold the numpy version to."""
+    """_decode_sub as a per-vertex struct loop (with the non-finite rule):
+    used when numpy is missing, and the reference the tests hold the numpy
+    version to."""
     fmt = ">3f" if be else "<3f"
     hfmt = ">H" if be else "<H"
     verts = [struct.unpack_from(fmt, stream, vbo + i * stride) for i in range(nv)]
@@ -3863,8 +3866,8 @@ def _descriptor_candidates(header, order="<"):
 def submesh_materials(header, order="<"):
     """Per-submesh material indices, in submesh (descriptor) order.
 
-    Engine layout (verified on Rorschach vs in-Blender ground truth,
-    2026-07-08g): each render-piece record is
+    Engine layout (verified on Rorschach vs in-Blender ground truth): each
+    render-piece record is
         [u32 len][pieceName..\0] ... [u32 1][u32 materialIndex] ... [geometry descriptor]
     i.e. the NAME+MATERIAL precede their descriptor.  Positional pairing with
     extract_materials() order is WRONG whenever one material covers several
@@ -3875,8 +3878,7 @@ def submesh_materials(header, order="<"):
     i = 0
     n = len(header)
     # offsets whose u32 can be a name length 2..48: only these need the record
-    # test, every other offset just steps on (the 1.4.0 loop unpacked a word at
-    # every byte offset)
+    # test, every other offset just steps on
     lenpat = re.compile(
         (rb"(?=[\x02-\x30]\x00\x00\x00)" if order == "<" else rb"(?=\x00\x00\x00[\x02-\x30])"),
         re.S,
@@ -3934,7 +3936,7 @@ TEXTURE_DIR_EXTS = (".bmp", ".tga", ".dds", ".png", ".jpg", ".texture")
 class TextureIndex(dict):
     """Carved-texture lookup for one `textures/` tree.
 
-    As a dict it is bare name (lower case) -> texture dir, like the old index, and
+    As a dict it is bare name (lower case) -> texture dir, and
     independent of the order the file system lists directories in.  `resolve()` is
     the lookup to use: by the asset path the model stores when there is one, by
     bare name otherwise.  When a bare name fits several directories the one whose
@@ -4087,7 +4089,7 @@ def _make_roughness(texdir, specsize_png, exponent):
             # skin -> matte. roughness = 1 - sqrt(2/(exp+2)).
             rv = 1.0 - min(1.0, math.sqrt(2.0 / (expscale + 2.0)))
             r = int(round(min(1.0, max(0.0, rv)) * 255.0))
-            Image.fromarray((np.full((4, 4), r, dtype="uint8"))).save(out)
+            Image.fromarray(np.full((4, 4), r, dtype="uint8")).save(out)
         return out
     except Exception:
         return None
@@ -4162,7 +4164,7 @@ def _mtl_emission(sheet):
     below) -> (False, None): the layer is named in a comment and not linked (a
     level node can select another sheet of the texture, e.g. a lamp's "Lit" sheet
     after its "light off" one; a model file is written with the first sheet).  A
-    texture without sheet values keeps the old behaviour, (True, None)."""
+    texture without sheet values gives (True, None)."""
     si = (sheet or {}).get("selfIlluminance")
     if si is None or isinstance(si, bool):
         return True, None
@@ -4243,8 +4245,8 @@ def _write_obj_mtl(path, name, v, n, uv, tris, subs, mats, tex_index, log):
     import frame as _frame
 
     # true frame (default): x negated; the faces stay in file order, which is the
-    # counter-clockwise (front) order there.  mirrored: the engine numbers as 1.3.0
-    # wrote them (faces wind against the normals in a right-handed reader).
+    # counter-clockwise (front) order there.  mirrored: the engine numbers
+    # verbatim (faces wind against the normals in a right-handed reader).
     true_frame = _frame.is_true()
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write("# %s  (%d verts, %d tris, %d submeshes)\n" % (name, len(v), len(tris), len(subs)))
@@ -4372,16 +4374,16 @@ def _write_obj_mtl(path, name, v, n, uv, tris, subs, mats, tex_index, log):
             mf.write("\n")
 
 
-# ---- rigged/textured .glb export (optional; --glb). FILE-DERIVED (2026-07-13):
+# ---- rigged/textured .glb export (optional; --glb). FILE-DERIVED:
 #      the flat skin rig takes its joint names + palette ORDER from the model's own
-#      embedded skeleton header (extract_skeletons.skeleton_from_header), so the old
-#      capture artifacts (skeleton_female_biped.json / bundled_clip_*.npz) are no
-#      longer read. Emitted glbs are bind-pose; engine-exact ANIMATED per-character
-#      glbs come from the QA'd file-only pipeline: `watchmen.py characters` (binds ->
+#      embedded skeleton header (extract_skeletons.skeleton_from_header); no
+#      capture artifact (skeleton_female_biped.json / bundled_clip_*.npz) is
+#      read. Emitted glbs are bind-pose; engine-exact ANIMATED per-character
+#      glbs come from the file-only pipeline: `watchmen.py characters` (binds ->
 #      bake -> variant glbs). ----
 #: "attrs": --glb also writes the engine's per-vertex data (NORMAL, TANGENT,
 #: COLOR_0), sheet-driven materials and static .glb files for rigid models;
-#: --no-vertex-attrs clears it and the .glb output is the 1.3.0 one.
+#: --no-vertex-attrs clears it (the .glb output of releases before 1.4.0).
 #: "tex_size": --glb-texture-size (None: embed the textures at full size).
 #: The rig layout is $WATCHMEN_RIG (--rig; variant_glb.rig_mode).
 _RIG = {"on": False, "mod": None, "loaded": False, "attrs": True, "tex_size": None}
@@ -4394,7 +4396,7 @@ def _texture_size_arg(v):
     try:
         n = int(v)
     except ValueError:
-        raise argparse.ArgumentTypeError("%r is not a whole number" % v)
+        raise argparse.ArgumentTypeError("%r is not a whole number" % v)  # noqa: B904
     if n < 1:
         raise argparse.ArgumentTypeError("must be at least 1 (got %d)" % n)
     return n
@@ -4514,8 +4516,8 @@ _VOLUME_FLOATS = {5: 3, 6: 1, 7: 2}  # box / sphere / capsule (FUN_00524b23)
 
 def console_header_decode():
     """False when WATCHMEN_CONSOLE_MODELS=scan: console (big-endian) models are
-    then decoded by the descriptor scan as before 2026-10-05, not from their
-    header.  Default: header-driven."""
+    then decoded by the descriptor scan, not from their header.  Default:
+    header-driven."""
     return os.environ.get("WATCHMEN_CONSOLE_MODELS", "header").strip().lower() != "scan"
 
 
@@ -4667,7 +4669,7 @@ def _mr_part(r, pi, buffers, layout="part2"):
     P["occluder"] = P["proxy"] = None
     if r.boolean():
         # the part's OCCLUDER mesh for the engine's occlusion culling (0x545927 ->
-        # FUN_0053f9a5 "... not supported for occluder"); "proxy" is the old name
+        # FUN_0053f9a5 "... not supported for occluder"); "proxy" is an alias key
         mb = _mr_meshbuffer(r)
         mb.update(kind="occluder", part=pi, lod=None, name="", tex_index=[])
         P["occluder"] = P["proxy"] = mb
@@ -4759,7 +4761,7 @@ def parse_model_header(header, order="<", layout=None):
 
     {"type", "textures": [path], "texture_flags", "pivotbooks", "bbox_min",
      "bbox_max", "parts": [{name, pos, quat, f1, parent, lods: [[submesh]],
-     shadow: [buf], occluder: buf|None (also under the old key "proxy"),
+     shadow: [buf], occluder: buf|None (also under the alias key "proxy"),
      lists_offset, surface_count (see model_surfaces)}],
      "buffers": [buf in STREAM order], "end", "layout"}
     Every buf has kind ('render' | 'shadow' | 'occluder'), part, lod, name,
@@ -4824,8 +4826,8 @@ def _material_stem(path):
 
 def check_lod(lod):
     """`lod` as decode_model / select_model_buffers accept it: 'all' / None or an
-    int >= 0.  ValueError otherwise (a negative LOD used to select no buffer and
-    silently drop the model onto the legacy scan)."""
+    int >= 0.  ValueError otherwise (a negative LOD would select no buffer and
+    silently drop the model onto the descriptor scan)."""
     if lod in (None, "all"):
         return lod
     if isinstance(lod, bool) or not isinstance(lod, int) or lod < 0:
@@ -4839,7 +4841,7 @@ def _model_lod_arg(v):
     try:
         return check_lod(v if v == "all" else int(v))
     except ValueError:
-        raise argparse.ArgumentTypeError("expected a whole number >= 0 or 'all', got %r" % v)
+        raise argparse.ArgumentTypeError("expected a whole number >= 0 or 'all', got %r" % v)  # noqa: B904
 
 
 def language_slot(v):
@@ -4943,7 +4945,7 @@ def model_lod_info(header, order="<"):
         if bag is not None:
             # exact walk of the bag in either record layout.  (The fixed 20-byte
             # stride below loses its place on a string longer than one dword: a
-            # model with an `animation` path -- 22 in PC Part 2 -- had no LODs.)
+            # model with an `animation` path -- 22 in PC Part 2 -- would get no LODs.)
             num_ok = (None, num)
             for _o, lo, th, q, k in bag["records"]:
                 if lo in want and k == 1:
@@ -5127,8 +5129,8 @@ def model_meta(header, model=None, order="<"):
 
 def model_meta_reduced(header, order="<"):
     """Sidecar content of a model whose header follows NEITHER layout of
-    parse_model_header (none in the six shipped sets since the stand-alone
-    Part 1 layout is read; geometry comes from the descriptor scan): what the
+    parse_model_header (none in the six shipped sets, as the stand-alone
+    Part 1 layout is read too; geometry comes from the descriptor scan): what the
     property bag at the start of the header states -- the LOD switch distances
     and the bag itself -- with the parts that need the full header layout named
     under "not_decoded" instead of being left out silently.  None when the
@@ -5545,7 +5547,7 @@ def gltf_tangents(normals, tangents, bitangents, green_up=True):
       green_up=False -> w = +s, for a texture left in the engine's orientation.
     Rendered against the engine math in three.js on four models: w = -s with the
     inverted-green texture is within 0.5..1.1 degrees (median), w = +s is 2.4..17
-    degrees off.  (1.3.0 returned +s; no shipped GLB used it.)"""
+    degrees off."""
     n = np.asarray(normals, np.float32)
     t = np.asarray(tangents, np.float32)
     b = np.asarray(bitangents, np.float32)
@@ -5680,7 +5682,7 @@ class OutputNames:
 
     The level blocks repeat their shared assets (Part 2 PC: 8,711 block entries
     are 7,023 names), and the copies are byte-identical in every set measured
-    (six sets, 1.4.0: no name has two different header / stream pairs; in Part 1
+    (six sets: no name has two different header / stream pairs; in Part 1
     the Prison block lists 22 names without the stream its other copies have).
     place() makes the rule explicit instead of relying on that:
 
@@ -5774,8 +5776,8 @@ class OutputNames:
 def standalone_output_name(names, stem, header, stream):
     """Output name of a standalone `_h_z` / `_s_z` pair (`stem` = its archive path
     without the suffix) through the run's OutputNames -> (name, status).  Two
-    pairs with the same base name in different folders used to overwrite each
-    other; a copy with different bytes is now written as `<name>~<folder>.<ext>`
+    pairs with the same base name in different folders do not overwrite each
+    other: a copy with different bytes is written as `<name>~<folder>.<ext>`
     with a WARNING, an identical one is "repeat" (not written again)."""
     stem = stem.replace("\\", "/")
     folder = stem.rpartition("/")[0]
@@ -5922,9 +5924,9 @@ def _decode_model(header, stream, out_path, tex_index, log, order, lod, status, 
                 verts = apply_part_transform(xf, verts)
                 norms = apply_part_transform(xf, norms, point=False)
             if rig:
-                # pass the detected byte order (2026-08-17): without it decode_skin
-                # used the PC layout, whose stride>=56 gate rejected every console
-                # (stride-44) skinned submesh -> no console glb was ever emitted.
+                # pass the detected byte order: without it decode_skin would use
+                # the PC layout, whose stride>=56 gate rejects every console
+                # (stride-44) skinned submesh -> no console glb.
                 si, sw = _RIG["mod"].decode_skin(stream, vbo, nv, stride, order)
                 if si is None:
                     have_skin = False
@@ -5998,10 +6000,10 @@ def _decode_model(header, stream, out_path, tex_index, log, order, lod, status, 
             ti = hplan[1][k]["tex_index"]
             ok = ti and ti[0] < len(tex)
             materials.append(texture_ref(tex[ti[0]]) if ok else "submesh_%d" % k)
-    # Per-submesh materialIndex read from the header records (2026-08-17): positional
+    # Per-submesh materialIndex read from the header records: positional
     # pairing is WRONG whenever one material covers several submeshes (see the
     # submesh_materials docstring; Rorschach trenchcoat) -- same pattern as
-    # char_lib._parts.  Falls back to the old positional logic when the records
+    # char_lib._parts.  Falls back to positional pairing when the records
     # are unavailable/unparsable (or the _pick_vb path, which has no descriptors).
     if materials is None and mats and didx and len(didx) == len(subs):
         try:
@@ -6247,7 +6249,7 @@ def _decode_model(header, stream, out_path, tex_index, log, order, lod, status, 
 
 def _half(u):
     """IEEE half float (u16 code) -> Python float, as numpy's float16 reads it:
-    exponent 31 is +-infinity (mantissa 0) or NaN.  (1.4.0 returned 0.0 there.)"""
+    exponent 31 is +-infinity (mantissa 0) or NaN."""
     s = (u >> 15) & 1
     e = (u >> 10) & 0x1F
     f = u & 0x3FF
@@ -6553,8 +6555,8 @@ def _ogg_from_packets(pk, exact, end=None):
         gr[-1] = end
     # Vorbis I in Ogg: the identification header alone on the first page, the
     # comment and setup headers finishing on the page(s) before the first audio
-    # page (granule 0); audio packets fill pages of about OGG_PAGE_BYTES (1.4.0
-    # wrote one page per audio packet: 27+ bytes of page header per ~100-byte
+    # page (granule 0); audio packets fill pages of about OGG_PAGE_BYTES (not
+    # one page per audio packet: 27+ bytes of page header per ~100-byte
     # packet); the last page carries the end position (trims the final block)
     # and the EOS flag
     w = _OggWriter(1)
@@ -6570,7 +6572,7 @@ def _ogg_from_packets(pk, exact, end=None):
 
 
 def decode_audio(raw, out_path, exact, log=None):
-    """The 1.3.0 single-file output: every packet of the stream in file order.
+    """The single-file output (--flat-music): every packet of the stream in file order.
     Correct for a one-track stream; a multi-track stream comes out as its tracks'
     chunks appended in turn (use decode_audio_tracks)."""
     if not callable(log):
@@ -7119,7 +7121,9 @@ def _emit_audio(container, ext, name, out_dir, vgmstream_cli, log, tag, keep_con
         return outp
 
     if vgmstream_cli:
-        import subprocess, tempfile, os as _os
+        import subprocess
+        import tempfile
+        import os as _os
 
         wav = base.with_suffix(base.suffix + ".wav")
         wav.parent.mkdir(parents=True, exist_ok=True)
@@ -7157,8 +7161,8 @@ def decode_sfx_console(header, order, name, out_dir, vgmstream_cli, log, keep_co
 
     X360: the XMA2 packets start at pe+26, right after their byte count (the
     packet frame counts add up to samples / 512 there on every shipped sound;
-    1.3.0 cut them from pe+30, four bytes into the first packet, and no decoder
-    read the result).  PS3: the MP3 bytes of the header's one segment.  A
+    a cut from pe+30 lands four bytes into the first packet, and no decoder
+    reads that).  PS3: the MP3 bytes of the header's one segment.  A
     header sfx_info does not read falls back to a byte scan, and says so."""
     try:
         info = sfx_info(header, order)
@@ -7295,7 +7299,7 @@ def decode_console_audio(
     (media_track_name; `labels` = the MusicStreamSlot track names, `desc` =
     media_desc_from_header for per-track sample counts) and the list of track
     records is returned.  A one-track stream, or one that does not split
-    cleanly, is written by the single-file path below (the 1.3.0 files) and
+    cleanly, is written by the single-file path below and
     returned as a one-record list.  tracks=False returns True / False."""
     split = media_tracks_console(raw) if tracks else None
     if split and len(split[1]) > 1:
@@ -7477,7 +7481,7 @@ _COEF_PAIRS = tuple(zip(_C1, _C2, strict=True))
 def _adpcm_predict(s1, s2, c1, c2):
     """(s1*c1 + s2*c2) / 256 truncated toward zero, as the Microsoft reference
     decoder, the Windows ACM codec and ffmpeg compute it (C integer division);
-    1.4.0 used `>> 8`, which floors (differs by 1 on negative odd sums)."""
+    a plain `>> 8` floors (differs by 1 on negative odd sums)."""
     t = s1 * c1 + s2 * c2
     return t >> 8 if t >= 0 else -((-t) >> 8)
 
@@ -7786,7 +7790,7 @@ def decode_sfx(header):
         nsamp, dsz = struct.unpack_from("<II", header, pe + 18)
         if dsz == nsamp * 2 * ch and pe + 26 + dsz <= len(header):
             data = header[pe + 26 : pe + 26 + dsz]  # loader 0x449e40: data follows its size
-        else:  # not that layout: the 1.3.0 slice
+        else:  # not that layout: the pe+30 slice
             data = header[pe + 30 : pe + 30 + nsamp * 2 * ch]
         return (data, ch, rate) if len(data) >= 16 else None
     if tag == 2:
@@ -7799,7 +7803,7 @@ def decode_sfx(header):
             pcm = _adpcm_stereo(adata, ba, coefs) if ch == 2 else _adpcm_mono(adata, ba, coefs)
             if nsamp and len(pcm) > nsamp * ch:
                 del pcm[nsamp * ch :]
-        else:  # not that layout: find the standard table (the 1.4.0 rule) and read to the end
+        else:  # not that layout: find the standard table and read to the end
             j = header.find(_COEFB, pe)
             if j < 0:
                 return None
@@ -8216,7 +8220,7 @@ def _extract_main(argv):
     _stream_used = {}
     _stream_cache = {}  # stream-only file -> bytes, at most _STREAM_CACHE of them
 
-    def _stream_file(path, _find=stream_file_lookup({k: k for k in _stream_only})):
+    def _stream_file(path, _find=stream_file_lookup({k: k for k in _stream_only})):  # noqa: B008
         key = _find(path)
         if key is None:
             return None
@@ -8346,7 +8350,7 @@ def _extract_blocks_and_rest(
             continue
         # real block pair
         if a.limit is not None and n_assets >= a.limit:
-            break  # --limit N: stop after N block assets (was accepted but ignored)
+            break  # --limit N: stop after N block assets
         log("\nBLOCK %s" % stem)
         try:
             h_data, s_data = _half(hs, "h"), _half(hs, "s")
@@ -8361,10 +8365,10 @@ def _extract_blocks_and_rest(
         _args = (h_data, s_data, a.language) if a.language else (h_data, s_data)
         try:
             # check pass: the whole block parses and inflates (what does not inflate is
-            # reported now, before any asset of the block is written, as before).  The
+            # reported here, before any asset of the block is written).  The
             # assets are kept for the asset pass while they fit in BLOCK_CACHE_BYTES;
-            # a larger block is parsed again below -- holding a level's assets is what
-            # 1.4.0's memory went on
+            # a larger block is parsed again below -- holding a whole level's assets
+            # is what the memory would go on
             _rep = lambda m: log("  ! " + m)
             _kept, _size, _cap = [], 0, BLOCK_CACHE_BYTES
             for _item in extract_block(*_args, report=_rep, stream_files=_stream_file):
@@ -8396,11 +8400,10 @@ def _extract_blocks_and_rest(
             # already wrote the same bytes (OutputNames: "repeat")
             name, placed = names.place(e.name, stem, header, stream)
             low = name.lower()
-            # class-name compare is case-insensitive (2026-08-17): the source had
-            # both "mediastream" and "MediaStream" literals; only one spelling can
-            # match the on-disk typename, and a miss here left media_meta empty
-            # (console XMA then wrapped with default 2ch/48000 instead of the real
-            # channel/rate/sample values).
+            # class-name compare is case-insensitive: the typename is spelled both
+            # "mediastream" and "MediaStream"; a case-sensitive miss here would leave
+            # media_meta empty (console XMA then wrapped with default 2ch/48000
+            # instead of the real channel/rate/sample values).
             if not a.no_audio and cls.lower() == "mediastream":
                 try:
                     mm = media_meta_from_header(header, BLOCK_ORDER)
@@ -8769,7 +8772,8 @@ def _extract_blocks_and_rest(
     # stream, so they never enter model_jobs; collect them straight from the naz).
     if _RIG["on"]:
         try:
-            import extract_skeletons as _es, json as _json
+            import extract_skeletons as _es
+            import json as _json
 
             _sk = _es.collect(str(a.naz))
             skdir = a.out / "skeletons"

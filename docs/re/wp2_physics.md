@@ -2,32 +2,34 @@
 
 Target `KapowMultiDEDRM.exe`, PhysX 2.8.1 (`PhysXCore.dll` 2.8.1.1 decompiled, `NxCharacter.dll` not).
 Evidence tags: **[code]** traced in the decompilation/disassembly (address given), **[data]** read from the
-user's game files (read-only), **[inferred]** with the reason, **[not established]**.
-Machine-readable: `findings/wp2_ragdoll_rigs.json` (13 rigs + common tables, schema in the file),
-`findings/wp2_physx_vtables.json` (SDK vtable names + game call sites). Scratch: `work/wp2/`
-(`NOTES.md`, `rigs_sel.json` raw file dump, `build_rigs.py`, `vcalls.py`, `pxvt.py`, `vt_*.txt`,
-`group_matrix.json`, `cji_table.json`).
+game files (read-only), **[inferred]** with the reason, **[not established]**.
+Machine-readable: `wp2_ragdoll_rigs.json` beside this note (13 rigs + common tables, schema in the file).
+Outside this repository (section H): `findings/wp2_physx_vtables.json` (SDK vtable names + game call
+sites) and the scratch folder `work/wp2/`.
 
-## 0. What changes against the brief and the earlier documents
+## 0. Summary
 
 1. **The ragdoll rig is not built in code. It is data in the skeleton `.model` file.** `CharacterRagdollSetup`
    is an editor tool: its only entry `command_setup_default_character` (hash 0x73ae8e9, handler 0x682b7c) is
    the target of a `control=button` property and has no sender anywhere in the dump **[code]**. Its tables are
    the authoring defaults; the shipped files contain exactly those numbers (checked) plus per-skeleton edits
-   **[data]**. The dominatrix audit's "limits and masses are in code, not data" (d11) is the wrong way round.
-2. The model's articulated-body section (called "physics/ragdoll … not parsed" in `KAPOW_NAZ_FORMAT.md` /
-   `formats.md` 3.3) is now fully parsed: 13 character rigs extracted, all files tile to 4 bytes before EOF.
+   **[data]**.
+2. The model's articulated-body section (`KAPOW_NAZ_FORMAT.md`; `formats.md` 3.3) is parsed in full: 13
+   character rigs extracted, all files tile to 4 bytes before EOF.
 3. The two volume lists per node are **ragdoll/"default collision" shapes (list 0, PhysX scene 0)** and
-   **cloth-collision shapes (list 1, PhysX scene 1)**. `skeleton_blobs.md` left the meaning open.
+   **cloth-collision shapes (list 1, PhysX scene 1)**.
 4. The gameplay capsule **is** an `NxController` (class `Physics::CharacterController`, the "actor" of the
    `CharacterPhysics(CollisionCapsuleNode)` node), moved by `NxController::move`; gravity on the ground is a
-   constant −3 m/s sink term, and no integrating free-fall state was found (C).
-5. Side findings for the toolkit: (a) `.pb` pivot books and the model AB blob use one record format
-   `[objId][propHash][typeId][nWords][data]`; (b) `kapow_fragment_keys.pkl` lacks the D6 swing keys
-   (0xe3ba246d `swing1LimitType`, 0x6f1c1d46 `swing1MotionLimitValue`, 0x96f40d0c `swing2LimitType`,
-   0x1c2a4efb `swing2MotionLimitValue`, 0x0a3f7a6e / 0x1de40e20 / 0x09ebf0a2 and 0x9f5e10ab / 0xc640881e /
-   0x97bd4e2a restitution/spring/damping) so D6Joint objects in fragments are mis-typed today (e.g.
-   `"key_96f40d0c": "vector?"` in `CharacterRootTemplate_Enemy.fragment.json`) **[data]**.
+   constant −3 m/s sink term, and no integrating free-fall state exists (C).
+5. Side findings: (a) `.pb` pivot books and the model AB blob use one record format
+   `[objId][propHash][typeId][nWords][data]`; (b) the D6 swing keys 0xe3ba246d `swing1LimitType`,
+   0x6f1c1d46 `swing1MotionLimitValue`, 0x96f40d0c `swing2LimitType`, 0x1c2a4efb `swing2MotionLimitValue`,
+   and the restitution/spring/damping keys 0x0a3f7a6e / 0x1de40e20 / 0x09ebf0a2 and 0x9f5e10ab /
+   0xc640881e / 0x97bd4e2a are in `kapow_fragment_keys.pkl`; the binary parse of
+   `CharacterRootTemplate_Enemy.fragment` names every key (0 `key_…` left), and a toolkit test pins the
+   ten hashes **[data]**. A `.fragment.json` written by an older parser can still show them untyped
+   (e.g. `"key_96f40d0c": "vector?"` in a stale `CharacterRootTemplate_Enemy.fragment.json`); the binary
+   fragment is authoritative.
 
 ---
 
@@ -111,7 +113,7 @@ total mass T **[code, reproduces the files to 7 digits]**:
 T comes from the `CharacterRagdollSetup` node (`m_ntotalmass`, default 85; `m_nlineardamping` 0.5,
 `m_nangulardamping` 2.0 default, 2.5 in the shipped `CharacterVisual.fragment`) at authoring time; the game
 reads none of these **[code + data]**. "Per-character scaling" is therefore only the choice of slot-0 model:
-T = 75 / 85 / 120 / 185. No run-time mass or size scale was found on the path (`0x51d5ad` copies verbatim).
+T = 75 / 85 / 120 / 185. No run-time mass or size scale exists on the path (`0x51d5ad` copies verbatim).
 
 Actor creation `Physics::RigidBody` vtable slot 18, 0x506b75 **[code]**: one `NxShapeDesc` per volume of
 `node.volumes[body+0x8c]` (slot 15, 0x5073eb → factory 0x4f73d5); `shape.group` = `actor.group` = body+0x48
@@ -132,6 +134,13 @@ Shape descriptors **[code]**, constants read from exe bytes (0xa23760 = 0.025 do
 
 All: `skinWidth` 0.025, `shapeFlags` 0x120008 (SDK default), `materialIndex` 0 in the descriptor, local pose =
 the volume's position and quaternion in the bone frame.
+
+**Shape size.** The engine grows every primitive by 0.025 and sets skinWidth 0.025. That is the SDK's own
+recipe for hiding the permitted sinking-in ("inflate the size of physics objects with respect to their
+graphical representation", PhysX documentation, *Skin Width*). The surface things rest on is therefore the
+**stored** size. Check **[data]**: at the stored size no two bodies of any of the 13 rigs overlap in the bind
+pose unless a joint connects them; at the grown size 4–7 pairs per rig do (up to 4.6 cm). A solver without
+a skin width must use the stored size; the exported proxies and the `contact` record use the stored size.
 
 Material **[data + code]**: not in the model. It comes from the *pivot sheet* of the owning `Character` node
 (fragment property `pivotsheet_id`, a 64-bit id) looked up in the pivot book the model names
@@ -167,7 +176,7 @@ bind-pose derivation. Consequences:
 The editor's `JointLimits` 0x683d12 additionally rotates the *parent* frame about the swing1 axis by a
 per-joint offset (table field +0x48: spine −9, forearm 60, thigh 10, calf 30; `CreateJointInfo` 0x6846e8).
 That rotation is not serialised and the loader rebuilds the symmetric frame, so the shipped game does not
-have it **[code + data; the offsets' unit scale `[0xe171c0→+0x10→+0x60]` was not resolved]**.
+have it **[code + data; the offsets' unit scale `[0xe171c0→+0x10→+0x60]` is not resolved]**.
 
 Descriptor fill `Physics::D6Joint` slot 12 0x5146ec → 0x5141ee **[code]**: `actor[0]` = parent (+0xa4),
 `actor[1]` = child (+0xa8); `localAxis[i]` = image of X, `localNormal[i]` = image of Y under the stored
@@ -212,9 +221,20 @@ group** from `PhysicsSimulation.command_create_unique_ragdoll_collision_group` 0
 `command_unregister_unique_collision_group`). The pair matrix is set once by
 `PhysicsSimulation.command_setup_collision_groups` 0x7dffbf (186 calls of `PhysicsWorld` 0x512b81 →
 `NxScene::setGroupCollisionFlag` +0xbc and `setActorGroupPairFlags` +0xcc with 0x86 = start-touch |
-end-touch | forces); the 135 constant pairs are in the JSON (`common.collision_groups`), the 49 calls for
-the computed unique groups were not tabulated. Relevant rows: KINEMATIC_RAGDOLL collides with WORLD and
-RAGDOLL_IN_WORLD, not with DYNAMIC_WORLD or capsules; SIMPLE_RAGDOLL with WORLD and DYNAMIC_WORLD only.
+end-touch | forces); the 135 constant pairs are in the JSON (`common.collision_groups`). Relevant rows:
+KINEMATIC_RAGDOLL collides with WORLD and RAGDOLL_IN_WORLD, not with DYNAMIC_WORLD or capsules;
+SIMPLE_RAGDOLL with WORLD and DYNAMIC_WORLD only.
+
+The unique ragdoll groups (lifted script, `PhysicsSimulation`) **[code]**: pools 20–23
+(`GetRagdollNonDynamicCollisionGroup` 0x7d82f0), 24–27 (`GetRagdollDynamicCollisionGroup` 0x7d837d), 28–31 in
+pairs (`GetRagdollPairedCollisionGroup` 0x7d823f). Rows: all three collide with WORLD 0, RAGDOLL_IN_WORLD 3,
+KINEMATIC_RAGDOLL 4; 24–31 also with DYNAMIC_WORLD 5; none with 1, 2, 6–11; a pair (g, g+1) not with each
+other. `StateRagdollDriven` asks for a group with both arguments 1 (pool 24–27),
+`command_pre_transfer_to_animation_control` with (1, 0) (pool 20–23). Unset pairs keep the scene default
+"same group only" (0x502fda), so a ragdoll's bodies collide with one another (not across a joint), and no
+`setActorPairFlags` call exists on this path (its only wrapper `PhysicsWorld::SetActorPairCollisionFlagMSG`
+0x514ddc has no script user). The 49 non-constant calls in 0x7dffbf for these groups are not tabulated
+in the JSON; the rows above come from the lifted script.
 
 ---
 
@@ -243,7 +263,7 @@ back to `Ragdoll-Idle`; every get-up pose has a transition to `Dead`. No handler
 "go ragdoll" command directly: the senders of `command_ragdoll_driven` (0x633b7f2f) and
 `command_state_ragdoll_driven` (0xec42f9c0) are only 0x5b16ed and 0x6937d1. How the
 `KILL_ANIMATION_PARTNER` event and the damage poses select the knock-down/ragdoll states is state-machine
-and combat logic (events.md, WP3) and was **not traced here**. Impact-driven
+and combat logic (events.md, wp3_combat.md) and is **not traced here**. Impact-driven
 ragdoll of an animated character (thresholds `CharacterVisualDef`: ragdoll 6000, animation 2000, ignore 500,
 decrease 2500/s, collider force scale 1.2, height mask 0.6 in the shipped fragment) is handled in
 `CharacterVisual.ModelCollisionContactAdded` 0x69d00a / `DetermineDamageReaction` 0x6a18d1 — **not read**.
@@ -268,8 +288,13 @@ decrease 2500/s, collider force scale 1.2, height mask 0.6 in the shipped fragme
    (`AddRagdollBoneVelocities` 0x67a035); collider impulse × 1.2 → `SetRagdollMeanImpuls` 0x664ff3; collider
    velocity × 1.2 → `SetRagdollMeanVelocity` 0x664f7d; collider angular velocity → pelvis
    (`SetRagdollAngularVelocity` 0x66b43d, bone enum 32 = PELVIS). The *initial* body velocities are whatever
-   PhysX derived for the kinematic bodies that were following the animation (kinematic → dynamic switch);
-   no explicit pose/velocity copy function exists **[inferred from the absence of one on this path]**.
+   PhysX derives for the kinematic bodies that were following the animation (kinematic → dynamic switch):
+   `CollisionNode::SetMovementType` → `RigidBody` slot 12 0x4fe5ed does `wakeUp([0xa23680])`, then `clearBodyFlag(NX_BF_KINEMATIC)` when the
+   old type was 1, else `raiseBodyFlag(0x80)`; a change from or to static recreates the actor (slot 18).
+   No velocity is written **[code]**. The SDK text says a kinematic actor "lacks real velocity" and that
+   after a move "the velocity is returned to zero" **[SDK documentation; the 2.8.1 run-time behaviour is
+   not captured]**. Knock-downs are located in the D3D9 captures (`docs/RAGDOLL_RIG.md`), but the captures
+   hold no frame time and no engine state, so the first dynamic frame's velocity is **[not established]**.
 4. Per frame in that state: accumulated ragdoll damage > 1 → `CharacterRoot.command_give_ragdoll_damage_increment`
    0x6914f2; added damage decays 20/s (0x9e5c68); the first time the pelvis speed drops below 1.5 m/s
    (0x9e5ff0) `m_tcandamagebetransfered` is cleared and `command_reset_collision_group(1)` moves the bodies
@@ -282,8 +307,14 @@ ramp (0x4af07d); if weight ≥ 1e-5 the ragdoll pose is built from the bodies' w
 character space (`0x51a9dc`), mapped onto the full skeleton by a body↔bone mapper (`0x58f399`, tables from
 `0x4b96da`: per body the bind-pose matrix relative to its bone), and either lerped with the animation pose
 (weight ≤ 0.99999) or used alone. So while ragdolled **the 17 body bones are driven by the bodies**
-(position and orientation); bones without a body keep their animated local transform under the driven
-parent **[inferred from the mapper call shape; the mapper internals 0x58edf9/0x58eea3 were not read]**.
+(position and orientation).
+
+Bones without a body **[code]**: the mapper table (0x4b96da → `AddMapping` 0x58f942) has one entry per body
+{body index, bone index, offset}. `0x58edf9` writes each mapped bone's model-space transform (`0x5958c3`),
+after `0x595704` has marked all its descendants "model-space stale" (those that had an explicit
+model-space value get their local value rebuilt first, 0x594392). A stale bone is recomputed as local ×
+parent (0x5936e2). So an unmapped bone keeps its animated local transform under its nearest mapped
+ancestor. When every bone is mapped, `0x58eea3` writes all of them directly.
 
 Powered / partial ragdoll **[code]**: joint motors are switched on for every AB joint when the model
 changes (`command_model_changed` 0x5b33d4: `Joint::SetEnableJointMotors(1)`, `SetTwistMotorType(1)`,
@@ -294,11 +325,12 @@ per joint: target = joint-space orientation of the *animation* (`MuscleOrientati
 `SetOrientMotorPower` 0x5175b0 (joint+0x1a8 → swing drive, position mode, spring = power, damping 0);
 `SetTwistMotorPower(max(10, 10·power))` (joint+0x1a0 → twist drive). Power per joint =
 `m_ndefaultmusclepower` × `m_njointmusclepowerscaleN` (+ extra, blended in over `m_nmuscleblendintime`;
-`BehaviorAnimation.StateActive` 0x615ed3, audit d10; 16 scales = the 16 joints). Per body: bodies whose entry in `m_wantedboneposestructlist` is clear are dynamic (movement type 2), the others are
-set kinematic (1) and placed at the
-animated bone each frame (`SetWorldPosAndOrient`); the list is filled from `BehaviorAnimation.m_iselectedbones`
-(flags `ANIMATIION_BONE_TYPES`; which polarity means "physics" was not checked). `command_state_partial_ragdoll_driven` (0x757b0abf) has
-no sender in the code; partial ragdoll is this per-body switch.
+`BehaviorAnimation.StateActive` 0x615ed3, audit d10; 16 scales = the 16 joints). Per body: bodies whose
+entry in `m_wantedboneposestructlist` is clear are dynamic (movement type 2), the others are set kinematic
+(1) and placed at the animated bone each frame (`SetWorldPosAndOrient`); the list is filled from
+`BehaviorAnimation.m_iselectedbones` (flags `ANIMATIION_BONE_TYPES`; which polarity means "physics" is not
+checked). `command_state_partial_ragdoll_driven` (0x757b0abf) has no sender in the code; partial ragdoll is
+this per-body switch.
 
 ### B.4 Root follows the ragdoll, get-up **[code + data]**
 
@@ -319,7 +351,11 @@ time), `command_start_transfer_to_animation_control` 0x6b09d9 (capsule `command_
 movement type back, root placed at the get-up position `m_vcharactergetuppos` / `m_qcharactergetuporient`),
 and at the end 0x69fea0 (restores capsule width/height, `CharacterRoot.command_animation_driven_set_transform`).
 Position checks before standing (`VerifyCharacterLocation` 0x6a01d4, `solveStaticObject` 0x6a10cb,
-`dynamic_getup_logic`) were **not read**.
+`dynamic_getup_logic`) are **not read**.
+
+At the end of `command_update_ragdoll` 0x6bc3e2, `CharacterVisual`'s `_nragdolldeathtime` 3.0 s (timer
+`_nragdolldeathtimer`) and the fail-safe 15.0 s (registry defaults) are kill conditions of a
+ragdoll-driven character — not corpse timers (`docs/RAGDOLL_RIG.md`, "Get-up failure and corpse settle").
 
 ### B.5 Corpses
 
@@ -327,14 +363,13 @@ Read in the dominatrix audit (d9, `CharacterRoot.StateDead` 0x6bb12a): while the
 above 0.01 the pose is refreshed only when in a frustum; at rest the corpse is re-parented to its culling
 group, `Character::SetFreeze(1)`, the articulated body cleared and physics deleted; fell-out-of-world test at
 y = −100; `FREEZE_ACTIVE_RAGDOLLS` trigger actions force it (`TriggerActionCharacter.FreezeActiveRagdoll`
-0x852a99). Added here: `CharacterVisual` has `_nragdolldeathtime` 3.0 s and a fail-safe 15.0 s
-(registry defaults) **[data; the code using them not read]**.
+0x852a99). The settle timing of `StateDead` is in `wp3_combat.md` 3.4.
 
 ---
 
 ## C. Character controller
 
-Auto-align, absolute animation mode and the paired "DCC" flow are in `findings/placement.md` (sections 1–5);
+Auto-align, absolute animation mode and the paired "DCC" flow are in `placement.md` (sections 1–5);
 not repeated.
 
 **Object** **[code + data]**: `CharacterPhysics(CollisionCapsuleNode)` node "MovementPhysics" in
@@ -350,11 +385,12 @@ swing axes free, orient motor 5000 / 10000) and the `ExpandVolume` capsule 0.08 
 (linear limit spring 200, damping 25) and `FollowPivot` box — the get-up/expand helper (audit e3), not read.
 
 **Move** `0x5027b5` (via `CharacterController::Move` 0x506a07 / 0x502baa) **[code]**: horizontal displacement
-capped at 25 m (0xa24b38; test 625); `NxGroupsMask{bits0 = caller mask, bits1 = 1 << physics type (body+0x3c; controller 4, cloth 3), bits2 = 0,
-bits3 = caller}`; `NxController::move(disp, activeGroups, max(minDist, 1e-5), &flags, sharpness, &mask)`;
-if the controller moved less than `minDist` it is put back (`setPosition`), otherwise the node transform is
-updated from `getPosition()`. Moving the node from outside (`NotifyPivot`, slot 28 0x502bfe) does a
-`move(delta, minDist 0.001, sharpness 1)`; in teleport mode `setPosition`.
+capped at 25 m (0xa24b38; test 625); `NxGroupsMask{bits0 = caller mask, bits1 = 1 << physics type (body+0x3c;
+controller 4, cloth 3), bits2 = 0, bits3 = caller}`; `NxController::move(disp, activeGroups, max(minDist,
+1e-5), &flags, sharpness, &mask)`; if the controller moved less than `minDist` it is put back
+(`setPosition`), otherwise the node transform is updated from `getPosition()`. Moving the node from outside
+(`NotifyPivot`, slot 28 0x502bfe) does a `move(delta, minDist 0.001, sharpness 1)`; in teleport mode
+`setPosition`.
 
 **Script states** (`CharacterPhysics`, enum `CHARACTER_PHYSIC_STATES` 0 ON_GROUND, 1 FREE_FALL, 2 RAGDOLL,
 3 ABS_ANIMATION, 4 CHARGE):
@@ -379,15 +415,15 @@ updated from `getPosition()`. Moving the node from outside (`NotifyPivot`, slot 
   horizontal part of contact-info field +0x28 exceeds 200 (0x9eba88) and its own animation velocity is
   below 1.0; then sets `_tgroundcollision` when normal·up > 0.9 (0xa299a0). Field +0x28 is the motion
   direction for a controller hit (0x50bb4e) and the summed normal + friction force for a contact report
-  (0x50cfaa → 0x50c359), so only contact reports can pass 200; `FeedBack` 0x681e7b applies impulses to dynamic bodies it touches
-  (`RigidBody::ApplyImpulse`); `RagdollFeedBack` 0x6823dc ray-casts for ragdolls; `command_detect_wall`
-  0x67b508 (`m_nangleforwallcontrol` 46°). The numbers and rules of these four are read since
-  (2026-10-06): `docs/COMBAT_META.md`, "Movement contact rules". `FeedBack` never runs: its only
-  caller, the command `CollisionResponse` 0x67c7e4, has no sender (hash 0x4cb780c2 only at its
-  registration; no subscription names it; the native handle in 0xe15290 is stored at 0x50f255 and
-  never read) (read from code).
-- Character-vs-character separation in pairs: the DCC joint (`DccJoint` 0x6a3d71, `DccUpdate`), an
-  `EmbeddedJointNode` between the two capsules — placement.md 1.4; its D6 parameters were not extracted.
+  (0x50cfaa → 0x50c359), so only contact reports can pass 200; `FeedBack` 0x681e7b applies impulses to
+  dynamic bodies it touches (`RigidBody::ApplyImpulse`); `RagdollFeedBack` 0x6823dc ray-casts for ragdolls;
+  `command_detect_wall` 0x67b508 (`m_nangleforwallcontrol` 46°). The numbers and rules of these four:
+  `docs/COMBAT_META.md`, "Movement contact rules". `FeedBack` never runs: its only caller, the command
+  `CollisionResponse` 0x67c7e4, has no sender (hash 0x4cb780c2 only at its registration; no subscription
+  names it; the native handle in 0xe15290 is stored at 0x50f255 and never read) **[code]**.
+- Character-vs-character separation in pairs: the DCC joint (`DccJoint` 0x6a3d71, 4.9 kB; `DccUpdate`
+  0x680654, 6.2 kB), an `EmbeddedJointNode` between the two capsules — placement.md 1.4; its D6
+  parameters are not extracted here (`ENGINE_CONSTANTS.md`, "DCC joint").
 
 **Filtering** **[code]**: scene creation `0x502fda` sets `setFilterOps(AND, AND, AND)`, `setFilterBool(true)`,
 `setFilterConstant0/1 = {0xffffffff, 0, 0xffffffff, 0xffffffff}` (0x4fec19) and all 32×32 group pairs to
@@ -403,7 +439,7 @@ default block 0x44 matches the SDK default), static AABB tree / dynamic AABB tre
 reports, scheduler at +0x80). Scene 0 = world, capsules, ragdolls, triggers, jiggle boxes; scene 1 = cloth
 and the kinematic cloth-collision bodies. Both use the same gravity, rate and step.
 
-**Stepping** (jiggle.md §3, re-read): `0x4f4d20` accumulates frame dt, h = 1/rate (60 Hz default, ctor),
+**Stepping** (jiggle.md §3): `0x4f4d20` accumulates frame dt, h = 1/rate (60 Hz default, ctor),
 n = floor(acc/h); `0x4f4ddc` per scene: `setTiming(h, maxSteps = 8, NX_TIMESTEP_FIXED)` (+0x148) and
 `simulate(min(n·h, maxSteps·h))` posted as a job. Kinematic targets: `moveGlobalPose` once per frame.
 SDK: `NxCreatePhysicsSDK(0x2080100, Physics::Allocator, ErrorStream, desc)`, `setParameter(NX_SKIN_WIDTH,
@@ -432,7 +468,7 @@ SDK: `NxCreatePhysicsSDK(0x2080100, Physics::Allocator, ErrorStream, desc)`, `se
 
 Which raycasts the camera and combat use (`PhysicsWorld::CastRay_*`, `CastCapsule_*`, `Check*Overlap`
 0x51be80–0x51c595, all taking a pivot-sheet mask, node mask and shape-group mask) is a script-side question
-and was not surveyed.
+and is not surveyed here.
 
 ### D.2 SDK method identification
 
@@ -450,10 +486,11 @@ anchors. In every interface slot 0 is one extra entry before the first documente
   +0x74 `setDriveLinearVelocity` follow — certain for +0x70 (called by `SetOrientMotorTargetOrient`).
 - **NxPhysicsSDK, NxController, NxControllerManager — inferred** from header order with 4 / 5 / 2 consistent
   call sites each.
-- **NxCloth (member +0x9c of `Physics::Cloth`, 16 offsets used), NxShape, NxMaterial — not established.**
+- **NxCloth** (member +0x9c of `Physics::Cloth`, 16 offsets used; 92 slots) and **NxMaterial** (23 slots)
+  are named from their own name strings: `docs/RAGDOLL_RIG.md` "Cloth". **NxShape — not established.**
 
 Tables and the game's call sites per offset: `findings/wp2_physx_vtables.json`. The scan
-(`work/wp2/vcalls.py`) finds 561 indirect call sites in 0x4f4000–0x525000; 180 have a receiver my
+(`work/wp2/vcalls.py`) finds 561 indirect call sites in 0x4f4000–0x525000; 180 have a receiver the
 pattern does not classify, so the per-interface lists are lower bounds.
 
 ---
@@ -463,31 +500,31 @@ pattern does not classify, so the per-interface lists are lower bounds.
 - **List 0** (`node+0x4c`): shapes of the node's scene-0 body — the ragdoll body *and* the kinematic body that
   represents the animated character to the world (same actor, movement type switched). A node's list 0 is
   used only if the AB section lists that node as a body; in the 13 rigs every node with list-0 volumes is a
-  body and vice versa **[code + data]**. Yes: **the ragdoll uses them; they are its only geometry.**
+  body and vice versa **[code + data]**. **The ragdoll uses them; they are its only geometry.**
 - **List 1** (`node+0x58`): shapes of kinematic bodies in the cloth scene, created only when the model's AB
   has cloths (Rorschach: Pelvis, both thighs and calves for coat and belt; Nite Owl: all 17 for the cape).
   The 17-body list-1 sets in the female part models are inert in the shipped game (those models are never
   slot 0 and have no cloth) **[code + data]**.
-- Third list: emitter surfaces, unrelated (skeleton_blobs.md).
+- Third list: emitter surfaces (`MeshParticleData`), unrelated (skeleton_blobs.md).
 - Character **hit detection does not use volumes** (range checks; audit d13). World collision of a living
   character is the controller capsule, not the volumes.
 
 ---
 
-## F. Export specification
+## F. Export representation
 
-Goal: a Blender user imports the character GLB and gets bodies, shapes and constraints in place.
 Everything needed per skeleton is in `wp2_ragdoll_rigs.json` → `rigs[<key>]`; nothing below needs the exe.
+The toolkit's implementation and conventions: `docs/RAGDOLL_RIG.md`.
 
-### F.1 What to write
+### F.1 Sidecar and GLB nodes
 
 1. **Sidecar** `<character>.ragdoll.json` = the rig entry verbatim plus `common`, keyed by the skeleton the
    character uses (slot-0 model: `female`, `medium`, `large`, `small`, `gimp`, `rsh`, `nto`, `bs2`).
 2. **Helper nodes in the GLB** (so that Blender's importer, which re-orients bones, still places everything):
    - per shape a node `RB.<bone>.<i>` as **child of the bone's joint node**, `translation` = `local_pos`,
-     `rotation` = conjugate of `local_quat_xyzw` (same rule the exporter already applies to rest
-     quaternions), `extras.kapow_shape` = `{type, physx:{…}, file:{…}}`; for convex meshes also a mesh
-     primitive from `file.vertices`/`indices` (mode 1 = triangle list);
+     `rotation` = conjugate of `local_quat_xyzw` (the rule the exporter applies to rest quaternions),
+     `extras.kapow_shape` = `{type, physx:{…}, file:{…}}`; for convex meshes also a mesh primitive from
+     `file.vertices`/`indices` (mode 1 = triangle list);
    - per body `extras.kapow_body` on the bone's joint node: `{mass, linear_damping, angular_damping,
      solver_iterations: 10, friction: 0.6, restitution: 0, group}`;
    - per joint a node `RJ.<child bone>` as child of the **child** bone's joint node with `translation`
@@ -495,12 +532,12 @@ Everything needed per skeleton is in `wp2_ragdoll_rigs.json` → `rigs[<key>]`; 
      `{parent_bone, child_bone, twist:[low,high], swing1, swing2, motions, springs, projection}`;
    - on the skin root: `extras.kapow_ragdoll = {format: "wp2_ragdoll_rigs/1", rig: <key>, sidecar: <file>}`.
    - cloth-scene bodies only as data in the sidecar (`cloth_scene_bodies`), no nodes by default.
-3. Mirror: the GLB is the engine's mirror image (ANIMATION_META.md). Helper nodes are children of the
-   joints, so they mirror with the skeleton if the user un-mirrors. Angle ranges about an axis change sign
-   under a reflection (`[low, high]` → `[−high, −low]`); every twist range in the game data is symmetric, so
-   nothing changes in practice.
+3. Mirror: under `--frame mirrored` the GLB is the engine's mirror image (ANIMATION_META.md). Helper nodes
+   are children of the joints, so they follow the skeleton's frame either way. Angle ranges about an axis
+   change sign under a reflection (`[low, high]` → `[−high, −low]`); every twist range in the game data is
+   symmetric, so nothing changes in practice.
 
-### F.2 Blender mapping (to be done by an add-on script or by hand)
+### F.2 Blender mapping
 
 - Body: one mesh object per `RB.*` node (capsule = cylinder length `physx.height` + two hemispheres radius
   `physx.radius` along the node's Y; box = `2·half_extents`; sphere), rigid-body shape CAPSULE / BOX / SPHERE /
@@ -508,9 +545,10 @@ Everything needed per skeleton is in `wp2_ragdoll_rigs.json` → `rigs[<key>]`; 
   Blender version has it (otherwise one convex hull of the union), mass = `mass`, friction 0.6, bounciness 0.
   Damping: Blender/Bullet's 0…1 damping is not PhysX's 1/s coefficient c. Bullet scales velocity by
   `(1 − d)^dt`, PhysX by about `e^(−c·dt)`, so d = 1 − e^(−c): translation 0.39 for c = 0.5, rotation 0.86 /
-  0.92 for c = 2.0 / 2.5 (conversion from the two libraries' formulas, not measured — to be checked in
-  Blender). `collision_margin` 0 if the +0.025 inflated `physx` sizes are used, or 0.025
-  with the `file` sizes. Bone ← body: `Copy Transforms`/`Child Of` from the 17 bones to their body objects.
+  0.92 for c = 2.0 / 2.5 (conversion from the two libraries' formulas, not measured in Blender).
+  `collision_margin` 0 if the +0.025 inflated `physx` sizes are used, or 0.025 with the `file` sizes (the
+  stored size is the resting surface, A.2). Bone ← body: `Copy Transforms`/`Child Of` from the 17 bones to
+  their body objects.
 - Joint: `GENERIC` rigid-body constraint on an empty at the `RJ.*` node (world transform at bind =
   `frame_world_bind`), `object1` = parent body, `object2` = child body, `disable_collisions` = true. Linear
   X/Y/Z limits 0…0. Angular: `limit_ang_x` = `[twist.low, twist.high]` (locked → 0…0), `limit_ang_y` =
@@ -521,14 +559,14 @@ Everything needed per skeleton is in `wp2_ragdoll_rigs.json` → `rigs[<key>]`; 
 ### F.3 Not representable in Blender's rigid-body constraints
 
 - **Soft limits**: PhysX limit spring/damping act only *beyond* the limit; Blender's `GENERIC_SPRING` springs
-  act around the rest angle. Export the numbers, use hard limits.
+  act around the rest angle. The numbers are exported; the constraints use hard limits.
 - **Swing cone**: PhysX couples swing1/swing2 as an elliptic cone and measures twist after swing; Blender
   limits three Euler angles independently — equal only for small angles.
 - **Joint projection**, **muscles** (swing/twist position drives toward the animation), per-body
   kinematic/dynamic switching, unique collision groups and the 20×20 group matrix, PhysX damping semantics,
   max linear/angular velocity 200, `skinWidth`.
-- `bs2` and `gogo_*` rigs are unusable as authored (all limits 0, masses 100): export shapes, flag
-  `"untuned": true`, and suggest the `female` limits (same skeleton, same shapes).
+- `bs2` and `gogo_*` rigs are unusable as authored (all limits 0, masses 100): shapes are exported, flagged
+  `"untuned": true`, with the `female` limits as the suggested substitute (same skeleton, same shapes).
 
 ---
 
@@ -537,50 +575,23 @@ Everything needed per skeleton is in `wp2_ragdoll_rigs.json` → `rigs[<key>]`; 
 | item | what it takes |
 |---|---|
 | Impact → ragdoll decision for a living character (thresholds 6000 / 2000 / 500, height mask) and ragdoll damage, impact sounds | read `CharacterVisual.ModelCollisionContactAdded` 0x69d00a (large), `DetermineDamageReaction` 0x6a18d1, `CharacterRoot.command_give_ragdoll_damage_increment` 0x6914f2 |
-| Bones without a body while ragdolled; exact blend | read the pose mapper 0x58edf9 / 0x58eea3 / 0x58f942 and `0x596525` |
-| Explicit velocity hand-over at the kinematic → dynamic switch | read `CollisionNode::SetMovementType` → `RigidBody` slot 12 0x4fe677 (raise/clear body flag) and check for a velocity write; or a capture |
+| Exact blend of the mapped bones while ragdolled (`0x596525`) | read 0x596525 with the mapper 0x58edf9 / 0x58eea3 / 0x58f942 |
+| Velocity of the first dynamic frame at the kinematic → dynamic switch (no velocity is written, B.3) | a capture with frame time and engine state; the D3D9 captures hold neither |
 | Get-up position checks, expand volume | `VerifyCharacterLocation` 0x6a01d4, `solveStaticObject` 0x6a10cb, `staticDynamicOverlap` 0x6a0a60, `dynamic_getup_logic` 0x728e00, `CharacterExpandVolume` 0x66d0ec |
 | How `PELVIS_ROTATION` is formed from the pelvis axes (which axis = "face up") | read lines 1088–1310 of 0x6bc3e2 (vector algebra); needed only to reproduce clip choice offline |
 | Controller slope limit value; step limit after init | find the writers of `CharacterController::SetSlopeLimit` 0x4fe288 / `SetStepLimit` 0x4fe2cb in the script (`m_ninitsteplimit` user) |
-| Assembly of the move velocity from `GamePivot` motion, push-back, rotation clamps | finish `CharacterRoot.StateActive` 0x6b367a (also WP3's item) |
-| Push/wall/feedback rules and numbers; DCC joint parameters | read `CollisionContactAdded` 0x67c845, `FeedBack` 0x681e7b, `command_detect_wall` 0x67b508, `DccJoint` 0x6a3d71 (4.9 kB), `DccUpdate` 0x680654 (6.2 kB) |
-| Collision rows of the unique ragdoll groups (≥ 20), `command_set_safe_ragdoll_collision_groups` | resolve the 49 non-constant calls in 0x7dffbf from the disassembly; read 0x7df74a |
-| NxShape vtable names; the 180 unclassified call sites | improve receiver tracking in `vcalls.py` (NxCloth, 92 slots, and NxMaterial, 23 slots, are named since from their own name strings: `docs/RAGDOLL_RIG.md` "Cloth") |
+| Assembly of the move velocity from `GamePivot` motion, push-back, rotation clamps | finish `CharacterRoot.StateActive` 0x6b367a (also wp3's item) |
+| `command_set_safe_ragdoll_collision_groups` | read 0x7df74a |
+| NxShape vtable names; the 180 unclassified call sites | improve receiver tracking in `vcalls.py` |
 | Editor swing offsets (−9 / 60 / 10 / 30) — units and whether any file still has them | only if a file with a non-default `childSpaceOrient` turns up; none of the 44 models with joints (683 joints) has one |
-| Corpse timers `_nragdolldeathtime` 3 s / fail-safe 15 s | find their users in `CharacterVisual` (`_nragdolldeathtimer`) |
-| Run-time verification of any of the above | a capture; none was used in this work package |
+| Run-time verification of any of the above | a capture with engine state; none exists |
 
 ---
 
-## Errata (2026-10-04, from the implementation pass — details in `findings/impl_ragdoll.md`)
+## H. Files
 
-1. **0.5(b) is wrong.** `kapow_fragment_keys.pkl` does contain the D6 swing keys (0xe3ba246d, 0x6f1c1d46,
-   0x96f40d0c, 0x1c2a4efb and the six restitution / spring / damping hashes) in 1.3.0, 1.5.0 and 1.6.0. I read
-   a stale `CharacterRootTemplate_Enemy.fragment.json` on the PC, written by an older toolkit. The current
-   binary parse of that fragment names every key (0 `key_…` left) **[data, re-checked on the PC]**.
-2. **A.2 / F, shape size.** The engine grows every primitive by 0.025 and sets skinWidth 0.025. That is the
-   SDK's own recipe for hiding the permitted sinking-in ("inflate the size of physics objects with respect to
-   their graphical representation", PhysX documentation, *Skin Width*). The surface things rest on is therefore
-   the **stored** size. Check **[data]**: at the stored size no two bodies of any of the 13 rigs overlap in the
-   bind pose unless a joint connects them; at the grown size 4–7 pairs per rig do (up to 4.6 cm). A solver
-   without a skin width must use the stored size.
-3. **B.3 item 3, velocity at the switch — now read.** `RigidBody` slot 12 0x4fe5ed: `wakeUp([0xa23680])`, then
-   `clearBodyFlag(NX_BF_KINEMATIC)` when the old type was 1, else `raiseBodyFlag(0x80)`; a change from or to
-   static recreates the actor (slot 18). No velocity is written **[code]**. The SDK text says a kinematic
-   actor "lacks real velocity" and that after a move "the velocity is returned to zero" **[SDK documentation;
-   the 2.8.1 run-time behaviour was not captured]**.
-4. **B.3, bones without a body — now read** **[code]**: the mapper table (0x4b96da → `AddMapping` 0x58f942) has
-   one entry per body {body index, bone index, offset}. `0x58edf9` writes each mapped bone's model-space
-   transform (`0x5958c3`), after `0x595704` has marked all its descendants "model-space stale" (those that had
-   an explicit model-space value get their local value rebuilt first, 0x594392). A stale bone is recomputed as
-   local × parent (0x5936e2). So an unmapped bone keeps its animated local transform under its nearest mapped
-   ancestor. When every bone is mapped, `0x58eea3` writes all of them directly.
-5. **A.4 / G, unique ragdoll groups — now read** (lifted script, `PhysicsSimulation`): pools 20–23
-   (`GetRagdollNonDynamicCollisionGroup` 0x7d82f0), 24–27 (`GetRagdollDynamicCollisionGroup` 0x7d837d), 28–31 in
-   pairs (`GetRagdollPairedCollisionGroup` 0x7d823f). Rows: all three collide with WORLD 0, RAGDOLL_IN_WORLD 3,
-   KINEMATIC_RAGDOLL 4; 24–31 also with DYNAMIC_WORLD 5; none with 1, 2, 6–11; a pair (g, g+1) not with each
-   other. `StateRagdollDriven` asks for a group with both arguments 1 (pool 24–27),
-   `command_pre_transfer_to_animation_control` with (1, 0) (pool 20–23). Unset pairs keep the scene default
-   "same group only" (0x502fda), so a ragdoll's bodies collide with one another (not across a joint), and no
-   `setActorPairFlags` call exists on this path (its only wrapper `PhysicsWorld::SetActorPairCollisionFlagMSG`
-   0x514ddc has no script user).
+Kept with the decompilation outside this repository (`ghidra_kapow_out/engine/engine_notes/`, see
+`README.md`): `findings/wp2_physx_vtables.json`, `findings/impl_ragdoll.md` (the implementation note), and
+`work/wp2/` (`NOTES.md`, `rigs_sel.json` raw file dump, `build_rigs.py`, `vcalls.py`, `pxvt.py`,
+`vt_*.txt`, `group_matrix.json`, `cji_table.json`, `cb_vtables.json`). Shipped beside this note:
+`wp2_ragdoll_rigs.json`.

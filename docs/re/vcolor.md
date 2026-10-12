@@ -1,11 +1,5 @@
 # Per-vertex colour, tangent frame and winding: what the Kapow shaders do with them
 
-> **Correction (after the render test, see `impl_vcolor.md`):** the TANGENT advice in §6 is superseded.
-> No 1.3.0 GLB carries TANGENT, so the "w = s with flipped green" clash never occurred in shipped files.
-> The real defect is that PC `ATI2` normal maps were decoded with X and Y swapped. With that fixed and
-> green inverted for glTF, **w = −s** matches the engine (about 1° median in three.js and Blender).
-> §0's "31 models" and vegetation remarks stand.
-
 Scope: Part 2 PC, vertex formats 5 (44 B) and 6 (56 B). Evidence tags: **[bytecode]** read from the
 shader instructions, **[exe]** read from the decompilation/disassembly, **[data]** measured on the
 extracted Part 2 models, **[trace]** measured on `apitrace_dump.txt`, **[inferred]**, **[not established]**.
@@ -14,6 +8,7 @@ Companion: `findings/vcolor_shaders.json` (all 243 shaders: define set, inputs, 
 reads COLOR0; colour statistics for all 1,453 coloured buffers; tangent statistics; capture draw table).
 Scratch and tools: `work/vcolor/` (`sm3dis.py` disassembler + archive reader, `dis/*.asm` all 243
 listings, `shash.py`/`bf.c`/`bfa.c` name-hash reproduction, `colour_stats.json`, `trace_shaders.txt`).
+Render test of the export rules (§6): `impl_vcolor.md`.
 
 ## 0. Short answers
 
@@ -21,11 +16,11 @@ listings, `shash.py`/`bf.c`/`bfa.c` name-hash reproduction, `colour_stats.json`,
 |---|---|
 | What is COLOR0 on a model vertex? | A **multiplicative tint on the final lit colour** (rgb) and a **multiplier on output alpha** (a). Not AO-on-ambient, not a layer mask, not wind, not a specular mask. [bytecode] |
 | When is it used? | Only when the mesh buffer's `hasColor` byte is 1; the engine then picks the `VERTEX_COLORS` vertex-shader variant. Otherwise the shader does not even declare COLOR0 and feeds (1,1,1). [exe] + [trace] |
-| Which models? | Every buffer whose colours are not all 255: `hasColor` equals "has a non-white vertex" on 2,657 / 2,657 buffers. That is **387 of 735 models, 1,453 buffers**, not 31. [data] |
+| Which models? | Every buffer whose colours are not all 255: `hasColor` equals "has a non-white vertex" on 2,657 / 2,657 buffers. That is **387 of 735 models, 1,453 buffers**. [data] |
 | Tangent frame | `N' = x·T + y·B + z·N` with the **stored** tangent (TEXCOORD1) and **stored** bitangent (TEXCOORD2). No cross product, no handedness sign, no orthogonalisation. [bytecode] |
 | Culling | `D3DCULL_CW` for one-sided materials, `D3DCULL_NONE` for two-sided ones; two-sided pixel shaders flip the normal with `vFace`. [exe] + [trace] |
 
-Two premises in the task did not hold on the data, both stated here so nobody carries them forward:
+Ruled out on the data:
 
 - "31 models have non-default colours": the corpus has 387. Under `art/characters` + `Animation` there are 39.
 - "The palms and other vegetation are among them": no. Every buffer of `palm_01`, `palm_02`,
@@ -166,7 +161,7 @@ matter for rendering.
 - The pixel shader is chosen from the material (texture sheet), not the mesh: `FUN_0056bcb8` picks by
   reflection mode, material type (`sheet+0x60` = 10 or 11) and an "additional features / two-sided" flag.
   Every pixel variant consumes TEXCOORD0, so the vertex shader alone decides whether colour is applied.
-- `hasAlpha` (`+0x32`) has no reader in the render path that I could find; only the builder and the
+- `hasAlpha` (`+0x32`) has no reader found in the render path; only the builder and the
   cloth copy (`FUN_00433c40`) touch it. [exe, by search; not exhaustive]
 - Capture [trace]: every model colour-pass draw uses DeferredMain2VS. 5,524 format-5 draws and 1,620
   format-6 draws use the `VERTEX_COLORS` variants, 8,120 and 2,916 the plain ones. No model draw uses
@@ -211,7 +206,7 @@ Stored data [data, 1.80 M vertices, 1.40 M triangles]:
   **+∂P/∂v** on 97.5 % (0.3 % disagree, rest degenerate UVs).
 - `sign(dot(cross(N, T), B))` is + on 66.5 % and − on 33.0 % of vertices (mirrored UV islands).
 - Not orthogonal: |N·T| > 0.1 on 9.5 %, |T·B| > 0.1 on 13.9 %; B is more than 10° away from
-  ±cross(N, T) on 15.5 %. (The 29 % in the task presumably uses a tighter threshold.)
+  ±cross(N, T) on 15.5 % (a 29 % figure quoted elsewhere presumably uses a tighter threshold).
 - 99.85 % of triangles wind clockwise against their normals under a right-handed cross product.
 
 Culling [exe]: the render-state cache stores the cull mode in bits 4–7 of `state+0xB8`
@@ -220,32 +215,28 @@ part_0002.c near 0x4590xx). `FUN_00571d5d` sets 1 (`D3DCULL_NONE`) when the text
 byte (`sheet+0xA4`) is set, otherwise the value on the state stack. [trace] confirms: model draws use
 `D3DCULL_CW` (2) or `D3DCULL_NONE`; `D3DCULL_CCW` occurs only for light volumes.
 
-Interpretation [inferred, consistent with the existing "export is a mirror image" finding in
+Interpretation [inferred, consistent with the "export is a mirror image" finding in
 ANIMATION_META.md]: `D3DCULL_CW` keeps triangles that are counter-clockwise on screen. The file's
 triangles are clockwise in a right-handed reading, so the engine's space is left-handed and its front
 faces are the ones whose stored normal points at the viewer. Front face = the side the normal is on;
 there is no inverted-normal convention.
 
-## 6. Recommendation for the glTF export
+## 6. Rules for the glTF export
 
-| Attribute | Verdict | Details |
+| Attribute | Rule | Details |
 |---|---|---|
-| **COLOR_0** | **Emit, transformed**, only for buffers with `hasColor = 1` | rgb: `srgb_to_linear(c/255)` as float (or normalised u16); a: `c/255` unchanged. Reason: the engine multiplies display-encoded colour by `c`; glTF multiplies linear base colour, so a raw 0.5 would darken too little. With the conversion a diffuse-lit surface shows the same displayed factor. Do not emit for `hasColor = 0` buffers (they are all white anyway). |
-| alpha of COLOR_0 | **Emit as is**; needs the right material | It multiplies base-colour alpha, which is what glTF does. The 53 `hasAlpha` buffers need `alphaMode: BLEND` (decals, puddles, sky, Rorschach layers) or they will render as opaque quads; `hasAlpha` is a usable trigger for that. |
-| `_COLOR_RAW` | Optional custom attribute | Keep the untouched bytes if a round trip matters. Not needed for rendering. |
+| **COLOR_0** | **Emit, transformed**, only for buffers with `hasColor = 1` | rgb: `srgb_to_linear(c/255)` as float (or normalised u16); a: `c/255` unchanged. Reason: the engine multiplies display-encoded colour by `c`; glTF multiplies linear base colour, so a raw 0.5 would darken too little. With the conversion a diffuse-lit surface shows the same displayed factor. Not emitted for `hasColor = 0` buffers (they are all white anyway). |
+| alpha of COLOR_0 | **Emit as is**; needs the right material | It multiplies base-colour alpha, which is what glTF does. The 53 `hasAlpha` buffers need `alphaMode: BLEND` (decals, puddles, sky, Rorschach layers) or they render as opaque quads; `hasAlpha` is a usable trigger for that. |
+| `_COLOR_RAW` | Optional custom attribute | The untouched bytes if a round trip matters. Not needed for rendering. |
 | **NORMAL** | **Emit as is** | Unit, used directly by the shader. |
-| **Winding** | **Keep the current flip** (or mirror one axis and keep indices) | Coordinates are written unmirrored into a right-handed format, so indices must be reversed to make the normal side the front. Equivalent and more faithful to handedness: negate X on positions, normals and tangents and keep the indices. Two-sided sheets → `doubleSided: true`. |
-| **TANGENT** | **Emit xyz as is (stored, unit); w needs care** | glTF builds `B = cross(N, T)·w`. The engine uses the stored bitangent, which is +∂P/∂v. Let `s = sign(dot(cross(N, T), B_stored))` computed on the numbers as exported. If the normal texture is exported **unchanged**, `w = s`. If the exporter **flips the green channel** (the toolkit's default "gl" mode), `w = −s`. If X is mirrored instead of flipping indices, negate once more. |
+| **Winding** | **Reverse the indices** (or mirror one axis and keep indices) | Coordinates are written unmirrored into a right-handed format, so indices must be reversed to make the normal side the front. Equivalent and more faithful to handedness: negate X on positions, normals and tangents and keep the indices. Two-sided sheets → `doubleSided: true`. |
+| **TANGENT** | **Emit xyz as is (stored, unit); `w = −s` with the green-flipped normal texture** | glTF builds `B = cross(N, T)·w`. The engine uses the stored bitangent, which is +∂P/∂v. Let `s = sign(dot(cross(N, T), B_stored))` computed on the numbers as exported. With the normal texture's green channel inverted for glTF (the toolkit's default, `gltf_tangents(green_up=True)`), `w = −s`; with the texture left in the engine's orientation, `w = s`. If X is mirrored instead of flipping indices, negate once more. Render test (`impl_vcolor.md`): `w = −s` with the inverted-green texture matches the engine math to about 1° median in three.js and Blender; a PC `ATI2` normal map must be decoded with X and Y in the right order for this to hold (a swapped decode, not the sign of `w`, is what makes bumps read as dents). |
 | `_BITANGENT` | Optional custom attribute | Only a custom shader can reproduce the engine exactly on the ~15 % of vertices whose stored bitangent is not ±cross(N, T). Do not orthogonalise by default: the engine does not. |
 
-Things to verify on the toolkit side:
-
-- `watchmen_extract.gltf_tangents` returns `w = s`. `char_lib` flips green by default. If both are active
-  in the same GLB the bitangent term is inverted on every vertex (bumps read as dents along V). The
-  algebra above is from the bytecode; I did not render a GLB to confirm which combination the writer
-  actually ships.
-- The 17 % darkening is real engine behaviour. Switching COLOR_0 off makes those 387 models brighter
-  than in game and removes the decal edge fades.
+Toolkit: `watchmen_extract.gltf_tangents` returns `w = −s` for `green_up=True` (default) and `w = s`
+otherwise; `char_lib` flips green by default, so both agree. The 17 % darkening is real engine
+behaviour: switching COLOR_0 off makes those 387 models brighter than in game and removes the decal
+edge fades.
 
 What a faithful material needs beyond glTF's model:
 

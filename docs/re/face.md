@@ -1,9 +1,11 @@
 # Face animation: which face pose plays during which body animation, and when
 
 Target: `KapowMultiDEDRM.exe` (image base 0x400000) and the Part 2 PC fragments.
-Read 2026-10-03. Machine-readable table: `findings/face_map.json`
+Machine-readable table: `findings/face_map.json`
 (`watchmen-face-map/1`, 2.5 MB). Scratch and generator: `work/face/`
 (`gen_face_map.py`, `sim.py`, `facecls.py`, `finalize.py`).
+Toolkit: `wlib/face_rule.py` (`--face-rule engine`, the face block of `anim_meta.json`,
+`face_format` "watchmen-face/2"; schema in `ANIMATION_META.md`, "The face block").
 
 Evidence tags: **[R]** read from code (address given), **[D]** measured on the
 game data, **[I]** inferred (reason given), **[N]** not established.
@@ -129,10 +131,11 @@ So: the head model sits in the body's frame; its `Head` and `Neck` bones are
 **overwritten by the body's Head and Neck bone transforms**, and the face
 bones (jaw, lips, lids, brows) below `Head` keep the pose the face controller
 gives them. There is no offset other than the 90° model-axis turn. This agrees
-with what the toolkit measured earlier (Nite Owl's cowl clavicles riding the
-body, `ENGINE_CONSTANTS.md` 1287) and with how the GLBs attach the face rig
-(`f_anchor` follows the body `Head` joint). Not established: the space of the
-copied bone transforms (model space is assumed) [N].
+with the toolkit's measurement (Nite Owl's cowl clavicles riding the
+body, `ENGINE_CONSTANTS.md`) and with how the GLBs attach the face rig
+(`f_anchor` follows the body `Head` joint). Not established here: the space of the
+copied bone transforms (model space is assumed) [N]; `ANIMATION_META.md` has the
+toolkit's reading of the head and neck copy space.
 
 ### 1.4 Update order [R]
 
@@ -170,7 +173,7 @@ body's current state has `m_tallowheadctrl` (state data +0x160; set on 215 of
 `ANIMATION_VALUE` 17 `HEAD_ANGLE_TO_TARGET` (0x66ab17) and 18
 `HEAD_VERTICAL_ANGLE_TO_TARGET` on the **body** controller. The head turn
 itself is the body class's additive `HeadTurn` overlay, which the toolkit's
-interpreter already models. `LOOK_AT_TARGET` (45) stays camera-only.
+interpreter models. `LOOK_AT_TARGET` (45) stays camera-only.
 
 ## 2. The driver
 
@@ -229,9 +232,8 @@ damage state and the face hit pose start together.
   are no visemes and no amplitude input (section 3.4).
 - **Blink**: not procedural. For `EN4_FACE` it is the idle state `IdleB`
   (pose `MouthClosed_EyesClosed`); the male classes have no blink at all
-  (section 3.2). This corrects `ENGINE_CONSTANTS.md` 317 ("Blink timer — does
-  not exist … the engine has no … blink") only in so far as a blink does
-  exist for the women, as data.
+  (section 3.2). The engine has no blink timer (`ENGINE_CONSTANTS.md`); a
+  blink exists for the women only as data.
 
 ## 3. The face state machines [D, rules R]
 
@@ -334,14 +336,14 @@ frame. `STOP_SPEAK` arriving every silent frame does not disturb the other
 groups: the engine skips group members that are already in the evaluation's
 tested list (3.5).
 
-### 3.5 Two engine rules the toolkit's interpreter does not have [R]
+### 3.5 Two engine rules needed to simulate these classes [R]
 
-Needed to simulate these classes; both are in `work/face/sim.py`.
+Both are in `work/face/sim.py` and in `anim_state_machine.Interpreter`
+(`get_valid_state`; its `rr_index` is unused, kept for compatibility).
 
 1. `command_get_valid_state` 0x5f076f: the scan starts at index **0**
    (0x5f0792), or at a random index for a "Choose Random State" group. It is
-   not a round-robin cursor (`anim_state_machine.Interpreter.get_valid_state`
-   keeps `rr_index`).
+   not a round-robin cursor.
 2. The same function skips members found in the caller's tested list and
    appends each member it examines (the `(7)` / `(9)` list calls at the top of
    its loop); `command_get_valid_transition` 0x5f7873 and
@@ -383,8 +385,8 @@ Needed to simulate these classes; both are in `work/face/sim.py`.
 
 ## 5. The table — `findings/face_map.json`
 
-Built by `work/face/gen_face_map.py` from the real fragments (staged
-read-only from the device), the event nodes' raw properties, and
+Built by `work/face/gen_face_map.py` from the real fragments (read-only),
+the event nodes' raw properties, and
 `anim_meta_v2.json` for durations, speeds, event times and pairs. For every
 body state it lists the face inputs the game generates (`inputs`), the hits
 the state deals to the other character (`inflicts`), and the resulting face
@@ -432,103 +434,61 @@ Confidence per row: `high` (data + read code only), `medium` (contains an
 inferred input), `low` (depends on sound playback: any talk segment, any Nite
 Owl hit segment).
 
-## 6. Proposed metadata extension (additive; not implemented)
+## 6. Toolkit
 
-### 6.1 `anim_meta.json`
+`face_rule.py` builds the face block of `anim_meta.json` (`face_format`
+"watchmen-face/2", additive: top-level `face` with `classes`, `drivers`,
+`attachment`, `conventions`; per body state `face` / `inflicts`; per pair
+`face` on the shared clock) from the face classes and the CharVisual
+fragments, by running the face class in `anim_state_machine.Interpreter`; the
+schema is in `ANIMATION_META.md`, "The face block". The facts it carries are
+those of sections 1–5: body class → face class, the four inputs with their
+lifetimes and engine addresses, `hit_pose_to_state`, the idle and talk cycles
+(IdleA ≥ 3 s, IdleB ≥ 0.5 s, 0.21 s eases, random), the attachment (`Head`
+and `Neck` driven by the body's bones, Nite Owl's four cowl bones, attach bone
+`Spine2`, `head_model_yaw_deg` 90), and per state the input list and face
+track with a confidence (`high` / `medium` / `low` as in section 5). Event
+records expose the pose of `IMPACT_EFFECTS` (`m_ivalue00`, the event's enum
+value) and the speak flag of `SOUND` (`m_ttruth1`), which the face rules need
+(`m_ttruth1..3` are the event's three flags). Time is given as `t_s`
+(seconds of play time since the state was entered; clip time =
+start_playpos·duration + t_s·speed) beside `time_s` (clip timeline), as events
+are.
 
-Keep `format` "watchmen-anim-meta/2"; add a version key so consumers can test
-for the block: `"face_format": "watchmen-face/1"`.
+In the GLB (`face_rule.pose_extras`, `variant_glb`): the face skin
+(`skins[1].extras.watchmen`) carries `head_model`, `pose_family`,
+`face_classes`, `anchor_node` (`f_anchor`, or `face_root`), `anchor_parent`,
+`rule: "engine"`; each `FACE <dir>/<clip>` animation carries `extras.watchmen`
+`{synthetic: false, pose, face_states}`; a `FACE SYNTH …` animation
+(`FACE SYNTH Blink`, `FACE SYNTH Talk`) is marked `synthetic: true` with a note
+that the game has no such clip; a body animation's face channels are listed as
+`poses` `[{written_time_s, pose, ease_in_s}]`, `written_time_s` beside `t_s`
+when the clip is retimed (as events have); pairs carry the pair `face` record.
+With that a Blender consumer can put the idle cycle on an NLA track of its own
+and key, per body clip, the `track` segments as holds of the named `FACE …`
+pose actions with `ease_in_s` blend-in — for a pair from `pairs[*].face`.
 
-```
-face
-  classes      { face class: { engine_name, class_id, clip_dir, default_state,
-                   groups [ {path, criteria, choose_random_state} ],
-                   states [ {name, path, clips, ease_in_s, criteria, criteria_tree} ],
-                   transitions [ transition record as in classes.*.transitions ],
-                   hit_pose_to_state { DAMAGE_POSE name: face state | null },
-                   idle_cycle { states {name: {clip, min_s}}, rule, evidence },
-                   talk_cycle { states [ {name, clips} ], min_s, rule, evidence } } }
-  body_class   { body class: face class | null }
-  inputs       { NORMAL_ATTACK | HITTAKEN | START_SPEAK | STOP_SPEAK | DEAD:
-                   {kind: action|enum, id, lifetime, sent_by, evidence} }
-  attachment   { driven_bones [ {head_bone: "Head", body_bone: "Head"},
-                                {head_bone: "Neck", body_bone: "Neck"} ],
-                 nite_owl_extra [ L Clavicle, R Clavicle, LUpArmTwist, RUpArmTwist ],
-                 attach_bone: "Spine2", head_model_yaw_deg: 90, evidence }
-  conventions  { time: "t_s = seconds of play time since the state was entered;
-                        clip time = start_playpos*duration + t_s*speed",
-                 idle: "IDLE = idle_cycle, free-running, not tied to the body clip",
-                 … }
-```
+What the GLBs provide for it:
 
-On each **state** (`classes.*.states[*]`):
-
-```
-face { class, category, confidence, confidence_basis,
-       inputs [ {t_s, time_s, input, damage_pose?, damage_pose_any_of?,
-                 face_state_by_pose?, source, evidence} ],
-       track  [ {from_s, to_s, face_state, clips?, ease_in_s?, one_of?,
-                 sound_dependent?} ] }
-inflicts [ {t_s, time_s, playpos, event, event_id, damage_pose, damage_pose_id,
-            pose_basis, kills} ]
-```
-
-`time_s` (clip timeline) beside `t_s` (play time), as events already do.
-`face` is `null` for a class without a face controller.
-
-On each **pair** (`pairs[*]`):
-
-```
-face { clock: "seconds since both states started (timeline.playpos_per_second)",
-       master  { class, inputs [...], track [...] },
-       partner { class, inputs [...], track [...] },
-       confidence, confidence_basis }
-```
-
-The events block could additionally expose, per event record, `enum_value`
-(`m_ivalue00`) and `flags` (`m_ttruth1..3`): the face rules need the pose of
-`IMPACT_EFFECTS` and the speak flag of `SOUND`, and format 2 drops both.
-
-### 6.2 GLB
-
-| Where | What |
-|---|---|
-| `skins[1].extras.watchmen` (the face skin) | `{ face_class, clip_dir, anchor_node: "f_anchor", anchor_follows: {body_joint: "Head"}, engine_attachment: <face.attachment>, pose_animations: { "MouthClosed_EyesOpen": <animation index>, … } }` |
-| each `FACE <dir>/<clip>` animation's `extras.watchmen` | `{ face_clip: "<dir>/FACE/<clip>", pose: true, used_by: [face state names] }` |
-| each body animation's `extras.watchmen.face` | the state `face` record of 6.1 for the states using the clip, with `written_time_s` beside every `t_s` when the clip is retimed (as events have) |
-| `animations[i].extras.watchmen.pairs[*].face` | the pair's `face` record |
-| synthetic animations | mark `FACE SYNTH Blink` / `FACE SYNTH Talk` and the face channels inside body animations with `extras.watchmen.synthetic: true` and the rule that produced them |
-
-With that a Blender consumer can: put the idle cycle on an NLA track of its
-own (IdleA ≥ 3 s, IdleB ≥ 0.5 s, 0.21 s blends, random), and on top of it
-key, per body clip, the `track` segments as holds of the named `FACE …` pose
-actions with `ease_in_s` blend-in — for a pair from `pairs[*].face`.
-
-### 6.3 What the GLBs need for it
-
-- **Pose clips**: present and findable. Every clip the three classes use is
-  already in the animation list as `FACE EN1/…` (11), `FACE BS2/…` (9),
-  `FACE NTO/…` (4) on the rigs that have a face (checked on
-  `characters_v140`: Dominatrix_1..10, TwilightLady, Heavy, NiteOwl,
-  NiteOwl_Dry) [D].
-- **Attachment**: exported in substance (`face_root` → `f_anchor` keyed in
-  every body clip from the body `Head` joint; proxies for body-driven
-  parts). What is missing is only the *description* (which joint, that Neck
-  is driven too) — the `skins[1].extras` entry above.
+- **Pose clips**: every clip the three classes use is in the animation list as
+  `FACE EN1/…` (11), `FACE BS2/…` (9), `FACE NTO/…` (4) on the rigs that have a
+  face (Dominatrix_1..10, TwilightLady, Heavy, NiteOwl, NiteOwl_Dry) [D].
+- **Attachment**: `face_root` → `f_anchor` keyed in every body clip from the
+  body `Head` joint; proxies for body-driven parts; the description (which
+  joint, that Neck is driven too) is `face.attachment`.
 - **Missing face rigs**: Gimp1/2, Gimp7–11 and the three KnotTop thugs have no
   face nodes and no FACE animations, although the game gives those characters
   a head model with a face controller (`GoonCharVisual` etc. → `EN1_FACE`;
   head meshes from `BordelloFace` / `ThugFace`: `GimpHead1..3`,
   `Large/Medium/Small_Head_*`). Their face rigs would have to be attached
   before any face track can play on them.
-- **Current face channels in body clips** (pose picked from the clip *name* by
-  `face_synth.category_pose`, blink keys every 2.7–3.6 s) are not the game's
-  rule: attack pose depends on the state's "Attack state" flag, hit poses on
-  the damage pose and last 0.75 s, the blink exists for `EN4_FACE` only and is
-  ~0.5 s closed every ~3.1 s, males have a `Provocatively` fidget instead.
-  They should either be replaced by channels baked from `track` or be removed
-  from body clips in favour of the pose actions + metadata; in both cases
-  labelled.
+- **`--face-rule legacy`** keeps the 1.3.0 face channels in body clips (pose
+  picked from the clip *name* by `face_synth.category_pose`, blink keys every
+  2.7–3.6 s). That is not the game's rule: the attack pose depends on the
+  state's "Attack state" flag, hit poses on the damage pose and last 0.75 s,
+  the blink exists for `EN4_FACE` only and is ~0.5 s closed every ~3.1 s,
+  males have a `Provocatively` fidget instead. `--face-rule engine` (default)
+  bakes the face from `track`; synthetic channels are labelled.
 
 ## 7. Not established
 
@@ -579,6 +539,6 @@ actions with `ease_in_s` blend-in — for a pair from `pairs[*].face`.
 | `FireAnimationAction` / `CopyTmpListToControlActionList` / `ClearOneFrameEvents` | 0x5aa83f / 0x5abe69 / 0x5aa4c0 |
 | `CHARACTER_BONE_TYPE` / `CHARACTER_HEAD_BONE_TYPE` registrations | 0x672a62–0x672c08 |
 
-Side note for whoever maintains the tools: `hh.py` fails on any name with more
-than a few hits (`KeyError: 'argc'` — the registry records have no `argc`
-key); `work/face/h.py` is a working copy with a `class:<name>` listing.
+Tooling note: `hh.py` fails on any name with more than a few hits
+(`KeyError: 'argc'` — the registry records have no `argc` key);
+`work/face/h.py` is a working copy with a `class:<name>` listing.
