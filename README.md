@@ -1452,13 +1452,27 @@ What the test files pin:
   sky pass alone and the one first-sheet reader.
 
 A checkout on its own reports 2,187 passed, 2 skipped, 2 deselected (2,189
-tests and the two opt-in validator tests; measured on Python 3.13.15); the
-comparison with the reference jiggle values runs there on frozen numbers.
+tests and the two opt-in validator tests; measured on Python 3.13.15 with the
+`regdump` extra installed, without which one more test of `test_names` is
+skipped for want of `capstone`); the comparison with the reference jiggle
+values runs there on frozen numbers.
 `conftest.py` fails a test that leaves a `WATCHMEN_*` variable changed, so
 the result does not depend on the order the tests run in. The suite writes
 about 65 MB below the temp folder (`$TMPDIR`); on a full temp disk tests
 fail with `No space left on device` and pytest can stop with an internal
 error.
+
+GitHub Actions runs the same checks on every push and pull request
+(`.github/workflows/ci.yml`): `ruff check` and `ruff format --check` at a
+pinned ruff; the suite on Ubuntu and Windows under Python 3.13 and 3.14 with
+the latest numpy and Pillow, and under 3.13 with the floors of `pyproject.toml`
+(numpy 2.1, Pillow 11.0); the two validator tests against a pinned
+`gltf-validator`; and a package check that builds the sdist and wheel, runs
+`twine check`, installs the wheel into a clean environment, compares
+`watchmen --version` and `watchmen-kapow --version` with `pyproject.toml`, and
+confirms that Python 3.12 is refused by `watchmen.py` (exit code 2) and by pip.
+The wheel is kept as the run's `dist` artifact. Dependabot
+(`.github/dependabot.yml`) proposes updates of the commit-pinned actions.
 
 Parsing the real corpus losslessly (the "906/906 fragments" figure: every
 fragment parsed to its end, every stored value written exactly) needs a game

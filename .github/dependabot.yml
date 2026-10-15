@@ -1,0 +1,16 @@
+# Keeps the commit-pinned actions of .github/workflows/ current.
+# Python dependencies are not tracked here: pyproject.toml holds deliberate floors
+# (numpy>=2.1, Pillow>=11) that the CI matrix tests, not versions to raise.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 14
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci
