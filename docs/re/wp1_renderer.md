@@ -120,8 +120,9 @@ Kajiya-Kay hair shader and the glass shader are **dead in the shipped PC rendere
 `DeferredRA` picks the model effect through four indices at `this+0x3c8..0x3d4` (main, wet, terrain,
 falloff). `FUN_00567dce` toggles between `{1, 0x1d, 0x11, 0x1b}` (REDeferredMain / REDeferredWetSurface /
 REDeferredTerrain / REDeferredFalloff) and `{2, 2, 2, 2}` (REDeferredMain2 for everything) [code]. The
-capture uses the second set for every model draw [capture]. Which value the constructor leaves and
-whether anything flips it at run time: [NE] (caller 0x575041 not read).
+capture uses the second set for every model draw [capture]. The constructor 0x574f74 sets +0x3c4 to 1 and
+then calls the toggle (0x575041), which flips it to 0 and stores `{2, 2, 2, 2}`; the toggle has no other
+caller and no data reference, so nothing flips it at run time [code].
 
 ---
 
@@ -664,7 +665,6 @@ The toolkit's material mapping and its comparison against renders: `docs/MATERIA
 | item | what it would take |
 |---|---|
 | A combat frame with a Dominatrix (draw order among many characters, light counts, shadow layers in a level) | dump ~3 frames of `KapowMulti.3.trace` with `apitrace dump --calls` (the 11 GB trace needs ~1 GB scratch) and run `summ.py` |
-| Default of `DeferredRA+0x3c4` (REDeferredMain2 vs the DeferredMain family) and what flips it | read the ctor 0x574f74 / caller 0x575041 |
 | Sort key `light+0x24` | read the Light / scene-node base ctor |
 | Occlusion culling (software rasteriser, occluder selection, `FUN_00583640`) | read 0x574048 callees and the three Occlusion job containers |
 | `CharacterLodCtrl`, `FXGfxEffectCtrl`, `GfxBlender` (script side of LOD and grading) | script classes, WP0 naming first |

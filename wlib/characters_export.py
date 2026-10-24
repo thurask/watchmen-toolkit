@@ -219,9 +219,11 @@ def _is_part1(extract_out):
 
 
 def track_names_for(extract_out):
-    """Part 1 uses the prefix-insensitive track lookup (not established for Part 1; see
-    bake_v4)."""
-    return "prefix" if _is_part1(extract_out) else "exact"
+    """The track lookup of the character export: "exact" for every set.  The engine binds a
+    clip track to the bone of the same name, case-sensitive, in both parts (Part 2
+    0x53c0dc / 0x539eaf, Part 1 0x5339d3 / 0x531a35; see bake_v4).  `extract_out` is kept
+    so callers name the set the bake is for."""
+    return "exact"
 
 
 # RESTORATION overrides (material -> texture name), applied per variant.

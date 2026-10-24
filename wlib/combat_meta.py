@@ -269,7 +269,7 @@ BYSTANDER_DAMAGE_FACTOR, BYSTANDER_STUN_S = 0.0, 3.0
 BYSTANDER_POSES = (5, 2, 11, 8)  # rand_number quartiles, DetermineDamageReaction 0x6a18d1
 ELECTRIC_ARMOUR_FACTOR, UNDERBOSS_FROM_AI_FACTOR, UBER_VS_PLAYABLE_MIN = 0.2, 0.2, 0.7
 SWEEP_STEP_PLAYPOS, SWEEP_HIT_M = 0.05, 0.8
-# CharacterVisualDef members ModelCollisionContactAdded reads / stores without a reader
+# CharacterVisualDef members ModelCollisionContactAdded reads
 VISUAL_DEF_READ = (
     "m_nragdollimpactforcethresholdforsound",
     "m_nragdollimpactheightmask",
@@ -277,7 +277,12 @@ VISUAL_DEF_READ = (
     "m_nragdollimpactragdolltrigger",
     "m_nragdollimpactanimationtrigger",
 )
-VISUAL_DEF_UNREAD = ("m_nragdollimpactignoretrigger", "m_nragdollimpactforcefromcollider")
+# "Transfer Force Scale": CharacterVisual.StateRagdollDriven 0x69ed7c multiplies the collider
+# velocity and impulse handed to a body that a thrown body knocks over by it; registered
+# default 1.2 (CharacterVisualDef register 0x676a41); the shipped fragment stores 1.2 too
+VISUAL_DEF_TRANSFER, VISUAL_DEF_TRANSFER_DEFAULT = "m_nragdollimpactforcefromcollider", 1.2
+# stored without a reader in script
+VISUAL_DEF_UNREAD = ("m_nragdollimpactignoretrigger",)
 
 CONSTANTS = [
     (COUNTER_MARGIN_S, "0xa5ecc8", "f32", "counter: least time left before the IMPACT event"),
@@ -512,6 +517,15 @@ def contact_damage_cap(mass_kg):
     return round(float(mass_kg) * RAGDOLL_CAP_FACTOR, 6)
 
 
+def _transfer_scale(vd):
+    """m_nragdollimpactforcefromcollider of the CharacterVisualDef: the stored value, else the
+    registered default when the extract has the node, else None (no node)."""
+    v = vd.get(VISUAL_DEF_TRANSFER)
+    if v is not None:
+        return v
+    return VISUAL_DEF_TRANSFER_DEFAULT if vd.get("fragment") else None
+
+
 def _ragdoll_damage(visual_def):
     vd = visual_def or {}
     return {
@@ -571,6 +585,10 @@ def _ragdoll_damage(visual_def):
             {k: vd.get(k) for k in VISUAL_DEF_READ},
             evidence="data (CharacterVisualDef); null when the extract has no such node",
             fragment=vd.get("fragment"),
+            **{VISUAL_DEF_TRANSFER: _transfer_scale(vd)},
+            transfer_note="the velocity and impulse a body knocked over by a thrown ragdoll takes"
+            " from it are multiplied by this (CharacterVisual.StateRagdollDriven 0x69ed7c); the"
+            " registered default 1.2 (0x676a41) when the node does not store it",
             unread_in_script=list(VISUAL_DEF_UNREAD),
         ),
         "unused": "CharacterVisual._naddeddamage is written with the same amount and decays by"
@@ -779,7 +797,137 @@ def _twilight_reaction():
         "forced_attack_move_dist_m": 1.5,
         "random": "engine random numbers (MT19937, seeded once with 5489, never reseeded by"
         " script): unlike the reaction table the routine depends on the draw",
-        "not_exported": "her punish and back-flip routines",
+        "see_also": "rules.twilight_lady_punish, rules.twilight_lady_back_flip",
+    }
+
+
+# the readiness test shared by the punish and the back-flip attack (Enemy.StateActive 0x724071,
+# twilightladybackflipbehavior.StateActive 0x88130b)
+_TL_GATE = [
+    "her current animation state has special handling IMMUNE_TO_BREAK_ATTACK: wait until its"
+    " main-state play position is at least 0.7",
+    "otherwise wait while she is in slave mode, prone, or the master of a paired state"
+    " (m_imasterof of the current state is not 0)",
+]
+
+
+def _twilight_punish():
+    return {
+        "evidence": "read from code (lifted script checked against the disassembly)",
+        "arm": {
+            "handler": "Enemy.command_attacker_finished_combo 0x721f9d"
+            " (command_attacker_failed_combo 0x722042 forwards to it)",
+            "sent_by": "the human player: PlayerCtrl.command_visualize_completed_combo 0x7f4f20,"
+            " and command_visualize_failed_combo 0x7f5074 / command_fade_out_combo 0x7f5139 when"
+            " the combo held more than one item, to the behaviour handler of the player's"
+            " target-lock entity",
+            "rule": "only an Enemy of character type TWILIGHT_LADY arms, and only when not armed"
+            " already: armed = true; if the punish time has passed, the attacker becomes the"
+            " punish target and the punish time is now + 0.5 s",
+            "delay_s": 0.5,
+        },
+        "delay": {
+            "handler": "Enemy.command_delay 0x722063 (CharacterRoot.command_delay 0x68f635)",
+            "sent_by": "animation event DELAY_OPPONENT (86) of the attacker, to its current target",
+            "rule": "punish time = now + 1.5 s",
+            "delay_s": 1.5,
+        },
+        "execute": {
+            "handler": "Enemy.StateActive 0x724071, every update while armed",
+            "when": "the punish time has passed and a punish target is set",
+            "gate": [*_TL_GATE, "and the target's command_may_be_attacked(her) must be true"],
+            "attack": [
+                "disarm; leave slave mode",
+                "force animation state COMBAT_IDLE (blend and start play position -1)",
+                "attack target and next attack target = the punish target",
+                "CombatOrchestrator.command_lock_target(her, target) and"
+                " command_register_attack(her, her behaviour)",
+                "command_attack_fast",
+                "OVERRIDE_ATTACK_COMBO KNOCKDOWN; fire ONE_FRAME_ACTION, NORMAL_ATTACK, PUNCH;"
+                " ATTACK_MOVE_DIST 1.5",
+                "CharacterRootLogic.command_kill_combo",
+            ],
+            "give_up_after_s": 2.0,
+            "give_up": "while the gate holds her back she waits; 2.0 s after the punish time"
+            " she disarms without attacking",
+            "not_armed": "the punish target is cleared on every update while not armed",
+        },
+        "stuck_case": "the arm handler sets armed before it tests the time, and only a punish or"
+        " a give-up disarms, both of which need a target: a combo that ends before a delayed"
+        " punish time leaves her armed without a target, so no later combo arms her (inferred"
+        " from the code; not seen in game)",
+    }
+
+
+def _twilight_back_flip():
+    return {
+        "evidence": "read from code (lifted script checked against the disassembly)",
+        "behaviour": "TwilightLadyBackflipBehavior (script class twilightladybackflipbehavior),"
+        " created by Enemy.command_init 0x7231b4 for character type TWILIGHT_LADY",
+        "entered": "as enemy state 9 TWILIGHT_LADY_BACK_FLIP, only through a forced state"
+        " (Enemy.Evaluate rule 3; Enemy.SetState 0x715285 picks the behaviour only for"
+        " TWILIGHT_LADY). Shipped: the four REQUEST_FORCED_STATE actions of Bordello's"
+        " Enemies.fragment (level meta, graph.nodes[].forced_state)",
+        "setup": "command_init 0x880f52 finds the node TwilightLadySceneSetupFolder and collects"
+        " its PivotNode descendants as retreat points; command_check_preconditions is true when"
+        " the folder exists and holds at least one",
+        "routine": [
+            "StateActive 0x88130b; without a valid setup it leaves at once",
+            "d = distance to the nearest enemy Perception knows",
+            "d < 4.0 m: wait for the gate, then, with a Perception target, attack: leave slave"
+            " mode, force COMBAT_IDLE, attack and next attack target = the target, orchestrator"
+            " lock_target and register_attack, command_attack_slow, OVERRIDE_ATTACK_COMBO"
+            " AREA_DAMAGE, fire ONE_FRAME_ACTION, NORMAL_ATTACK, HEAVY_PUNCH, ATTACK_MOVE_DIST = d,"
+            " kill_combo; turn to the target every frame while the attack runs; then retreat",
+            "retreat: each point within 4.0 m of her weighs 0, any other point weighs minus the"
+            " sum, over the known enemies, of the cosine between the direction to the point and"
+            " the direction to the enemy; the heaviest point above -1.0 wins; none: she gives up"
+            " the behaviour",
+            "goal: the point, or 7.0 m towards it at the point's height when it is farther",
+            "when the goal is farther than 2.0 m: force COMBAT_IDLE; then every frame while"
+            " farther than 2.0 m and for at most 3.0 s: fire FLIP_MOVE, target lock = the"
+            " Perception target, set_movement(heading to the goal, facing away from it, 1.0)",
+            "stop: set_movement with speed 0, wait until her move speed is at most 0.1, leave",
+        ],
+        "gate": _TL_GATE,
+        "constants": {
+            "attack_range_m": 4.0,
+            "goal_reached_m": 2.0,
+            "max_goal_distance_m": 7.0,
+            "max_flip_time_s": 3.0,
+            "stop_speed": 0.1,
+        },
+        "counter_attack_and_break": "StateCounterAttackAndBreak 0x87aac0 (for 2.0 s, each frame:"
+        " stop, next attack target = the attacker, command_counter_attack) has no entry: no"
+        " script enters it and the class's command_react_to_attack is the empty body 0x48d561,"
+        " so Enemy.command_react_to_attack_twilight_lady's hand-over to the running behaviour"
+        " does nothing",
+        "shipped_duration": "the shipped forced states (criteria TIMER | STATE_NOT_RUNNING, 0.05 s)"
+        " last until the first evaluation later than 0.05 s after the request, at most 0.2125 s"
+        " (the enemy's evaluation interval is 0.0625-0.1625 s; STATE_NOT_RUNNING never ends it,"
+        " the behaviour reports running): the 3.0 s limit is not reached; when the forced state"
+        " ends first, command_lost_focus 0x8166ca leaves StateActive without a speed-0 command,"
+        " and what the routine started (the attack, the BackFlip animation state) runs on as"
+        " animation (docs/re/wp4_ai.md 3.5)",
+    }
+
+
+def _weapon_steal():
+    return {
+        "evidence": "read from code",
+        "handler": "CharacterRootLogic.command_animation_event_received 0x6a525e, event"
+        " COUNTER_ATTACK_WEAPON_STEAL (32), on the character whose clip fires it (the taker)",
+        "rule": [
+            "victim = the taker's AnimationCtrl.m_eanimationpartner; none: nothing happens",
+            "victim of character type UNDERBOSS: nothing happens",
+            "the victim drops its weapon (CharacterRoot.command_force_drop_weapon, which returns"
+            " it); no weapon: stop",
+            "a taker that holds a weapon drops it",
+            "victim RORSCHACH: the weapon stays on the ground",
+            "otherwise WeaponBase.command_do_actual_pickup(taker, 0.1) 0x8b320d attaches it to"
+            " the taker's weapon attach bone over 0.1 s and it becomes the taker's m_eweapon; a"
+            " player taker uses a weapon flagged player_one_handed as BASH_1H",
+        ],
     }
 
 
@@ -982,6 +1130,9 @@ def _rules(visual_def=None):
         "ragdoll_damage": _ragdoll_damage(visual_def),
         "attack_permission": _attack_permission(),
         "twilight_lady_reaction": _twilight_reaction(),
+        "twilight_lady_punish": _twilight_punish(),
+        "twilight_lady_back_flip": _twilight_back_flip(),
+        "weapon_steal": _weapon_steal(),
         "combo": {
             "evidence": "read from code",
             "handlers": "CharacterComboDatabase.get_longest_valid_combo 0x66cd98,"
@@ -1848,7 +1999,11 @@ class CombatData:
                 )
             elif n.cls == "CharacterVisualDef" and self.visual_def is None:
                 self.visual_def = dict(
-                    {k: n.p(k) for k in VISUAL_DEF_READ + VISUAL_DEF_UNREAD}, fragment=rel
+                    {
+                        k: n.p(k)
+                        for k in VISUAL_DEF_READ + (VISUAL_DEF_TRANSFER,) + VISUAL_DEF_UNREAD
+                    },
+                    fragment=rel,
                 )
         for rel, n in nodes:
             if n.cls == "CharacterDef":
@@ -2816,7 +2971,6 @@ NOT_ESTABLISHED = [
     " much health a ragdolled body loses",
     "the AI behaviours behind rules.attack_permission (chase, hang back, circle, return to the"
     " combat zone) and the orchestrator's level presets: not exported here",
-    "Twilight Lady's punish and back-flip routines",
     "Underboss: whether the registered defaults 3 / 2 are live (the shipped fragment stores"
     " neither property)",
     "a native or data writer of PublicLib.g_nglobaldamagefactor outside the files scanned"

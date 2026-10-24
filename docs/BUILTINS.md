@@ -42,9 +42,17 @@ Part 1. The X360 Part 1 image (retail and the devkit-signed build) has 133: it l
 `RegisterPerformanceMeasurementCallback`, 121 `UnRegisterPerformanceMeasurementCallback` (member
 and signature strings both absent), and adds `set_disc_error_message(entity,integer)`
 (`SetDiscErrorMessageMSG`) and `disablecurrentloadscreen` (`DisableCurrentLoadScreenMSG`).
-Measured on strings; the X360 Part 1 registration order and handlers were not read, so a
-builtin index from this table is not valid for X360 Part 1 from index 68 on. PC Part 1 was not
-examined. `builtins.json` carries this as `other_builds`.
+Measured on strings; the X360 Part 1 registration order and handlers were not read.
+
+PC Part 1 has the same difference, read from code: its `BuiltinModule::RegisterMembers`
+(0x47c5a6 in the unpacked `part1_pc` executable; function 0x47bcb1, property 0x47c4ad, enum
+member 0x4fd1b6) registers 117 functions, 19 properties and 10 enum members. The order is the
+Part 2 order without the eight and with `set_disc_error_message` at index 65 (before
+`getsystemlanguage`) and `disablecurrentloadscreen` at 74, so a function index of this table is
+the PC Part 1 index up to 64 and not from 65 on; properties and enum members are in the same
+order. That X360 Part 1 has the PC Part 1 order is inferred (same strings, same game).
+`builtins.json` carries both as `other_builds` (`pc_p1.index_in_pc_p1` maps each Part 2 index
+to the Part 1 one, null for the eight).
 
 ## Calling convention
 

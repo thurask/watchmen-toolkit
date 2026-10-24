@@ -169,8 +169,9 @@ matter for rendering.
 - **Which models get a colour-consuming shader:** exactly the buffers with `hasColor = 1`, i.e. the 387
   models listed in the JSON (`coloured_buffers`), per submesh. A model can mix coloured and uncoloured
   submeshes (Rorschach: 2 of 11).
-- Not established: which rule sends a material to REDeferredMain2 rather than REDeferredMain / REMain /
-  REHair (the capture shows only the first for models), and whether any CPU code reads the colour bytes
+- Every model draws with REDeferredMain2: `DeferredRA` fixes its four model-effect indices to slot 2 at
+  construction (0x574f74 → toggle 0x567dce, no other caller; `wp1_renderer.md` §2) [code]. Not established:
+  whether any CPU code reads the colour bytes
   at run time (none found; cloth setup was not traced vertex by vertex).
 
 ## 5. Tangent space, culling, winding
@@ -248,7 +249,6 @@ What a faithful material needs beyond glTF's model:
 
 ## 7. Not established
 
-- The rule that routes a material to REDeferredMain2 versus the other render effects.
 - 19 shader define sets (none of them a model vertex shader in the capture); two deep-search matches
   may be hash collisions.
 - Any run-time CPU reader of the colour bytes (none found).

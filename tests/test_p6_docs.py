@@ -9,7 +9,7 @@ overtook, where they live in code.
    state "is not read"; it is (m_edefaultanimstate, command_get_valid_state).
 3. The 28 command handlers that the function dump lacks are all in reg_dump.json
    (the table comes from the registration calls, not from the function list).
-4. One 1.5.0 heading in the CHANGELOG, written against 1.4.0 (and one 1.4.0 heading).
+4. One heading per release in the CHANGELOG, newest first (1.6.0, 1.5.0, 1.4.0, 1.3.0 ...).
 """
 
 import json
@@ -116,16 +116,18 @@ def test_handlers_the_function_dump_lacks_are_in_reg_dump():
     assert len(running) == 35  # the largest group of the 86, not most of them
 
 
-def test_changelog_has_one_1_5_0_entry_and_the_docs_do_not_date_it_backwards():
+def test_changelog_has_one_entry_per_release_and_the_docs_do_not_date_it_backwards():
     root = os.path.join(HERE, "..")
     with open(os.path.join(root, "CHANGELOG.md"), encoding="utf-8") as f:
         log = f.read()
     heads = re.findall(r"^## .*$", log, re.M)
-    assert heads[0] == "## 1.5.0 — 2026-10-10" and heads[1].startswith("## 1.4.0")
-    assert heads[2].startswith("## 1.3.0")
-    assert sum(h.startswith("## 1.5.0") for h in heads) == 1
-    assert sum(h.startswith("## 1.4.0") for h in heads) == 1
-    assert not any("unreleased" in h.lower() for h in heads)
+    if heads[0] == "## Unreleased":  # changes collected for the next release
+        heads = heads[1:]
+    assert heads[0] == "## 1.6.0 — 2026-10-24" and heads[1] == "## 1.5.0 — 2026-10-10"
+    assert heads[2].startswith("## 1.4.0") and heads[3].startswith("## 1.3.0")
+    for v in ("1.6.0", "1.5.0", "1.4.0"):
+        assert sum(h.startswith("## %s" % v) for h in heads) == 1
+    assert not any("unreleased" in h.lower() for h in heads)  # one pending section, at the top
     # "until 1.4.0" read as if 1.4.0 were already behind us
     for rel in (
         "README.md",
@@ -136,5 +138,5 @@ def test_changelog_has_one_1_5_0_entry_and_the_docs_do_not_date_it_backwards():
     ):
         with open(os.path.join(root, rel), encoding="utf-8") as f:
             text = " ".join(f.read().split()).lower()
-        for v in ("1.4.0", "1.5.0"):
+        for v in ("1.4.0", "1.5.0", "1.6.0"):
             assert "until %s" % v not in text and "until toolkit %s" % v not in text, rel

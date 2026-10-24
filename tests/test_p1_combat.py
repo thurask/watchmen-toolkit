@@ -164,10 +164,8 @@ def test_ragdoll_damage_rule_and_the_visual_def_numbers(meta):
     vd = r["visual_def"]
     assert vd["m_nragdollimpactforcethresholdforsound"] == 300.0
     assert [vd[k] for k in cm.VISUAL_DEF_READ] == [300.0, 0.6, 2500.0, 6000.0, 2000.0]
-    assert vd["unread_in_script"] == [
-        "m_nragdollimpactignoretrigger",
-        "m_nragdollimpactforcefromcollider",
-    ]
+    assert vd["unread_in_script"] == ["m_nragdollimpactignoretrigger"]
+    assert vd[cm.VISUAL_DEF_TRANSFER] == 1.2 and "0x69ed7c" in vd["transfer_note"]
     assert vd["fragment"].endswith("CharacterVisual.fragment")
     assert r["bystanders"]["direct_damage"] == 0.0 and r["fall_kill"]["damage"] == 100000.0
 
@@ -176,6 +174,14 @@ def test_an_extract_without_a_visual_def_has_null_numbers(plain):
     vd = plain["combat"]["rules"]["ragdoll_damage"]["visual_def"]
     assert all(vd[k] is None for k in cm.VISUAL_DEF_READ) and vd["fragment"] is None
     assert cm.rules()["ragdoll_damage"]["visual_def"]["fragment"] is None
+    assert vd[cm.VISUAL_DEF_TRANSFER] is None
+
+
+def test_the_transfer_scale_falls_back_to_the_registered_default():
+    stored = cm._ragdoll_damage({"fragment": "x", cm.VISUAL_DEF_TRANSFER: 2.5})["visual_def"]
+    absent = cm._ragdoll_damage({"fragment": "x"})["visual_def"]
+    assert stored[cm.VISUAL_DEF_TRANSFER] == 2.5
+    assert absent[cm.VISUAL_DEF_TRANSFER] == cm.VISUAL_DEF_TRANSFER_DEFAULT == 1.2
 
 
 def test_contact_damage_cap_is_mass_times_the_force_cap():
@@ -287,6 +293,36 @@ def test_sweep_attack_permission_and_twilight_rules():
     t = r["twilight_lady_reaction"]
     assert "0x7220c7" in t["handler"] and t["defaults"]["hits_before_dodge"] == 3
     assert t["defaults"]["dodges_before_counter"] == 1 and t["forced_attack_move_dist_m"] == 1.5
+    assert "not_exported" not in t and "twilight_lady_punish" in t["see_also"]
+
+
+def test_twilight_lady_punish_back_flip_and_weapon_steal_are_exported():
+    r = cm.rules()
+    p = r["twilight_lady_punish"]
+    assert "0x721f9d" in p["arm"]["handler"] and p["arm"]["delay_s"] == 0.5
+    assert p["delay"]["delay_s"] == 1.5 and "DELAY_OPPONENT (86)" in p["delay"]["sent_by"]
+    ex = p["execute"]
+    assert ex["give_up_after_s"] == 2.0 and "0x724071" in ex["handler"]
+    assert any("KNOCKDOWN" in s and "ATTACK_MOVE_DIST 1.5" in s for s in ex["attack"])
+    assert any("command_may_be_attacked" in g for g in ex["gate"])
+    assert "inferred" in p["stuck_case"]
+    b = r["twilight_lady_back_flip"]
+    assert b["constants"] == {
+        "attack_range_m": 4.0,
+        "goal_reached_m": 2.0,
+        "max_goal_distance_m": 7.0,
+        "max_flip_time_s": 3.0,
+        "stop_speed": 0.1,
+    }
+    assert "TwilightLadySceneSetupFolder" in b["setup"]
+    assert any("AREA_DAMAGE" in s and "HEAVY_PUNCH" in s for s in b["routine"])
+    assert any("FLIP_MOVE" in s for s in b["routine"])
+    assert "no entry" in b["counter_attack_and_break"] and "0.2125 s" in b["shipped_duration"]
+    assert not any("command_may_be_attacked" in g for g in b["gate"])  # the punish adds it
+    w = r["weapon_steal"]
+    assert "COUNTER_ATTACK_WEAPON_STEAL (32)" in w["handler"]
+    assert any("UNDERBOSS" in s for s in w["rule"]) and any("RORSCHACH" in s for s in w["rule"])
+    assert not any("punish" in s.lower() for s in cm.NOT_ESTABLISHED)
 
 
 def test_not_established_drops_what_is_settled(meta):

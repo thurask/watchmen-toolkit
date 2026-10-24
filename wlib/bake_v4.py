@@ -364,9 +364,10 @@ def bake(
     # Tracks bind to bones by exact, case-sensitive name (0x53c0dc / 0x539eaf, 0x594dde); an
     # unmatched track is skipped (0x594cac).  Part 2 medium: `Bip02 R/LUpArmTwist(1)` have no
     # track in 221 of 222 EN1 clips and are placed by the twist pass (capture: median 0.16° /
-    # 0.03° against 34° / 30° with the track and no pass).  track_names='prefix' keeps the
-    # 'BipNN '-insensitive lookup for Part 1, where `Attach RHand` has only a
-    # `Bip01 Attach RHand` track in 983 clips and no capture exists.
+    # 0.03° against 34° / 30° with the track and no pass).  Part 1 binds the same way
+    # (0x5339d3 / 0x531a35, 0x58abd0), so its `Attach RHand`, which has only a
+    # `Bip01 Attach RHand` track in 983 clips, gets no track.  track_names='prefix' is the
+    # 'BipNN '-insensitive lookup, for a bind that is not the engine's (a head model's own).
     import re
 
     _canon = lambda n: re.sub(r"^Bip\d+\s+", "", n)

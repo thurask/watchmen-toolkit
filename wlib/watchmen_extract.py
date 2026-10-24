@@ -4734,7 +4734,9 @@ def _parse_model_header_as(header, order, layout):
         # 0x53db65: highest bone index used by part 0 / LOD 0, + 1
         v = r.u32()
         M["skinned_bone_count"] = None if v == 0xFFFFFFFF else v
-        M["has_cloth"] = r.boolean()
+        # the model carries an .animation of its own (curtains, foliage): its path follows
+        # the articulated body (0x547006 -> 0x54292c; parse_model_nodes.model_tail)
+        M["has_animation"] = r.boolean()
         r.skip(r.count(32) * 32)
         r.skip(r.count(4) * 4)
         # the model's box as its minimum and maximum corner (it is a little larger than
@@ -5075,6 +5077,37 @@ PARTS_NOTE = (
 )
 
 
+def _model_tail_meta(header, order="<"):
+    """The keys model_meta adds from the header's tail (parse_model_nodes.model_tail),
+    only on a model that has them: "animation" (the path of the model's own
+    .animation) and "morph_channels"."""
+    try:
+        import parse_model_nodes as _pmn
+    except ImportError:
+        return {}
+    T = _pmn.model_tail(header, order)
+    if T is None:
+        return {}
+    out = {}
+    if T["animation"]:
+        out["animation"] = T["animation"]
+    if T["morph_channels"]:
+        out["morph_channels"] = T["morph_channels"]
+        out["morph_channel_note"] = MORPH_CHANNEL_NOTE
+    return out
+
+
+#: what <name>.model.json says about "morph_channels"
+MORPH_CHANNEL_NOTE = (
+    "ModelRes morph-channel list (writer 0x543e10, reader 0x547006).  A channel's weight "
+    "w > 0 picks the last target whose key <= w and drives it by (w - previous key) / "
+    "(key - previous key), the previous key of the first target being 0 (0x4b5b31); "
+    "scripts find a channel by its name (Character.GetMorphChannelIdx 0x4bca89).  `target` "
+    "keys the per-target weights that code fills (Character+0x244); that it is the index "
+    "the stream's morph records carry is inferred.  `f0` is not read by that code"
+)
+
+
 def model_meta(header, model=None, order="<"):
     """Sidecar content of a header-decoded model (decode_model writes it as
     <name>.model.json): LOD count and switch distances, the buffers that are
@@ -5104,6 +5137,7 @@ def model_meta(header, model=None, order="<"):
         },
         "parts": _parts_summary(M),
         "parts_note": PARTS_NOTE,
+        **_model_tail_meta(header, order),
         **(
             {
                 "particle_surfaces": [_surface_summary(s) for s in surfaces],
@@ -7701,11 +7735,13 @@ def mp3_frame_stats(data):
 
 
 def _ps3_sound_info(header, pe):
-    """Fields of a PS3 'sound' asset header (big-endian; read on the data: the
-    2,921 Part-2 and 3,953 Part-1 sounds of the PS3 disc all fit, the PS3
-    loader itself was not read).  pe = property-bag end:
-    +0 u8 looping, +1 u8 is3d, +2 u8 (1 on every sound; meaning not
-    established), +3 u32 sample rate, +7 u32 channels, +11 u32 samples,
+    """Fields of a PS3 'sound' asset header (big-endian; the 2,921 Part-2 and
+    3,953 Part-1 sounds of the PS3 disc all fit, and the field order is the PS3
+    Part 2 loader's, 0x140f10 in sounddataps3.cpp).  pe = property-bag end:
+    +0 u8 looping, +1 u8 is3d, +2 u8 compressed (1 on every sound: the
+    bytes-per-second field is stored; 0 would mean PCM16 with that field absent
+    and taken as rate x 2 x channels, a layout no shipped sound uses and this
+    reader does not handle), +3 u32 sample rate, +7 u32 channels, +11 u32 samples,
     +15 u32 bytes per second, +19 u32 size (32 + MP3 bytes + 0..15 padding),
     +23 the 32-byte segment header of the streams (dword 0 = MP3 bytes; dword 4,
     on looping sounds only, is the byte length of two MP3 frames, floor(2 x 1152 x

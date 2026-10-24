@@ -179,8 +179,25 @@ offsets below are engine values too, in both frames.
 `actor` / `target` are the root positions of the character carrying the event and of its
 animation partner. A teleport puts the root at P, the capsule at P + 0.5 · height (2.0) and the
 visual node on the capsule (0x6b2af5), so the root is on the floor, 1.0 m under the visual
-frame; that it is still there at the moment of a cut is inferred (how the root follows the
-capsule each frame is not established).
+frame; that it is still there at the moment of a cut is inferred. What is read: the capsule node's world
+position is the PhysX controller centre (`CharacterController::SetOrientAndMove` 0x5027b5 copies `getPosition` into
+the node after each move); `CharacterRoot.StateActive` 0x6b367a writes the root only when the character is
+ragdoll-driven, and then to the capsule's position (the centre: the capsule is first moved to the ragdoll pelvis
++ 0.45 × height, double @0xa5f020), so a ragdoll-driven root is at the waist. In normal and absolute (paired) mode
+`StateActive` does not write the root, the root's transform parent is the scene (set in `initialize_external`
+0x6b3164), and the capsule is placed in world space on its own (`command_activate_collision` sets its transform
+parent to the scene). The only callers of the pivot position setter 0x47e785 on the character side are teleport
+0x6b0b7f, `command_set_world_position_and_orient` 0x6b2af5, `initialize_external`, `StateActive` (ragdoll-driven),
+`StateDead` 0x6bb12a (twice), `command_update_ragdoll` 0x6bc3e2 and the get-up 0x728e00, and no script writes
+`worldPos` of the root. So in normal and paired play the root is not moved by movement (read from code for the
+script side). Native side (read from code): 0x47e785 converts to local space and calls the local-position setter
+0x47da30, whose 27 callers are editor tools, minigames, weapons, `CharacterAddonCtrl` (add-on anchors),
+`CharacterPhysics.command_update_world_data` (the absolute mode's world start / end helper nodes, not the root),
+`PivotNode.Move` / `MoveLocal` (no script uses either) and the scene's per-frame update, which moves only the
+keyboard-driven debug target (0x496294 → 0x4a43f8). No native code moves a `CharacterRoot` each frame, so in
+normal and paired play the root stays where the last teleport or `set_world_position_and_orient` put it, on the
+floor. Writes through a whole-matrix setter were not enumerated. The controller position the capsule node takes
+is the capsule centre (read in `NxCharacter.dll`, NAV_DATA.md "Heights").
 `fx_meta.cut_camera(cut, actor, target, look_at_point, previous, camera)` does the arithmetic
 and returns `position`, `look_at`, `side` and `fallback`; a kept position needs `previous` or
 `camera` (`ValueError` otherwise). It does no collision test: the engine accepts a position when
@@ -549,8 +566,8 @@ PC / X360 record layout; the full parameters of an effect are in the asset's own
 
 ## Not established
 
-`fx.not_established` in the table. In short: how the root node follows the capsule
-each frame (the cut's vertical reference); whether the first cut of a session blends (the test
+`fx.not_established` in the table. In short: an in-game confirmation that the cut's
+vertical reference is the floor (the code above leaves the root on the floor); whether the first cut of a session blends (the test
 uses the cut camera's previous orientation); which weapon model a character holds in a
 given pair; the
 damage pose a given IMPACT ends with (the conversions and their order — combo, direction, size,

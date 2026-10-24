@@ -52,7 +52,8 @@ is relative to your own game install and working directory.
 - `game.naz` — the source archive (~937 MB on PC).
 - `Data/Engine/KapowMulti*.exe` — the game executable. Only
   `watchmen gendata regdump` reads it, and only usefully when its `.text`
-  section is not encrypted; the retail build is SecuROM-packed in place and this
+  section is not encrypted; the retail build's is encrypted in place by Steam's
+  SteamStub wrapper and this
   toolkit neither unpacks it nor helps you obtain one that is unpacked. The
   string sections (`.rdata`/`.data`) *are* readable in the retail build, which is
   why `gendata strings` works on it.
@@ -405,7 +406,8 @@ corpus. The research reports: `docs/re/formats.md` (the loaders),
 reports.
 
 Analysis of engine CODE requires an executable whose `.text` is not
-encrypted; the retail build's is SecuROM-packed in place. The toolkit does
+encrypted; the retail build's is encrypted in place by Steam's SteamStub
+wrapper. The toolkit does
 not unpack it and does not need it for anything except `gendata regdump`.
 
 ---

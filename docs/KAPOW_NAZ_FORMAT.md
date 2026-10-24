@@ -369,7 +369,9 @@ the frame's spare milliseconds and keeps a 5 ms margin)*
    the newer build, 0x70000 in the stand-alone Part 1 build (seen directly on
    the pivot book, version 2, and as the 0x10000 difference of the two
    texture values). The second word differs per file and per platform; that
-   it is the source CRC is read from code and was not checked on files. Two
+   it is the source CRC is read from code. It is not a checksum of anything shipped (measured on the six PC Part 2
+   standalone headers: neither zlib CRC-32 nor the engine bit-CRC, raw or name-folded, of the decompressed header,
+   the decompressed `_s_z` stream, both together, the compressed bytes, the whole file, or the asset path matches). Two
    standalone pairs with the same base name in different folders do not
    overwrite each other in `extract`: a copy with different bytes is written
    as `<name>~<folder>.<ext>` with a WARNING (none occurs in the six sets:
@@ -579,7 +581,7 @@ renderer counts engine layers, the file counts slots:
 | 1 | 2 | normal (`ATI2`) | +0x19c | Gfx+0x598 (bytes 80 80 80 80) |
 | 2 | 4 | specular (`DXT1`), "specMap" | +0x1a8 | +0x59c (white) |
 | 3 | 5 | glow (`DXT1`) | +0x1b4 | +0x59c |
-| 4 | 3 | height (`L8`), the parallax map | +0x1c0 | +0x5a0 (bytes ff 00 00 00; opaque black, inferred) |
+| 4 | 3 | height (`L8`), the parallax map | +0x1c0 | +0x5a0 (64×64, bytes ff 00 00 00 = A,R,G,B: opaque black; gfx.cpp 0x433007, byte order from the colour writer 0x42dd56; +0x598 all 0x80, +0x59c all 0xff) |
 | 5 | 6 | fallOff | +0x1cc | +0x59c |
 | 6 | 7 | ambOcc | +0x1d8 | +0x59c |
 | 7 | 8 | specSize (`L8`), the specular-power map | +0x1e4 | +0x5a0 |
@@ -831,7 +833,7 @@ Seen at run time (measured, three draws of a D3D9 gameplay capture): the
 Heavy's `Heavy_Button` sheet `BlueButton` draws with the diffuse of
 `Heavy_ButtonBlue.bmp` and the normal map and constants of `Heavy_Button.bmp`.
 The engine takes entry `sheet+0x6c` of the override texture's frame table
-(0x49bcbe; the meaning of +0x6c is inferred); the exporters take the override
+(0x49bcbe); +0x6c is the sheet's current animation frame (0 for a sheet without animation, see `ENGINE_CONSTANTS.md` "Texture sheets"); the exporters take the override
 texture's first layer file of that kind, which is the same thing unless the
 override texture has more than one frame (no case was looked for).
 
@@ -907,15 +909,28 @@ A `ModelRes` is a mesh. Like a texture it splits across the two block files: the
 **Header blob** (after the type string and property bag of §3):
 
 ```
- u32 maxLodIndex, bool hasSkeleton, u32 skinnedBoneCount (0x53db65; 0xFFFFFFFF without a skeleton), bool hasCloth, [u32 n][n×32 B bone boxes: min, max], [u32 n][n×4 B bone index]
+ u32 maxLodIndex, bool hasSkeleton, u32 skinnedBoneCount (0x53db65; 0xFFFFFFFF without a skeleton), bool hasAnimation, [u32 n][n×32 B bone boxes: min, max], [u32 n][n×4 B bone index]
  vec3 bboxMin, vec3 bboxMax
  u32 nTex  { bool flag (asset flag bit 4, 0x543e10); string path }            texture list
  u32 nPb   { string path }                  pivotbooks
  u32 nParts { Part }
- … articulated body (ragdoll), optional cloth object: see "Articulated body" below;
-   list `[u32 n]{f32, string name, [u32 m][m × 8 B]}` (ModelRes+0x134, writer 0x543e10;
-   searched by name by 0x4b38b6 and sized into `Character`'s channel arrays by 0x4b9bfe, so
-   inferred to be the morph-channel list); not parsed
+ … articulated body (ragdoll): see "Articulated body" below
+ [string animation path]  only when hasAnimation is set (0x547006 → 0x54292c): the model's own
+   .animation (curtains, foliage)
+ [u32 n] n × {f32, string name, [u32 m] m × {u32 target, f32 key}}  the morph-channel list
+   (ModelRes+0x134, 36-byte elements, writer 0x543e10). Read from code: the script native
+   `Character.GetMorphChannelIdx` 0x4bca89 → 0x4ba428 → 0x4b6f26 → 0x4b38b6 returns the index of the
+   element whose +0x14 (hash of the name) matches; the animation binder 0x594dde maps a clip's morph
+   tracks to channels the same way; 0x4b9bfe sizes `Character`'s channel arrays (+0x22c, +0x238,
+   filled with −1); 0x4b5b31 turns a channel weight w > 0 into target weights: the last entry whose
+   key ≤ w gets (w − previous key) / (key − previous key), the previous key of the first entry being 0,
+   stored under its target (Character+0x244). The leading f32 is not read there.
+   Parsed by `parse_model_nodes.model_tail`; `<model>.model.json` carries `animation` and
+   `morph_channels` on the models that have them. Measured: every model header of the PC Part 2 level
+   blocks (981 copies), two Xbox 360 Part 2 blocks (299) and the PC Part 1 `WatchMen` block (15) reads
+   to its last byte; 26 PC Part 2 copies carry an animation path (hasAnimation set on exactly those);
+   one model has channels (`KnotTop_Small_ArmsBrokenS02`: two channels `default03`, f32 0.5, one
+   target 1 at key 1.0).
 
  Part:    vec3 pos, quat (xyzw), string name, u32, i32 parent
           u32 nLods { u32 nSub { Submesh } }
@@ -1143,12 +1158,13 @@ Part 2 layout. It is the record stream above with two differences:
    inline, u32, bool, MeshBuffer, [u32 size][size bytes]`. The byte that is
    kept is the one the loader uses (a dynamic copy of the buffer, set on cloth
    meshes); the one that is absent is the byte the Part 2 PC loader reads and
-   discards. Code: the Xbox 360 Part 1 reader `0x828bccc0` reads 1, 1, 4, 1
-   bytes where the Part 2 readers (`0x542541` PC, `0x828fea68` Xbox 360) read
-   1, 1, 4, 1, 1; and the submesh record's version term is 10 in the Part 1
-   build (`0x828b4ff0`) against 11 in Part 2 (`0x53a563` PC, `0x828f54c0`
-   Xbox 360), while the terms of the model (46), the node (10) and the mesh
-   buffer (15, 8, 2, 3) are the same in both builds. The Xbox 360 Part 1
+   discards. Code: the Part 1 readers (`0x539078` PC, `0x828bccc0` Xbox 360)
+   read 1, 1, 4, 1 bytes where the Part 2 readers (`0x542541` PC, `0x828fea68`
+   Xbox 360) read 1, 1, 4, 1, 1; and the submesh record's version term is 10
+   in the Part 1 builds (`0x5320a4` PC, `0x828b4ff0` Xbox 360) against 11 in
+   Part 2 (`0x53a563` PC, `0x828f54c0` Xbox 360), while the terms of the model
+   (46), the node (10) and the mesh buffer (15, 8, 2, 3) are the same in both
+   builds. The Xbox 360 Part 1
    addresses resolve with `default.pe` read as a memory image (file offset =
    RVA, image base `0x82000000`), not through its section table.
 2. Every property blob — the bag of §3 and the articulated-body blob — holds
@@ -1164,9 +1180,27 @@ read as Part 1; the 1,085 that have a submesh read in that layout only, the 5
 without one read in both and take the bag's answer. The stream blob is
 unchanged (PC Part 1: consumed exactly on 1,085 / 1,085), and so are the node
 records, the MeshBuffer header and the body / joint lists: counts and values
-are equal to the PS3 Part 1 copy of the same model on 1,090 / 1,090. The
-readers of the Part 1 node and model root were not opened; their equality is
-from the data and the unchanged version terms.
+are equal to the PS3 Part 1 copy of the same model on 1,090 / 1,090.
+
+The PC Part 1 readers agree (read from code, `part1_pc` executable, compared
+instruction by instruction with addresses and source line numbers masked):
+the model root reader 0x53d563 (ModelRes slot 24; Part 2 0x547006) and the
+201 functions it reaches within three calls are the Part 2 code (189
+identical; of the rest, six differ only in the allocator's source line
+numbers or in jump tables). Two differences change what is read: the submesh
+reader 0x539078 lacks the one byte, and the articulated-body record reader
+0x50513c reads `[objId][keyHash][nWords]` where Part 2's 0x510e5f reads four
+words and checks the type. Three change only checks or flags, with the same
+bytes read: the property-bag reader 0x506248 takes the class from the type
+string without Part 2's name check (0x511f96); the part reader 0x53be9d
+creates every shadow hull's buffers with the model's static flag (0x53190e,
+true when ModelRes +0xe0 and `hasAnimation` are clear) where Part 2 also
+clears it on hulls with `fromCloth` set; and the articulated-body apply
+(0x510b93) has no Part 2 subset arguments, which the load passes as 0, 0. The
+version terms of the whole asset chain (texture, terrain, font, animation,
+model) are equal; the one other difference is `DetailMeshAsset`, 3 in PC
+Part 1 (0x522a4e) against 4 (0x52af3f), which is the `.detailmesh` byte
+(FORMATS_MISC.md).
 
 ### Part transforms
 
@@ -1190,7 +1224,8 @@ by inference); `<model>.model.json` lists the parts under `parts` and says
 ### Submesh and part fields
 
 Not established: what asset flag bit 4 (the texture-list bool) does beyond selecting
-the load argument of 0x55243f (0x49b2b2); the collision volume's second u32. The submesh
+the load argument of 0x55243f (0x49b2b2). (The collision volume's second u32 is 0 in every shipped volume and
+read only by the volume writer: FORMATS_MISC.md.) The submesh
 flag byte the Part 1 build does not have is 'the buffer has a cloth mesh' (writer
 0x53f736; measured: equal to the MeshBuffer's own cloth bool on 2,578 of 2,578 PC
 Part 2 render buffers, and the one bool PC Part 1 stores is set on 41 buffers

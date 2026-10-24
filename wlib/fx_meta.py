@@ -1457,8 +1457,9 @@ _CUT_PLACEMENT = {
     "nLookAtHeightAboveGround).  A teleport puts the root at P, the capsule at P + 0.5 * "
     "height (2.0) and the visual node on the capsule (command_set_world_position_and_orient "
     "0x6b2af5), so the root is on the floor, 1.0 m under the visual frame -- in clip space "
-    "the GamePivot track's x and z, on the floor.  That it is still there at the moment of "
-    "a cut is inferred: how the root follows the capsule each frame is not established",
+    "the GamePivot track's x and z, on the floor.  No script or native code moves the root "
+    "in normal or paired play (read: the local-position setter 0x47da30 has no per-frame "
+    "caller that targets a CharacterRoot), so it is still there at the moment of a cut",
     "angle": "placement 'angle' (angle_deg != 0): d = normalize_xz(target - actor), base = "
     "actor; when the cut looks at the attack target d = -d and base = target; position = "
     "base + distance_m * (sin h, 0, cos h) + (0, height_m, 0) with h = atan2(d.x, d.z) + "
@@ -1641,7 +1642,8 @@ _RUMBLE = {
 }
 
 _NOT_ESTABLISHED = [
-    "how the root node follows the capsule each frame (the cut's vertical reference)",
+    "an in-game confirmation that the cut's vertical reference (the root) is on the floor; "
+    "the code leaves the root where the last teleport put it",
     "whether the first cut of a session blends (the test uses the cut camera's previous "
     "orientation)",
     "which weapon model a character holds in a given pair (pair.fx gives every weapon "

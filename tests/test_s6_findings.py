@@ -162,7 +162,8 @@ def test_terrain_names_follow_the_loader_and_the_old_keys_still_build():
     assert d["f1c"] == d["uv_scale"] + d["uv_offset"]
     assert s["enabled"] == s["flag"] == 1
     assert s["cells"][0]["index_buffer"]["primitive_type"] == 1
-    assert doc["not_established"] == ["decals[].b18", "decals[].uv_offset (how it enters the UV)"]
+    assert doc["not_established"] == []
+    assert "0x52cf69" in doc["inferred"]["decals[].uv_scale / uv_offset"]
     assert "0x53886b" in doc["inferred"]["decal_textures / decals"]
     assert "131 decals" in doc["inferred"]["decals[].uv_rotation_deg"]
     assert ta.build(json.loads(json.dumps(doc))) == data

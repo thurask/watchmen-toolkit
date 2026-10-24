@@ -19,8 +19,9 @@ block's byte order)
         i32 x4  quad rectangle x0, z0, x1, z1 (0x530e01)
         u8      texture            index into the second texture list (0x53886b); alias b10
         f32     uv_rotation_deg    measured on the vertex buffers; alias f14
-        u8 x3   b18, wrap_u, wrap_v   sampler address, 1 = wrap, 0 = clamp (0x4aebdb,
-                                   0x4aec0e, 0x458794); aliases b19, b1a
+        u8 x3   b18, wrap_u, wrap_v   b18: read only by the terrain writer (0x52d14c), 0 on
+                                   every PC decal; wrap: sampler address, 1 = wrap,
+                                   0 = clamp (0x4aebdb, 0x4aec0e, 0x458794); aliases b19, b1a
         f32 x4  uv_scale, uv_offset   alias f1c
         u32 x4  place              sector, cell, vertex in sector, vertex in cell
         f32 x3, f32 x3, f32 x4     box min, box max, sphere
@@ -104,8 +105,10 @@ INFERRED = {
         "found"
     ),
     "decals[].uv_scale / uv_offset": (
-        "measured: v = t / uv_scale[1] on 16 decals; the offset on one configuration only; "
-        "the constructor default is (1, 1, 0, 0) (0x543d29)"
+        "measured: v = t / uv_scale[1] on 16 decals; the constructor default is (1, 1, 0, 0) "
+        "(0x543d29).  Rotation, scale and offset are stored only: the loader (slot 24 "
+        "0x5397d0) and the writer (slot 23 0x52cf69) are their only readers, so the decal "
+        "vertex buffers carry the final UVs (read from code)"
     ),
     "decals[].place": (
         "four u32 the PC loader reads as 16 raw bytes; sector / cell / vertex indices by "
@@ -122,7 +125,7 @@ INFERRED = {
         "bitangent; matched against the PC values, not read from console code"
     ),
 }
-NOT_ESTABLISHED = ["decals[].b18", "decals[].uv_offset (how it enters the UV)"]
+NOT_ESTABLISHED = []
 #: (name read from the loader, offset-style key kept as an alias) of the terrain header.
 #: parse() writes both; build() takes the name when the dict has it, else the alias.
 DECAL_ALIASES = (

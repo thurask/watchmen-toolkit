@@ -81,7 +81,8 @@ the registration scanner that regenerates `wlib/reg_dump.json` (format 2: a regi
 sweep, 5,090 props, the real classId, a handler slot per command); it is Ghidra-free (the
 `.rdata` string map replaces a strings export), uses capstone and refuses a packed `.text`.
 
-Retail DRM: SecuROM encrypts `.text` in place (extra `.bind` section) but `.rdata` / `.data`
+Retail DRM: Steam's SteamStub wrapper encrypts `.text` in place (extra `.bind` section holding
+the stub; no SecuROM in either exe) but `.rdata` / `.data`
 of the retail `KapowMulti.exe` are byte-identical to the unpacked exe, so the string harvest
 works on a retail install.
 
@@ -580,9 +581,25 @@ histogram over the 1185-file corpus: FULL 71, HALF 354, THIRD 760 (49 FULL over 
 of the character set). keyRate = 30/scale nominally (THIRD ≈ 10Hz, HALF ≈ 15Hz, FULL = 30Hz); the
 stored keyRate varies slightly per clip because it is (nk−1)/dur. The name list starts at
 byte 29 in all 6,912 clip files of Parts 1 and 2 on all platforms; `bake_v4.NAME_SCAN_START`
-= 20 (the scan starts behind the five-word header). Leftover: 1 byte (the terminator) on every
+= 20 (the scan starts behind the five-word header). Leftover: 1 byte (the morph-block flag, 0; see "Reader" below) on every
 file. Type-3 tracks: pos is f32x3 + 4 PAD bytes (0 in 10705/11125; 17 junk values repeated
 across files = baker uninitialised memory, not data).
+
+Reader [code]: `Animation` vfunc 24 0x5434af reads keyRate → +0x9c, duration → +0xa0, @8 → +0xa4, keyCount → +0xa8,
+frameRateScale → +0x98; then 0x540fba reads @20 as an **event count** followed by 12-byte records `[u32][f32][u32]`
+(0 in every file). A `u8` flag then creates `CompactSkeletalAnimData` (0x592d62; vtable 0xa406e0), whose reader 0x593fc3
+reads the name list (`AnimData` base) and per track a `u8` type; factory 0x592e87:
+
+| Type | Class | Reader | Payload |
+|---|---|---|---|
+| 0 | `AnimTrackTransFP` | 0x591698 | `u16 n`, constant rotation f32×4, `n` × int16×3 positions |
+| 1 | `AnimTrackRotFP` | 0x591534 | `u16 n`, constant position f32×3, `n` × int16×4 rotations |
+| 2 | `AnimTrackRotTransFP` | 0x591839 | `u16 n`, `n` × int16×7 |
+| 3 | `AnimTrackConstPose` | 0x5918ce | 32 raw bytes, copied whole by its sampler 0x591899 |
+
+The type-3 pad bytes are the fourth component of the pose's 16-byte position vector: read and copied with the pose,
+not interpreted by the track. The last `u8` (the "terminator") is a second flag: 1 would create a `MorphAnimData`
+block (0x58fac4; reader 0x58f3e9: name list, then f32 × channels × keyCount); every shipped clip has 0.
 
 Console copies are big-endian; the PS3 and X360 copies of `EN4_EXP_MOV_dance_cage_small_C`
 bake bit-identical to the PC cache (measured).
@@ -713,14 +730,19 @@ skipped, 0x594cac). FUN_005936e2's short table at [*obj]+0x10 = 16-bit parent in
 Consequences: Part 2 medium's `Bip02 *UpArmTwist` bones get no track (measured on 2,714
 matched capture frames: rest local plus twist pass, median 0.16° / 0.03°, max 0.87°), and the
 gimp's `Attach RHand` stays at rest in `EN2_COM_MOV_run_start_right_foot`, whose track is
-`Bip01 Attach RHand` (2 matched frames: 0.26° against 91.28°). Part 1: not established;
-983 clips name the track `Bip01 Attach RHand`. Medium models name palettes 'RUpArmTwist...'
+`Bip01 Attach RHand` (2 matched frames: 0.26° against 91.28°). Part 1 binds the same way
+(read from code, PC Part 1: GetBoneIndex 0x4b9754 → hash 0x42783a, exact compare 0x427a18;
+channel table search 0x5339d3, compare 0x531a35, find-or-add 0x539506, skeleton map 0x5356dc
+equal to Part 2; source map 0x58abd0 equal but for field offsets; the Animation reader 0x539fd1
+renames no track), so in its 983 clips that name the track `Bip01 Attach RHand` an
+`Attach RHand` bone gets no track there either (inferred from the code; no Part 1 capture). Medium models name palettes 'RUpArmTwist...'
 against the bind's 'Bip02 RUpArmTwist...'; large models 'Bip01 Attach RHand' against 'Attach
 RHand'.
 
 Toolkit: `bake` matches track names exactly and places the twist bones with the twist pass;
-the prefix-insensitive lookup (`'BipNN '`-prefix-insensitive, exact match wins) is kept as
-`track_names="prefix"` for Part 1. Mesh palette matching (`char_lib.load_parts`) is
+the character export and `watchmen bake` use exact matching in both parts. The
+prefix-insensitive lookup (`'BipNN '`-prefix-insensitive, exact match wins) is kept as
+`track_names="prefix"` for the head-model bakes, whose bind is the head model's own. Mesh palette matching (`char_lib.load_parts`) is
 prefix-insensitive with exact match winning; a dropped mid-list palette name shifts every
 later skin index and is a red flag — only leading mesh-object names (before 'Bip') and a
 trailing 'Interact' may drop. On medium with prefix matching the twist locals span 71.45deg /
@@ -869,7 +891,30 @@ Record offsets are 4 x registration index.
                      +0xf8 / +0x158 / +0x15c overlay gate flags
 
 State +0x9c and +0x15c are inferred by counting properties in registration order; the rest are
-read against their uses. Group record: +0x0c "Choose Random State", +0x14 transitions, +0x18
+read against their uses.
+
+**Forcing a state** [code]: `command_force_anim_always(integer, blend, startPlayPos)` (0x1fb9a3bd, 0x5b31ef) looks the id
+up with `AnimationClass.command_get_state_entity(integer)` and calls `ForceToState`, so it can only reach the one state
+an id resolves to (most shipped states have id 0). `command_force_animstate_always(entity, blend, startPlayPos)`
+(0x64c3f1c7, 0x5b3259) calls `ForceToState` with the state entity itself; both need `m_eanimationclass` set. A state
+entity is found by name (Entity +0x20) in the controller's animation class tree.
+
+**From the controller to the playing clip's name** [code: `command_get_main_state_main_blendsource` 0x5b0bc8,
+`AnimBlendSource::GetAnimSlot` 0x514e59, `AnimSlot::GetTargetAnimName` 0x4b5585]: AnimationCtrlWM members +0x0c bank
+list → element 0 → its data +0 = page list → last page (element n−1, n = count / slots of `list(pagestruct)`) → page data
++0 = layer list → element 0 → layer data +4 = blend-source list → element 0 = the main `AnimBlendSource`; +0x68 =
+its `AnimSlot`; slot +0x58 = the `Animation` asset; asset +0x40 = the clip name (char*). Each "element" is list
+object → +0 storage → +4 data → slot; struct elements are instance pointers whose +4 is the field block.
+
+**The animation type (+0x15c) is recomputed at load** [code + data]: `AnimationStateWM.initialize_external`
+0x5f0e63 writes it (with +0x144 / +0x148) from the state's criteria, and every shipped state receives
+`initialize_external`: `SceneScope.StateActivate` 0x813bf5 calls `ProjectLib.InitializeHierarchy(self)`, whose
+`RecursiveInitializeExternal` 0x7fe85c sends it to the node and every descendant (Node +0x4c / +0x50, no
+condition). The enemy classes sit under their level's `SceneScope(LoadBlock)` (9 of 9 level-placed
+AnimationClass fragments, measured on the level files); the player classes are in
+`GameEssentials/CharacterAnimation.fragment` under `GameEssentials`, the root `SceneScope(FragmentNode)` of
+`WatchMenPart2.scene`, which `SceneScope.start` 0x813b0b sends to `StateActivate` (`docs/re/wp5_runtime.md` §5.3).
+The stored file values are stale editor output; the toolkit's recomputation is what the game uses. Group record: +0x0c "Choose Random State", +0x14 transitions, +0x18
 default state. 0x761caa4e is m_estoredtransitstate (+0x78); "Fallback state" prop 0x377d69a
 (UI). The +0x54 / +0x40-bit0 tests in TransitionMet and command_get_valid_state are entity
 fields (enabled), not record offsets.
@@ -1234,8 +1279,9 @@ products are "child * parent" (Hamilton), vector rotation is conj(q)·v·q.
 - The quaternion tolerance at 0xd91bf8 = 0.0 (inferred: byte scan: 11 references, all `fld`
   (`d9 05`); the four neighbouring globals are addressed absolute-only; the image has no
   relocation directory; the address lies in the zero-filled tail of `.data` (the file-backed
-  part ends at 0xd90000), and no instruction stores to it directly; a write through a
-  computed pointer is not excluded, and it was not read in a debugger).
+  part ends at 0xd90000), and no instruction stores to it directly; no instruction hands out an
+  address within 0x10 below it either (immediate scan of 0xd91a00–0xd91e00: the nearest is 0xd91be8,
+  the 8-byte QueryPerformanceFrequency result of 0x425885, then 0xd91c1c); not read in a debugger).
 
 ### DCC joint [code; constants from exe bytes]
 
@@ -1254,6 +1300,65 @@ width × 0.5)`; `delta = new − old`, its component into the hit normal removed
 | On binding a partner | partner capsule body mass 5.0 (0x9e97fc), own 50.0 (0x9e602c); child = own capsule, parent = partner capsule (child / parent assignment inferred from lifter names) |
 | Partner absolute, each tick | joint disabled; child-space position = partner target in the master's frame; orientations set; swing1/X/Y/Z = 0; enabled |
 | Partner not absolute | swing1/X/Y/Z = 2 |
+
+**When the joint binds and what releases it** (read from code unless tagged).
+
+- Every capsule state (`StateOnGround` 31, `StateCharge` 40, `StateGrapplingHook` 44,
+  `StateAbsoluteAnimation` 48, `StateRagdoll` 63, `StateInitFreeFall` 69; the class has no
+  others) calls `DccUpdate` 0x680654 each frame. It returns early when `DccTest` 0x676da0 fails
+  (capsule `physicsType` +0x14c == 4, CHARACTER_CONTROLLER; enum string 0xa29f14).
+- `DccUpdate` calls `DccJoint(partner capsule)` when all hold: the character's current
+  animation state has `m_imasterof` != 0; its `m_eanimationpartner` is set, is not a
+  placeholder (`m_tisplaceholder` +0x198) and is not itself; the partner capsule's
+  `m_icharacterphysicstate` (+0x04) == 3 (written only by `StateAbsoluteAnimation`); the
+  partner's `CharacterVisual.m_tisragdollinworld` (+0x14) == 0; the partner capsule's
+  `m_tallowchangeworldpos` (+0xb8) != 0. Otherwise it calls `DccJoint(null)`, which runs
+  `CleanUp_eDccJoint` 0x676db9 when a partner is bound. The joint lives on the master's capsule.
+- Release paths: (1) the master's own `DccUpdate` once the condition fails; (2) the partner's
+  LEAVE_ABSOLUTE_MODE event (19; the case at 0x6ac8de in
+  `CharacterRootLogic.command_animation_event_received` 0x6a525e) sends `break_joint`
+  (CharacterPhysics command #9, hash 0xc40d9345) to the master's capsule, but only while the
+  partner's `m_eanimationpartner` is set; (3) `CharacterRoot.command_ragdoll_driven` 0x6937d1
+  sends `break_joint` to its own partner's capsule, so it reaches the joint only when the
+  character that ragdolls is the slave; (4) `CharacterPhysics.command_character_placeholding_out`
+  0x67cbce compares `_edccother` (a capsule) with the root that sent game event 0xcf, so it
+  never matches (inferred: `_edccother` is only ever assigned a partner's
+  `m_echaracterphysics`). `DualAnimBroken` 0x675f4f sends only `leave_slave_mode`, which
+  clears the partner's `_eslaveof` (0x5b3310).
+- `CleanUp_eDccJoint` 0x676db9: if the joined capsule is still absolute (state 3) it gets
+  `goto_phys_normal_mode`; child and parent are cleared, the joint disabled, both capsule masses reset to 50.0
+  (0x9e602c); if the master's own body is a ragdoll in the world (`m_tisragdollinworld`), its ragdoll mean velocity
+  is set to the partner's animation velocity in world space. So while a joint is not released the partner capsule
+  keeps mass 5.0 against the master's 50.0.
+- Offsets for a live check (member block = entity +0x10): `CharacterPhysics` `m_icharacterphysicstate` +0x04,
+  `_edccjoint` +0x190, `_edccother` +0x198 (a capsule entity); joint and capsule enabled = Node +0x54;
+  `CharacterRoot` `m_nhealth` +0x64, `m_echaracterphysics` +0x28. A master that died bound shows as a capsule
+  with `_edccother` set, its own Node +0x54 at 0 and its root's health ≤ 0; the joint node keeps its own
+  +0x54 at 1 but has no PhysX joint (next bullet).
+- `StateRagdoll` 0x68012e disables its own capsule (`Node.enabled` = 0, `Node__SetEnabledScript`
+  0x48f65c) when the root's `m_nhealth` (+0x64) <= 0, before its first `DccUpdate`. What that does
+  in PhysX (read from code):
+  - The capsule (`CollisionNode` slot 26 0x49cb58 → 0x519f9b) disables every body of its physics
+    object (`node+0x154`, list +0x3c, the list `DccJoint` sets the mass on). For the
+    `Physics::CharacterController` that is slot 26 0x4f3b08: the controller manager's virtual +0xc
+    (`releaseController`, by header order; +0x8 is the `createController` call of 0x4fdfb3) frees the
+    `NxController` and its actor, and +0x9c is cleared. A disabled capsule has no PhysX actor.
+    Re-enabling (slot 25 0x4f3af9) creates a new controller at the node's position through slot 18
+    0x4fdfb3; `DccTeleportMode` uses this disable/enable pair to drop the speed (`tKillSpeed`).
+  - The "DCC joint" `EmbeddedJointNode` is created with `CreateNode(type, capsule)` (0x47bc97 → Node
+    slot 14 0x4945fd sets the logical parent), so the enable push-down 0x48f613 → 0x48e51d reaches
+    it. Its slot 26 0x4aab56 (while the physics system runs) → 0x4a8dd5 sets the D6Joint's +0x55 to 0
+    and rebuilds it (0x5146ec → 0x5141ee), which releases the `NxJoint` (scene virtual +0x28) and
+    creates none while +0x55 is 0. The joint therefore does not hold the slave in PhysX.
+  - What stays stuck is script state: `CleanUp_eDccJoint` never runs for the dead master (path 1 is
+    lost; inferred: a disabled node's state task does not run, as with the AI pause), so the slave
+    capsule keeps mass 5.0, `_edccother` stays set, and the slave stays in `StateAbsoluteAnimation`
+    (state 3) until its own event 19. Not established: whether that is the void launch (mod TODO 4).
+- Data (measured, pc_p2 `anim_meta.json`, 240 primary pairs): 158 hero → NPC, 64 hero → hero,
+  18 NPC → hero. All 18 NPC masters are COUNTERATTACK states (Enemy01 4, Enemy04 10,
+  EnemyBig 4); each hero victim state has a LEAVE_ABSOLUTE_MODE release at play position
+  0.45–0.79 (1.6–6.7 s). The risky case is an enemy that counters a hero and is killed during
+  the counter.
 
 ### Heading constants of `StateActive` [code; constants from exe bytes]
 
@@ -1965,6 +2070,30 @@ Get-up (`CharacterVisual.command_update_ragdoll` 0x6bc3e2):
 
 Ragdoll release and contact damage: §11 "Damage".
 
+Velocities at the start of ragdoll control (`CharacterVisual.StateRagdollDriven` 0x69ed7c entry, in order;
+read from code):
+
+- The bodies keep the velocity they already have; the entry reads it (`characterlib.GetRagdollMeanVelocity`)
+  and does not reset it. It is the velocity PhysX gave the body for the last move it executed while kinematic
+  (`v = Δx/(n·h)`, 0x10034c10; zero after a simulate with no target); neither `setKinematic(false)` nor the
+  awake-body path of the readback writes it (`docs/RAGDOLL_RIG.md` "While the game runs"). Which game update's
+  move that is: not established.
+- `m_nnormragdollspeed` (CharacterVisual +0x58) > 0 and mean speed > 0.5 (f32 0x9e6174): every bone velocity is
+  scaled so the mean speed equals it (`ScaleRagdollBoneVelocities`). `command_give_damage` 0x691b10 sets it to 3.5
+  (f32 0xa554f0) in its killing branch; the entry resets it to −1.0 (f32 0x9e6a8c) at the end.
+- `m_vragdollvelincrease` (+0x4c) is added to every bone (`AddRagdollBoneVelocities` 0x67a035), then zeroed; no
+  script writer found.
+- `m_vragdollcolliderimpulsevelocity` (+0x28) × `m_nragdollimpactforcefromcollider` → `SetRagdollMeanImpuls`; no
+  script writer of +0x28 found.
+- `m_vragdollcollidervelocity` (+0x34) × `m_nragdollimpactforcefromcollider` → `SetRagdollMeanVelocity`. Written
+  by `ModelCollisionContactAdded` when a body's accumulated impact force passes `m_nragdollimpactragdolltrigger`:
+  the colliding ragdoll's mean velocity. `m_nragdollimpactforcefromcollider` (CharacterVisualDef +0x10, caption
+  "Transfer Force Scale") has registered default 1.2 (0x676a41); the shipped `CharacterVisual.fragment` stores
+  1.2 as well (measured, pc_p2 extract).
+- `m_vragdollcolliderangularvelocity` (+0x40) → `SetRagdollAngularVelocity` on ragdoll bone enum 32; only ever
+  zeroed in script.
+- The pelvis body's velocity with y = 0 is kept as `vinitragdollpelvisvelocity`.
+
 ### Character controller [code; `NxCharacter.dll` 2.8.1.6]
 
 - Controller descriptor (0x4fdfb3): up Y; slope limit 45° always (constructor 0x4f60f1;
@@ -1975,6 +2104,16 @@ Ragdoll release and contact damage: §11 "Damage".
   Part 1, PC Part 2 and Xbox 360 Part 2 checked); radius width/2 + 0.025 = 0.425, height 1.2,
   constrained climbing, interaction flag 2. Wall-stop and wall-slide angle 46°
   (`m_nangleforwallcontrol`, no override).
+- **What the capsule's move collides with** [code]: `CharacterPhysics.command_attempt_move` passes
+  `m_icollisionmask` (members +0x08, the pivot-sheet mask from the collision node, `command_activate_collision`
+  0x67cc00) and `m_icharactercollisiongroupmask` (+0x0c) to `CharacterController.move`. `StateOnGround` 0x67d2a5 sets
+  +0x0c on every entry to 2^0 + 2^1 + 2^2 + 2^5 = 39 (WORLD, ACTIVE_ / INACTIVE_CHAR_PHYSICS, DYNAMIC_WORLD; exponents
+  from `fldz`, `fld1`, 2.0, 5.0 @0x9e97fc); `StateCharge` 0x67d89e sets its own. `command_activate_collision` also
+  fixes +0x15c world group 1, +0x160 dynamic world 32, +0x164 ragdoll feedback 8, +0x168 object feedback 32 (2^0,
+  2^5, 2^3, 2^5). A dead body is in a unique dynamic ragdoll group 24–27 (`StateRagdollDriven`), outside 39, so the
+  capsule passes through it. Adding bits 24–27 (0x0F000000) to +0x0c after each `StateOnGround` entry is the
+  narrowest switch: camera and AI casts use their own masks (inferred that `NxController::move` filters shapes by
+  this mask alone, as in the PhysX 2.8 SDK).
 - NxCharacter 2.8.1.6: proxy capsule 0.8 × size, kinematic; 10 sweep iterations; step offset
   only with sideways motion; sharpness < 0 = test move, sharpness 1 = no smoothing;
   `getPosition` is the exposed position, which the game refreshes itself at 0x502977. The
@@ -1996,6 +2135,13 @@ Reports: `re/wp3_combat.md`, `re/wp4_ai.md`. Consumer docs: COMBAT_META.md
 constants from the executable's bytes.
 
 ### Combat
+
+- **Where a counter happens** [code]: the button reaches `CharacterRootLogic.command_counter_attack` 0x68664c, which
+  calls `TestForCounterAttack` 0x68d36a; that method returns 1 only after it has fired COUNTER_ATTACK (12) into the
+  animation controller, so its true return is the one point every performed counter passes (players and AI alike;
+  `_echaracterroot.m_eplayerctrl` tells them apart). `AchievementCtrl` / `AchievementPart2Ctrl.
+  command_counter_attack_by_signed_in_player` (hash 0x11b982ae) is never sent: the hash occurs only at its two
+  registrations (0x5a10ed, 0x5a1caf).
 
 - **Combo speed-up is by animation type**, not by button: LIGHTATTACK 0.15 s, HEAVYATTACK
   0.2 s, any other type none, so Enemy01 / EnemyBig attacks (NOTSET) never speed up. It needs
@@ -2080,7 +2226,8 @@ constants from the executable's bytes.
   known-enemy list is empty receives the enemy's own target if the enemy can see it;
   `Perception.AddNewKnownEnemies` 0x7dcc88 uses it once and clears it.
 - Not established: ragdoll contact force magnitudes and contact counts (so the health a
-  throw really removes), Twilight Lady's punish and back-flip routines. Underboss: whether
+  throw really removes). Twilight Lady's punish and back-flip routines are read (COMBAT_META.md,
+  `rules.twilight_lady_punish`, `rules.twilight_lady_back_flip`). Underboss: whether
   the registered defaults 3 / 2 are live (the shipped fragment stores neither property); its
   movement, flee and flamethrower volume rules are in COMBAT_META.md and `rules.underboss`.
 
@@ -2101,8 +2248,8 @@ constants from the executable's bytes.
 - **Bystanders** (`DetermineDamageReaction` 0x6a18d1): damage × 0.0 (f64 0xc3cc18, `fmul` at
   0x6a193d), stun 3.0 s (f32 0x9e6910), pose one of 5 / 2 / 11 / 8. Above
   `m_nragdollimpactragdolltrigger` (6000) the bystander is ragdolled.
-  `m_nragdollimpactignoretrigger` and `m_nragdollimpactforcefromcollider` have no reader in
-  script. `_naddeddamage` decays by 20/s (f64 0x9e5c68; PS3 0x794a08–0x794a3c, PC 0x69f728)
+  `m_nragdollimpactignoretrigger` has no reader in script; `m_nragdollimpactforcefromcollider` is read only by
+  `StateRagdollDriven` (velocity transfer, §10 "Velocities at the start of ragdoll control"). `_naddeddamage` decays by 20/s (f64 0x9e5c68; PS3 0x794a08–0x794a3c, PC 0x69f728)
   and is never read.
 - **Hit formula** (`SetCloseCombatDamageToTarget` 0x6ae57f): the × 0.2 for electric armour
   applies to the base term only and not for an Underboss attacker; the charge bonus carries
@@ -2127,6 +2274,17 @@ constants from the executable's bytes.
 - Data: 9 of 31 AI definitions store a damage modifier of 0 and resolve to 1.0 or 1.5.
 
 ### Enemy AI, spawning, groups
+
+- **AI pause** (`BehaviorHandler.command_set_pause(truth)` 0x618f33) [code]: first
+  `BuildBehaviorMessageList` 0x615451 refills `_behaviorentitylist` (members +0x20) unless its
+  first entry is already `_eactiverootbehavior` (members +0x0C): it is that root behaviour followed
+  by every `Node` below it, depth first (`AILib.RecursivePushBackOfType(root, "Node", list, 0)`).
+  Then every entry gets the property `enabled` (hash 0x2708acba) = `!tPause`. There is no separate
+  pause flag: an enemy is paused when its active root behaviour has `enabled` = 0 (Node +0x54).
+  Among the `Behavior*` classes nothing else writes `enabled` (lifted scripts; native writers not
+  excluded). Senders of `set_pause`: `TriggerActionCharacterForceMove`,
+  `KynapseStaticPathObjSceneClimbUp`, `WaypointCompleteAutoTest`, and `BehaviorHandler` itself
+  (`StateBrainLessAutoTarget` pauses on entry and un-pauses in its exit block).
 
 - **`Enemy.Evaluate` 0x72587d, order**: health <= 0 → INACTIVE; breadcrumb mode (AGGRESSIVE
   only, timer set and older than 2.0 s); forced state; target and step-back timer or
@@ -2387,6 +2545,15 @@ executable's bytes at the stated width; not checked in the running game.
   midpoint (0.5 @0x9e5dc8), on the side of the current camera, the other side if the sweep
   (width = height = 0.2 @0x9ebc18) fails. `tKeepPreviousPosition`: the previous cut's target
   position, or the character camera's when there is none.
+- **Where a cut's slow motion comes from** [code]: `CharacterRootLogic.command_animation_event_received`
+  0x6a525e, branch event 59 (CAMERA_CUT), builds the `combatcutdata` from the event node's members and sends it with
+  `CameraCtrl.command_set_combat_cut_data` (0xbd64ac28) → `CameraCombatSpecialCuts.command_set_cut_data` 0x6325c5.
+  Mapping (cut field ← `AnimationEventWM` member): +0x00 ← `m_nvalue`, +0x04 ← `m_ttruth1`, +0x08 ← `m_ivalue00`,
+  +0x0c ← `m_nvalue09`, +0x10 ← `m_nvalue02`, +0x14 ← `m_nvalue05`, +0x18 ← `m_nvalue10`, +0x1c ← `m_nvalue03`,
+  **+0x20 `nTimeMultiplier` ← `m_nvalue04`** (members +0x30), +0x24 ← `m_ttruth2`, +0x28..+0x30 ← `m_nvalue06..08`. The cut
+  state calls `WorldLib.SetTimeMultiplier(nTimeMultiplier)` (`StateTransition` 0x63312e; transitions 2 / 3 blend toward it); leaving the
+  cut camera sets 1.0. So writing `m_nvalue04` = 1.0 on the CAMERA_CUT event nodes before a cut removes its slow
+  motion and keeps the shot; the kill slow motion of `give_damage` (`_nslomotimemultiplier`) is separate.
 - Look-at: `GetLookAtPosition` 0x634125; bone 18 = root + (0, look-at height, 0), else the
   bone's controlled world position. Bone type -> joint name: `CharacterVisual.SetupBoneMap`
   0x67a31e (§2). Hold update 0x633011: position fixed, aim recomputed; `UpdateWorldPos`
@@ -2424,6 +2591,28 @@ executable's bytes at the stated width; not checked in the running game.
   bloom 0 and self-illumination 0).
 
 ### Gameplay cameras (FX_META.md "Gameplay cameras", `fx.camera.gameplay`)
+
+- **Fight-camera (pad) distance** [code]: `CharacterCamera.InitializeCameraProperties` 0x655e27 (called only from
+  `initialize_local` 0x64bead and the editor's `FilterExposedProperties`) fills `_cameraproperties` (members +0xfc,
+  `list(cameramodeproperties)`): element 0 = exploration (uses `_ninitialblendintimeexploration`), element 1 = combat.
+  `StateActiveCombat` 0x64c330 copies element 1 into its frame locals on entry (`StructType_Copy`), so the combat
+  distances are that copy's `nMaxDist` +0x10, `nMinDist` +0x14, `nCollisionMinDist` +0x18 (struct field slots, 4 B
+  each, at instance+4); a write to element 1 applies from the next combat entry. Exploration distance comes from the
+  state manager's database items instead.
+- **Movement basis** [code]: `PlayerCtrl.GetMoveStickWorld` 0x7f22e7 turns the stick into world space with the z axis
+  of `PlayerCtrl._ecameractrl` (members +0x38, the CameraCtrl camera node) via `ConvertDirectionToWorldSpace`,
+  flattened to the ground plane, stored in `_voldcamdirplane` (+0x90). While `_tcamchanged` (+0x8c, set by
+  `command_activate_set_pos_camera` 0x7f420a) is set and the stick is held, the stored direction is reused; releasing
+  the stick clears it. So movement follows whatever orientation that camera node has when the player update runs.
+- **Frame order of input, character and camera** [code]: `PlayerCtrl` registers its task for manual resume at
+  order 4 (`initialize_external` 0x7f4795), characters at 5 (0x6b3164), and `CameraCtrl.StateActive` 0x637f66 turns
+  its own auto-resume off (`SetRunScript(false)`). The camera task is resumed only by the character it belongs to:
+  `CharacterVisual.UpdateCameraCtrl` 0x67a127 resumes `PlayerCtrl.command_get_camera` (= `_ecameractrl`), called at
+  the end of `UpdateAnimPoseAndCloth` 0x6b015d (sent from `CharacterRoot.StateActive` 0x6b367a after the animation
+  update and after it resumes the capsule task, 0x6b9000) and from `StateRagdollDriven` 0x69ed7c. So one frame runs
+  `PlayerCtrl.StateActiveDefault` 0x7f5365 (`GetMoveStickWorld`) → character update (animation, capsule, pose) →
+  camera update. The stick is turned into world space with the camera orientation of the previous frame (one frame of
+  lag); the camera of a frame is placed after the character has moved in it.
 
 - `MathLib.PowerSmooth(v, power, initPower)` 0x77ab7b: `v = clamp(v, 0, 1); m = v^initPower;
   m > 0.5 ? 1 − 0.5·(2 − 2m)^power : 0.5·(2m)^power` (`fx_meta.power_smooth`; the same
@@ -2471,6 +2660,12 @@ executable's bytes at the stated width; not checked in the running game.
 - Camera node (0x4a796c, 0x4a1eeb, 0x49e49c, 0x49e500): fov default 70.0 (0x9e6e50), clamp
   1..179 (0xc3cc48, 0xa00a98); near 0.05 with floor 0.05; far 1000, kept ≥ near + 1; viewport
   640 × 480. Only `fovVertical` is registered (string 0xa030a0).
+- **Which FOV is on screen** [code, lifted scripts]: the node default 70 holds only until the first
+  `CameraCtrl.StateActive` frame, which copies the active camera's `cameradata.nFov` through
+  `SetFOVVertical` (clamp 1..179). `CharacterCamera` exploration (update 0x651b3d, the only mode with
+  mouse look) blends to the state manager's `nVerticalFOV` (DEFAULT 45, COMBAT 60, ...); combat
+  (0x64cee1, pad only) uses `_ndefaultfov` (55 single, 70 / 65 co-op) × the recoil / look-at FOV
+  factor. The 45° vertical FOV of the apitrace frames is the DEFAULT exploration state.
 - Camera tour: `TriggerActionCamera.initialize_local` 0x84b30f — action 0 needs a sequence
   child (first match, 0x849e59), actions 1 and 2 need an ancestor tour (0x84e905), action 3
   enters StateIdle directly. StateIdle 0x84bde2 starts the tour with a goto request
@@ -2512,6 +2707,30 @@ Reports: `re/wp1_renderer.md`, `re/vcolor.md` (+ `vcolor_shaders.json`). Toolkit
 `wlib/materials.py`, `wlib/rig_glb.py`, `watchmen_extract`.
 
 ### Device and frame [code + measured]
+
+- **Clears** [code]: the only `IDirect3DDevice9::Clear` call is `GfxDx9` virtual slot 19 (0x455263:
+  `Clear(0, NULL, flags & 7, colour)`); Gfx singleton `[0xd91c70]`, called as `[vtbl+0x4c](colour*, flags)`. Call
+  sites (all 16 found by a scan for `call [reg+0x4c]` / `[reg+0x50]` after a load of 0xd91c70):
+  - Frame entry 0x563ca4: target only (1) on the target `GfxDx9` slot 23 (`[vtbl+0x5c]`) returns (0x563d34); then flags −1, i.e. target + Z +
+    stencil on the default state, colour 0xc917d0 before the camera loop (0x563f11) or 0x9e80dc on the other branch
+    (0x563da4).
+  - Target only (1): `REBloom` 0x57bb5d, `REShadowVolume` 0x584afc (colour 1,1,1,1), `REDeferredLightLayer`
+    0x5853e6 (colour 0; RT0 and RT1 bound), 0x5615db, 0x8bf4b2 (in 0x8bef92), the reflection passes 0x56d037 /
+    0x56d87f (before their sky boxes).
+  - Z + stencil (6): `REShadowMap` 0x5838ee (its own map), `REScaleZBuffer` 0x586cd6 (after binding its own target
+    and depth surface), the ends of both reflection passes (0x56d24e, 0x56da46, after re-binding the main target),
+    and slot 20.
+  - Slot 20 0x455140 (`[vtbl+0x50](value)`): draws a full-screen quad that fills the bound colour target with
+    `value`, then Clear(6). Called only by `REDepth` begin 0x57bbb7 (state reset to the camera default, RT0 = the
+    R32F depth target, value FLT_MAX) and by the refraction pass (0x56d621).
+  - State cache (flushed by `GfxDx9` slot 11 0x458794): +0x38 vertex shader, +0x3c pixel shader (0x453da3 sets this
+    one), +0x4c RT0 (null → the swap-chain target at +0x518), +0x50 RT1, +0x54 depth-stencil, +0x58 viewport.
+  - Order inside one camera (`DeferredRA` draw 0x56f9fb): reflection passes → stencil shadow volumes (mode 0) →
+    depth pre-pass (Z + stencil clear) → lights → scaled Z → shadow volumes (mode 1) → sky boxes, terrain, wet
+    surfaces, water, hard alpha, fall-off, grass, detail, soft alpha, particles, `Aux3DRA`, refractive particles,
+    lens flares. After the depth pre-pass nothing in the draw clears the camera's default depth surface, and every
+    other clear outside it is target only or on another surface, so the main depth is not cleared again before Present. Inferred: the default
+    depth-stencil of the state stack is the main depth surface (the slot is not traced to its creation).
 
 - **Device**: HAL with hardware vertex processing and pure device (0x50); X8R8G8B8, no MSAA;
   the ATI2 texture format is mandatory.
@@ -2776,8 +2995,10 @@ highlight: lower roughness together with lower specular strength.
   PC format 5 / 6 render buffer with the same offset, vertex count and stride, else nothing)
   keeps `doubleSided` true, does not make a character material BLEND on `renderType` 1, and
   gives a part whose vertex alpha varies a BLEND copy of its material.
-- Not established: the rule that sends a material to `REDeferredMain2` rather than another
-  render effect; console shader archives (not examined).
+- No per-material rule sends a model to `REDeferredMain2`: the `DeferredRA` constructor 0x574f74 sets +0x3c4
+  to 1 and calls the toggle 0x567dce once (0x575041), which flips it to 0 and stores {2, 2, 2, 2}; the toggle
+  has no other caller and no data reference, so the main, wet, terrain and fall-off model lists always use
+  REDeferredMain2 (read from code). Not established: console shader microcode (FORMATS_MISC.md).
 
 ### Vertex colour (`re/vcolor.md`)
 
@@ -2931,6 +3152,13 @@ X-first. Evidence:
   `watchmen_extract.texture_sheet` reads the first sheet of a header; the further sheets are
   named alternatives, not defaults; texture extraction writes the result as `sheet.json`
   beside the PNGs (with `stored_name` and `overrides`).
+- Animated sheets [code]: constructor 0x525964 (`enableAnim` +0xa7 = 0, `animDelayInMs` +0xa8 with +0xac =
+  ms / 1000, frame +0x6c = 0, frame player +0x68 = null). The per-frame sheet update 0x5231de first counts +0xac
+  down by the script clock (0xe14304); once it is ≤ 0 and a frame player exists, +0x6c = the player's current frame
+  (0x52fb0d: time accumulates, and while it exceeds the frame's duration the player steps on, 0x52c75e, reading the
+  next frame index 0x52929b and duration 0x5292bb). The same update scrolls four UV offsets (+0x128..+0x134). Every
+  layer getter (0x49c838 → 0x49be2d) uses +0x6c as the index into the texture's frame table, so an override
+  texture is drawn at the same frame as its sheet.
 - Sheet lookup: a collection node selects sheets through `textureSheetsDescription`
   (`BaseModel::Get/SetTextureSheetsDescription` 0x49f95e / 0x49d26c; setter dispatcher
   0x4a6ed7; the getter writes `%d,%d,%d,%s,%s,`): the first token is a version. Version 1 →
@@ -3166,6 +3394,14 @@ the exe bytes and are not listed here.
   selector's value × 0.1 (f64 0x9e9628), the selector is set with option × 10 (f64 0x9e5c60);
   default 1.0 for master, effects, voice and music (`command_set_default_settings` 0x82be66);
   the group volume is nVol × option (0x82fd6a).
+- **Which option scales which group** [code + data]: the group tree is `GameEssentials/SoundDb/SoundDb.fragment`
+  (`SoundGroups` → `MasterSoundGroup` → `EffectsGroup`, `VoiceGroup`, `MusicGroup`, `ProcessorGroup`;
+  `ProcessorGroup` → `ProcessorVoiceGroup` → `VoiceEnemies`, `VoiceRorschach` 0.9, `VoiceNiteOwl` 0.96,
+  `MissionSpeaks`, and `ProcessorEffectsGroup` → `Effect` 0.95, `EnemiesCombatSounds`, `PlayerCombatSounds`).
+  `command_set_voice_volume` 0x8300e0 sets `_evoicesoundgroup`, `_emenuvoicegroup` and `_eprocessedvoicegroup`
+  (members +0x44 = `ProcessorVoiceGroup` in `Sound.fragment`), so enemy voices follow the Voice option.
+  `VoiceEnemies` itself (found by name under the master group) is only set to 1.0 or the damp factor
+  (`StateActive` 0x829f70, `command_damp` 0x83104a).
 - Subtitles: §15 "Text and subtitles".
 
 ## 15. File formats
@@ -3214,7 +3450,11 @@ FUN_0049dd0e. The fixed header is exactly 400 bytes, read in one call (`push 0x1
     @32   u32      block version signature (0x49db60: CRC over "8" and each asset type's
                    version + 0x80000; computed and discarded by the loader, 0x4a3b5e);
                    0x79D3E0DA in Part 2 and PS3 Part 1, 0xEE1FB0A3 in PC / X360 Part 1
-    @36   char[36] GUID text (no reader found)
+    @36   char[36] GUID text: no reader. The header lands at load state +0x10; all 64
+                   `[reg+0x1e8]` load-state accesses in the exe touch none of +0x34..+0x57,
+                   and the only two hand-offs of the header pointer are the bounds copy
+                   0x42af16 (bytes 0-31) and the fingerprint reader 0x49dd0e (@72, @327)
+                   [instruction scan]
     @72   char[255] fingerprint: C string, 3-LFSR stream cipher, key
                    "1E564E3B-D243-4ec5-AFB7"; shipped blocks decrypt to
                    "THIS IS THE DEFAULT FINGERPRINT KEY, PLEASE CHANGE IT!"
@@ -3388,7 +3628,8 @@ area, on 2 Part 2 and 17 Part 1 surfaces (2–292 triangles; 8 on nodes named li
 emitter / surface — `ACUnit_Wall_02` "splash emitter" among them — 2 on other named nodes, 7
 on the unnamed root); why is not established, and the constant weight is not tied to a node
 name. Stored normals are unit length and opposite to the index winding; on Rorschach's arm
-surfaces they are 21–36° off the face normal (measured). Centroid factor 1/3 at 0xa37828; the
+surfaces they are 21–36° off the face normal (measured). Centroid factor 1/3 at 0xa37828, used for a
+horizontal (x, z) distance test against `radius` (0x54decc with a material test, 0x54e23e without); the
 collector stops at 1,500 triangles. On a character the surfaces are collected per ragdoll
 body from that body's node (0x54fba7), culled by `faceCullLimit` and material id, with no
 radius test.
@@ -3396,19 +3637,24 @@ radius test.
 ### The ModelRes header of the stand-alone Part 1 [code + data]
 
 - It is the Part 2 record stream with two differences: one flag byte fewer per submesh record
-  — the Xbox 360 Part 1 reader 0x828bccc0 reads 1, 1, 4, 1 bytes before the MeshBuffer, the
-  Part 2 readers (PC 0x542541, Xbox 360 0x828fea68) read 1, 1, 4, 1, 1; the kept byte is the
-  dynamic-copy flag — and untyped property records in the bag and in the articulated-body
+  — the Part 1 readers (PC 0x539078, Xbox 360 0x828bccc0) read 1, 1, 4, 1 bytes before the
+  MeshBuffer, the Part 2 readers (PC 0x542541, Xbox 360 0x828fea68) read 1, 1, 4, 1, 1; the
+  kept byte is the dynamic-copy flag — and untyped property records in the bag and in the articulated-body
   blob.
-- Version chain: the submesh term is 10 in the Part 1 build (0x828b4ff0) against 11 in Part 2
-  (0x53a563, 0x828f54c0); the model (46), node (10) and mesh-buffer (15, 8, 2, 3) terms are
-  equal. The header stores no version and no loader branches on one.
+- Version chain: the submesh term is 10 in the Part 1 builds (PC 0x5320a4, Xbox 360 0x828b4ff0)
+  against 11 in Part 2 (0x53a563, 0x828f54c0); the model (46), node (10) and mesh-buffer (15,
+  8, 2, 3) terms are equal. Of the PC asset terms only `DetailMeshAsset` differs as well (PC
+  Part 1 0x522a4e: 3, Part 2 0x52af3f: 4). The header stores no version and no loader branches on one.
 - An untyped record's type comes from its key (data: 86 keys, each with one type on all 918
   typed blobs of PS3 Part 1 and PC Part 2).
 - Data: 1,090 of 1,090 headers of PC and Xbox 360 Part 1 read in this layout, 1,085 in
   exactly one of the two layouts (the 5 without a submesh read in both and take the bag's
-  answer); the stream is consumed exactly on 1,085 of 1,085. Not opened: the Part 1 readers
-  of the node and of the model root.
+  answer); the stream is consumed exactly on 1,085 of 1,085.
+- Code (PC Part 1 against PC Part 2, instruction by instruction with addresses and source line
+  numbers masked): the model root reader 0x53d563 (Part 2 0x547006) and the 201 functions it
+  reaches within three calls are equal but for the submesh byte (0x539078), the untyped record
+  reader 0x50513c (Part 2 0x510e5f), and three checks or flags that read the same bytes
+  (KAPOW_NAZ_FORMAT.md, "The stand-alone Part 1 header").
 
 ### Console model streams [data]
 
@@ -3509,8 +3755,8 @@ book `/pivotbooks/default.pb` (0xa2f164).
   1, 1); Sprite constructor 0x4c3765: 0.05 (0x9ebc04), 0.0888889 (0xa0aac4), 4.0, 10.0,
   25.0, cull mode 1, axis 4. `StringLib.FormatNum` 0x848ba8 prints `"%f"` and cuts trailing
   zeros; its 28 call sites are editor filters and debug views, none a HUD class.
-- Not established: the TextBox rendering of `%N`, `\n`, `#RRGGBBAA`; which movie uses which
-  cutscene slot.
+- TextBox markup (`%N`, `\n`, `#RRGGBBAA`) is read from code in TEXT_ASSETS.md. Not established:
+  which movie uses which cutscene slot.
 
 ### Small asset formats (FORMATS_MISC.md) [code + data]
 
@@ -3540,8 +3786,8 @@ book `/pivotbooks/default.pb` (0xa2f164).
   the name "decal" for the rectangles. Sector `flag`, `b10`, `b19` / `b1a`, the index
   buffer's `x` and the buffer `flags` are read from code, `f14` and `f1c` measured
   (FORMATS_MISC.md, `.terrain`: `enabled`, `texture`, `wrap_u` / `wrap_v`, `primitive_type`,
-  `uv_rotation_deg`, `uv_scale` / `uv_offset`). Not established: `b18`; how `uv_offset`
-  enters the UV. No collision data and no LOD table exist in the file; a hole is a quad
+  `uv_rotation_deg`, `uv_scale` / `uv_offset`). `b18` is read only by the terrain writer and is 0 on every PC decal; rotation, `uv_scale` and `uv_offset`
+  are read only by the loader and the writer, so the decal vertex buffers carry the final UVs (FORMATS_MISC.md). No collision data and no LOD table exist in the file; a hole is a quad
   without triangles. Terrain draw 0x49c3be: 0xc79520 (the identity; 53 absolute references
   to it and 208 to 0xc79520..0xc7955f, none a store — measured) to 0x42c8fa with slot 0x28
   (0x49c3ef) and to effect vtable +0x24 (0x49c41b); the node to vtable +0x2c (0x49c423); then
@@ -3556,8 +3802,8 @@ book `/pivotbooks/default.pb` (0xa2f164).
   caption "Generate Terrain Ambient".
 - **`.detailmesh`** (read: 0x52de50; stream 0x5322c6): after the property bag `u8 hasMesh`
   and the vertex and index buffer descriptors, 25 bytes. The stand-alone Part 1 has no flag
-  byte, 24 bytes (read: Xbox 360 Part 1 reader 0x828dae50 goes from the bag straight to the
-  two descriptors). Data: the stream tiles with a 60-byte vertex on 30 of 30 files.
+  byte, 24 bytes (read: the Part 1 readers, PC 0x525b7e and Xbox 360 0x828dae50, go from the
+  bag straight to the two descriptors; the PC Part 1 version term is 3 against 4). Data: the stream tiles with a 60-byte vertex on 30 of 30 files.
 
 ### Asset names and letter case [data + code]
 
@@ -3679,7 +3925,7 @@ Read from code unless marked; constants from exe bytes.
   handle update; vfunc 29 sets it instead (0x49413d, 0x495bbe); when that runs after a load
   was not traced.
 - SubPivot 0x4a5907 (find or create one per part i ≥ 1 by name, `pivotID` = i, rest pose
-  unless byte +0x128; skipped when the ModelRes has `hasCloth`, +0xe8); `Model` vfunc 37
+  unless byte +0x128; skipped when the ModelRes has `hasAnimation`, +0xe8: a model with an `.animation` of its own); `Model` vfunc 37
   0x49faaf draws a part only when its SubPivot passes 0x48dffd and 0x48e028.
 - BaseModel constructor 0x4a8f99: `opacity` 1.0, `terrainAOGradient` 1.0, `geometryLodFactor`
   1.0, `geometryLodOverride` −1, `useConstantAO` false. LOD 0x49d00f (called from 0x573625,

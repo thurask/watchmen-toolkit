@@ -52,8 +52,10 @@ stairs; 1.015 in the master bedroom). This is how the data was generated, not an
 (0x48a6a4). For the 0.8 × 2.0 m movement capsule the controller is radius 0.425 and height 1.2,
 whose centre is 1.025 m above its bottom, which equals the measured offset (read: the
 controller is created at the node's world position, 0x4fe1ed, and its entity position is set to
-the value the controller returns, 0x5027b5, with no offset; not established here: that this
-value is the capsule centre, `NxCharacter.dll` not read). The generator is not in this build
+the value the controller returns, 0x5027b5, with no offset; read in `NxCharacter.dll`: that
+value is the capsule centre: `Controller::setPosition` 0x10008700 puts the kinematic actor exactly
+at it and `CapsuleController::move` 0x10005cc0 sweeps a capsule of half-height radius + height / 2
+about it). The generator is not in this build
 (`CreatePathData`, `CreateLocalPathData`, `UpdateAIDefinition` all point at the stub 0x48d55e),
 so the generation rule itself is unread.
 Compare a placement with the mesh in x / z and an altitude window, not by height:
@@ -183,7 +185,7 @@ bundled as `wlib/pivot_sheets.json`).
 | 0x08 | u32 | cell addressing: 1 = each cell carries a float box; 0 = integer lattice coordinates | code 0x916040, 0x90a3a0 |
 | 0x0c | 3 f32 + f32 | lattice origin and lattice cell size (unused with boxes; zero) | code 0x916040 |
 | 0x1c | 4 x 3 u32 | vertex extension descriptors {kind, offset, bytes}; first is (2, 0, 6) | inferred (0x90c980 looks for kind 2) + data |
-| 0x4c | 4 x 3 u32 | second descriptor block, all zero | unknown |
+| 0x4c | 4 x 3 u32 | second descriptor block, all zero; copied with the header to manager +0x1c8 and never read (no access to +0x1c8..+0x1f7 in the 33 path-manager functions that use the header copy; the kind-2 search 0x90c980 walks the first block only) | code (scan) + data |
 | 0x7c | u32 | vertex record size (36) | code 0x9172c0 |
 | 0x80 | u32 | edge record size (12) | code 0x9172c0 |
 
@@ -328,9 +330,9 @@ those strips twice. The triangles face up (+Y) in both frames.
 |---|---|
 | Why Bordello's path-object list entry 45 is null, and what the game does at that door | a node replaced after generation is the likely cause |
 | A reader of the cell stamp (0x28 / 0x2c) | none in the game; the generation tool is not available |
-| Second header descriptor block; cell tail word | all zero in the files |
+| Cell tail word | all zero in the files (the second header descriptor block is not read: header table) |
 | Abstract (hierarchy) cells, lattice addressing, version 1.0 | read from code only, no file; abstract cells are reported as undecoded regions, never guessed |
-| Why the data is 1 m above the ground | inferred: agents are reported at the centre of the movement capsule, 1.025 m above its bottom ("Heights"); read: the controller is created at the node's world position, 0x4fe1ed, and its entity position is set to the value the controller returns, 0x5027b5, with no offset; not established here: that this value is the capsule centre, `NxCharacter.dll` not read; the generator is not in this build |
+| Why the data is 1 m above the ground | inferred: agents are reported at the centre of the movement capsule, 1.025 m above its bottom ("Heights"); read: the controller is created at the node's world position, 0x4fe1ed, and its entity position is set to the value the controller returns, 0x5027b5, with no offset; that value is the capsule centre (read in `NxCharacter.dll`, "Heights"); the generator is not in this build |
 | Mesh-link gate on path following | read for the trace 0x9101a0 only |
 | Refresh periods of the sight visibility cache; default `physicsType` and sheet of a collision node | read: 0.3 s / 1 s (0x48a1b7, 0x935a60); constructor defaults `physicsType` 1 and the first sheet of `/pivotbooks/default.pb` (0x4a8944); a stored sheet id 0 is no sheet (0x4a4c44). The meaning of the clamp `owner+0x98 − owner+0x94` (0x935c90) is not established |
 | Whether the many graph components are intended (Bordello 20, NightClub 15, StreetsOfRiot 18) | small components are separate areas reached by scripted moves; leftovers not ruled out |

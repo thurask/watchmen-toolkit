@@ -191,9 +191,8 @@ extract output (`characters`, `faces`, `charlibs`, `animmeta`, `fxmeta`,
   textures, tangents, face rig, weapons or ragdoll helpers; `characters`
   writes the full character.
 - `watchmen bake CLIPNAME BIND.npz OUT.npy [NAZ]` — one clip's engine
-  palettes. `bake` matches tracks to bones as the character export does for
-  the set: by exact name, and for a Part 1 archive (one that holds
-  `Fragments/Enemy/Biker.fragment`) also without a leading `BipNN `.
+  palettes. `bake` matches tracks to bones as the character export and the
+  engine do, in both parts: by exact name, case-sensitive.
 - `watchmen animmeta EXTRACT_OUT OUT.json [BINDS_DIR]` — the animation
   metadata table (see "Animation metadata").
 - `watchmen soundmeta EXTRACT_OUT OUT.json` — what the game plays (see
@@ -1550,7 +1549,8 @@ missing, truncated or refused stops the import with the recovery command
   format `kapow-reg-dump/2`) recovered from registration call sites in the
   executable's code.
   Regenerable (`gendata regdump EXE`, needs `pip install .[regdump]`) but only
-  from a DRM-free executable — retail `.text` is SecuROM-encrypted in place.
+  from a DRM-free executable — retail `.text` is encrypted in place by Steam's
+  SteamStub wrapper.
   Its sibling `prop_names_from_reg.json` is a pure aggregation and is derived
   at runtime (not shipped).
 - `kapow_fragment_keys.pkl` — the fragment property-key crack: names AND value

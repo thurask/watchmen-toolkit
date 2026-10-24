@@ -235,14 +235,15 @@ def test_the_twist_pass_runs_by_default_in_the_engine_gauge_only(tmp_path):
         bake_v4.CONJ = True
 
 
-def test_the_character_export_picks_the_track_lookup_by_part(tmp_path):
+def test_the_character_export_binds_tracks_by_exact_name_in_both_parts(tmp_path):
     import inspect
 
     assert ce.track_names_for(str(tmp_path)) == "exact"
     d = tmp_path / "extracted" / "TNT" / "Production" / "Fragments" / "Enemy"
     d.mkdir(parents=True)
     (d / "Biker.fragment").write_bytes(b"")
-    assert ce.track_names_for(str(tmp_path)) == "prefix"  # Part 1
+    assert ce._is_part1(str(tmp_path))
+    assert ce.track_names_for(str(tmp_path)) == "exact"  # Part 1: the same engine lookup
     src = inspect.getsource(ce.bake_cache)
     assert src.count("track_names=_tn") == 2 and "twist_align=np.int32(1)" in src
     assert "bake_is_current(dst, clips[nm], _tn, _bsha)" in src
@@ -300,7 +301,7 @@ def _fake_archive(monkeypatch, tmp_path, blocks):
     return str(naz), read
 
 
-def test_a_bake_outside_the_export_uses_the_track_lookup_of_the_clips_set(tmp_path, monkeypatch):
+def test_a_bake_outside_the_export_uses_the_exact_lookup_in_either_part(tmp_path, monkeypatch):
     import test_p6_anim as tpa
     import watchmenlib as wl
 
@@ -310,10 +311,10 @@ def test_a_bake_outside_the_export_uses_the_track_lookup_of_the_clips_set(tmp_pa
     clip = tpa._clip([("root", 3, ((0, 0, 0), ID)), ("ArmTwist", 3, ((0, 0, 0), qy))])
     part2 = [[("Animation/EN1/c.animation", clip)], [("TNT/Fragments/Enemy/Thug.fragment", b"")]]
     part1 = part2 + [[("TNT\\Production\\Fragments\\Enemy\\Biker.fragment", b"")]]
-    for blocks, rule, angle in ((part2, "exact", 0.0), (part1, "prefix", 40.0)):
+    for blocks, rule, angle in ((part2, "exact", 0.0), (part1, "exact", 0.0)):
         naz, read = _fake_archive(monkeypatch, tmp_path, blocks)
         assert wl.bake_track_names("c", naz=naz) == (rule, clip)
-        assert read == list(range(len(blocks)))  # every block: the mark may follow the clip
+        assert read == [0]  # stops at the clip: no set mark is looked for
         del read[:]
         assert bake_v4.archive_clip("c", naz) == clip and read == [0]  # stops at the clip
         assert bake_v4.archive_clip("nope", naz) is None
@@ -338,7 +339,7 @@ def test_a_bake_outside_the_export_uses_the_track_lookup_of_the_clips_set(tmp_pa
     assert wl.bake_track_names("c", naz=str(tmp_path / "missing.naz")) == ("exact", None)
     monkeypatch.setattr(bake_v4, "bake", lambda *a, **k: k["track_names"])
     assert wl.bake("c", bind, 1, bank={"c": clip}, track_names="prefix") == "prefix"
-    assert wl.PART1_MARK == "/fragments/enemy/biker.fragment"
+    assert not hasattr(wl, "PART1_MARK")
 
 
 def test_the_contact_check_bakes_with_the_track_lookup_of_the_set(tmp_path, monkeypatch):

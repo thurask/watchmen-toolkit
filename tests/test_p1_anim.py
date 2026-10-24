@@ -528,7 +528,10 @@ def test_not_established_lists_the_open_camera_points():
     # settled: the transition clock is the script timepassed global (cut_placement.transition)
     assert not any("useRealtime" in t for t in text)
     assert "0xe14304" in fx._CUT_PLACEMENT["transition"]
-    assert any("root node follows the capsule" in t for t in text)
+    # settled from code: nothing moves the root in normal or paired play; only the game check is left
+    assert not any("root node follows the capsule" in t for t in text)
+    assert any("vertical reference (the root) is on the floor" in t for t in text)
+    assert any("0x47da30" in v for v in fx._CUT_PLACEMENT.values() if isinstance(v, str))
     assert any("first cut of a session blends" in t for t in text)
 
 

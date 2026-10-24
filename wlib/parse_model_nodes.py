@@ -310,3 +310,51 @@ def model_physics(mb, order="<"):
     except (ValueError, struct.error, IndexError):
         return None
     return dict(nodes=nodes, articulated_body=ab, end=ab["end"], layout=M["layout"])
+
+
+def model_tail(mb, order="<"):
+    """What a ModelRes header holds after its articulated-body section, read as
+    ModelRes::Read 0x547006 reads it:
+        [string animation path]        only when the header's second bool is set
+                                       (has_animation; read by 0x54292c: curtains,
+                                       foliage and other unskinned animated models)
+        [u32 n] n x {f32, string name, [u32 m] m x {u32 target, f32 key}}
+                                       the morph-channel list (ModelRes+0x134,
+                                       36-byte elements; writer 0x543e10)
+    A channel's weight w > 0 picks the last entry whose key <= w and drives that
+    target by (w - previous key) / (key - previous key), the previous key of the
+    first entry being 0 (0x4b5b31); `Character.GetMorphChannelIdx` finds a channel by
+    the hash of its name (0x4b38b6).  The leading f32 of a channel is not read there.
+    -> dict(animation=str | None, morph_channels=[{"f0", "name", "targets":
+    [[target, key]]}], end) with end == len(mb), or None when the tail does not
+    read to the end of the blob."""
+    try:
+        import watchmen_extract as _we
+    except ImportError:
+        if _HERE not in sys.path:
+            sys.path.append(_HERE)  # append, never insert(0)
+        import watchmen_extract as _we
+    M = _we.parse_model_header(mb, order)
+    phys = model_physics(mb, order)
+    if M is None or phys is None:
+        return None
+    try:
+        r = _we._Rd(mb, order)
+        r.p = phys["end"]
+        animation = r.string() if M.get("has_animation") else None
+        channels = []
+        for _ in range(r.count(12)):
+            (f0,) = r.floats(1)
+            name = r.string()
+            m = r.count(8)
+            targets = []
+            for _ in range(m):
+                t = r.u32()
+                (k,) = r.floats(1)
+                targets.append([t, k])
+            channels.append({"f0": f0, "name": name, "targets": targets})
+    except (ValueError, struct.error, IndexError):
+        return None
+    if r.p != len(mb):
+        return None
+    return dict(animation=animation, morph_channels=channels, end=r.p)

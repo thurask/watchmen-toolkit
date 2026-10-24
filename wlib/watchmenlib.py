@@ -258,25 +258,17 @@ def decode_clip(anim_bytes):
     return _bake_mod.walk(anim_bytes)
 
 
-#: the file whose presence makes a set Part 1 (characters_export._is_part1 tests the same
-#: file in an extract folder)
-PART1_MARK = "/fragments/enemy/biker.fragment"
-
-
 def bake_track_names(clipname, bank=None, naz=None):
     """(track_names, clip bytes or None) for a bake of `clipname` outside the character
-    export: the rule characters_export.track_names_for gives the clip's set.  "prefix" when
-    the archive the clip is read from is a Part 1 set (it holds Fragments/Enemy/
-    Biker.fragment), else "exact"; "exact" too when the clip comes from `bank`, which
-    names no set.  The clip bytes are returned when the archive was read for them."""
+    export: the rule characters_export.track_names_for gives, "exact" for every set (the
+    engine binds tracks by exact name in both parts).  The clip bytes are returned when the
+    archive was read for them (not when the clip comes from `bank`)."""
     if bank is not None and bank.get(clipname) is not None:
         return "exact", None
     _naz = naz or _bake_mod.default_naz()
     if not os.path.exists(_naz):
         return "exact", None  # bake() reports the missing archive
-    marks = {PART1_MARK: False}
-    clip = _bake_mod.archive_clip(clipname, _naz, marks)
-    return ("prefix" if marks[PART1_MARK] else "exact"), clip
+    return "exact", _bake_mod.archive_clip(clipname, _naz)
 
 
 def bake(clipname, bind=None, upsample=2, bank=None, naz=None, track_names=None):
@@ -286,8 +278,7 @@ def bake(clipname, bind=None, upsample=2, bank=None, naz=None, track_names=None)
     naz: the archive the clip is read from when `bank` does not have it (None:
     `01_game.naz`, else `game.naz`, in the current directory).
     track_names: bake_v4.bake's track lookup, "exact" or "prefix".  None (default): the
-    rule of the character export for the clip's set (bake_track_names): "prefix" for a
-    Part 1 archive, else "exact".
+    rule of the character export (bake_track_names), "exact".
     Returns (palettes (F,NB,3,4), duration_s)."""
     if track_names is None:
         track_names, clip = bake_track_names(clipname, bank, naz)

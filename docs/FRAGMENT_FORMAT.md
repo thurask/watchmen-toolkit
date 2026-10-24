@@ -112,7 +112,10 @@ is all an animation class needs. What a level is built from: LEVEL_META.md.
 
 Decided at registration: property record +0x38: bit 0 = never written; bit 1 = deprecated
 alias, read but never written; bit 3 is set on 16 properties (`bit3` in
-`property_store_flags.json`); its meaning is not established. `wlib/property_store_flags.json`
+`property_store_flags.json`) and nothing in the executable reads it: the record's flags have two getters, bit 0
+(0x4f93ec) and bit 1 (0x4f9420), and no instruction tests bit 3 of +0x38 (instruction scan). The 16 are owner /
+sub-object links (`owner`, `ownerAsset`, `texturePtr`, `sheetVec`, `actor`, the particle lists), so an editor-side
+flag is likely (inferred). It does not change what is stored. `wlib/property_store_flags.json`
 lists the 61 + 56 properties that carry bit 0 / bit 1 (class, property, registration site). The
 writer (Entity vfunc 7, 0x5016d8) also skips `script`, a property without a setter and
 `assetName` on an entity whose native class is SceneNode.

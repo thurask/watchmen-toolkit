@@ -739,3 +739,44 @@ def test_d6_swing_keys_resolve_in_the_fragment_key_table():
     import gen_data
 
     assert gen_data.keys_import(json.loads(json.dumps(gen_data.keys_export()))) == kd
+
+
+def _with_tail(h, tail, animation=None):
+    """build_model()'s header with its empty morph list replaced by `tail` and, when
+    `animation` is given, the has_animation bool set and the path in front of it."""
+    assert h.endswith(b"\0" * 4)
+    body = h[:-4]
+    if animation is not None:
+        i = body.index(struct.pack("<IBIB", 0, 1, 0xFFFFFFFF, 0))
+        body = body[:i] + struct.pack("<IBIB", 0, 1, 0xFFFFFFFF, 1) + body[i + 10 :]
+        body += _str(animation)
+    return body + tail
+
+
+def test_the_model_tail_reads_to_the_end_of_the_header():
+    import parse_model_nodes as pmn
+
+    T = pmn.model_tail(build_model())
+    assert T == {"animation": None, "morph_channels": [], "end": len(build_model())}
+
+
+def test_the_morph_channel_list_and_the_animation_path_are_parsed():
+    import parse_model_nodes as pmn
+    import watchmen_extract as we
+
+    ch = struct.pack("<f", 0.5) + _str("default03") + struct.pack("<I", 2)
+    ch += struct.pack("<If", 1, 0.5) + struct.pack("<If", 2, 1.0)
+    h = _with_tail(build_model(), struct.pack("<I", 1) + ch, animation="/art/a/b.animation")
+    assert we.parse_model_header(h)["has_animation"] == 1
+    T = pmn.model_tail(h)
+    assert T["animation"] == "/art/a/b.animation" and T["end"] == len(h)
+    assert T["morph_channels"] == [
+        {"f0": 0.5, "name": "default03", "targets": [[1, 0.5], [2, 1.0]]}
+    ]
+    meta = we._model_tail_meta(h)
+    assert meta["animation"] == "/art/a/b.animation"
+    assert meta["morph_channels"][0]["name"] == "default03"
+    assert "0x4b5b31" in meta["morph_channel_note"]
+    # a tail that does not end the blob is not read
+    assert pmn.model_tail(h + b"\0") is None
+    assert we._model_tail_meta(build_model()) == {}

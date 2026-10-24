@@ -119,7 +119,7 @@ seed and generator are **not established**.
 
 ### 2.1 Per-frame body of `StateActive` 0x724071 (read)
 
-1. Twilight Lady punish block (`_tdotwilightpunish`), not relevant for other types.
+1. Twilight Lady punish block (`_tdotwilightpunish`, `_ndotwilightpunishtime`, `_etargettopunish`), not relevant for other types; read in COMBAT_META.md (`rules.twilight_lady_punish`).
 2. If `ShouldUpdate()`:
    - alive: leader definition switch (1.2).
    - Target: the current target is kept unless `AILib.ShouldAcquireNewTarget(target)` 0x598886 (no target,
@@ -664,7 +664,7 @@ Flat statements of what the code does not do; several supersede items of `domina
 | Which orchestrator preset each encounter uses | list `CombatOrchestratorParameters` references in the level `MissionStructure.fragment`s |
 | Values of `Perception._nremembertargettime`, `_ntimebetweenposreachablequeries`, `AttackEnemy._ncheckforclearlineofattackfrequency`, `ReturnToCombatZone.m_ntauntdistance` | not in the template fragments (script-side defaults); find the initialising writes |
 | `ReturnToCombatZone`, `FollowPivotBehavior`, `BehaviorStepBack` in full | line-by-line read (about 8,000 lifted lines) |
-| Partner combat behaviours, Twilight Lady punish logic, Underboss (Part 1 only) | 75 kB + 20 kB of script |
+| Partner combat behaviours, Underboss (Part 1 only) | 75 kB + 20 kB of script |
 | Random generator and seeding of `rand_number` | read 0x47b03e |
 | `CharacterRoot.StateActive` movement integration and the SPEED/DIRECTION animation values | WP3 |
 

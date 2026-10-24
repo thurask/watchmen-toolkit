@@ -247,9 +247,18 @@ matrix, the muscles that pull a ragdoll toward the animation.
   frames the mean bone speed is 0.8–5.0 m/s, against 0.6–14.0 m/s in the last animated frame;
   no switch starts from rest. The per-bone velocity field (mean removed) correlates 0.81–0.98
   with the last animated frame in 7 switches, 0.60 in one and −0.08 to 0.42 in 4, independent of
-  the animated speed. That a body keeps the velocity of its last kinematic move unless
-  `StateRagdollDriven` (0x69ed7c) overwrites it is inferred; the per-body velocity in the frame
-  the flag is cleared is not established. Trace 1 frames 5136–5155 are an animated fall (the
+  the animated speed. PhysX sets a kinematic body's velocity once per simulate (0x10034c10):
+  with a pending `moveGlobalPose` target it writes `v = Δx/(n·h)` and `ω` from the rotation to
+  the body and its atom; with none it zeroes both and the wake counter, and the second such
+  simulate in a row puts the body to sleep (branch 0x100352a1). `setKinematic(false)` leaves that
+  velocity alone, and the game's `wakeUp(0.4)` (f32 0xa23680) before `clearBodyFlag` keeps the
+  body awake (awake flag body +0x70, set through 0x1017e690), so `setFlags` 0x10033600 takes the
+  active-list path (0x10033010) and not the sleep list (0x10033040 → scene +0x360), whose bodies
+  are the only ones the readback 0x100bf550 zeroes. A body therefore enters dynamic mode with the
+  velocity of the last move PhysX executed while it was kinematic, until `StateRagdollDriven`
+  (0x69ed7c) rescales or adds to it (read from code). Which game update's target that is (a target
+  set in the switch update itself is freed unexecuted by `setKinematic(false)`) and why the pose
+  holds for one frame are not established. Trace 1 frames 5136–5155 are an animated fall (the
   node moves every frame at constant height, mean vertical velocity near −3 m/s for eight
   frames). `KapowMulti.3.trace` frames 3042–3055 (a Heavy) were not analysed. Frame time: see
   `tools/apitrace/README.md`.

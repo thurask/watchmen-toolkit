@@ -1,6 +1,7 @@
 """Name tables touched by the open-items sweep.
 
-builtins.json    which builtins the X360 Part 1 image lacks / adds (member-name strings)
+builtins.json    which builtins the X360 Part 1 image lacks / adds (member-name strings) and
+                 the PC Part 1 registration order
 names2.tsv       the Kynapse bridge functions, named from their role
 fx_meta          the Twilight Lady's fake weapon is null in shipped data (0x6943b8)
 No game files."""
@@ -29,6 +30,27 @@ def test_builtins_table_says_what_x360_part1_differs_in():
     assert x["extra"][0]["signature"] == "set_disc_error_message(entity,integer)"
     assert x["evidence"].endswith("registration not read")
     assert len(j["functions"]) == 123  # the PC Part 2 table itself is unchanged
+
+
+def test_builtins_table_carries_the_pc_part1_registration_order():
+    with open(os.path.join(ROOT, "wlib", "builtins.json"), encoding="utf-8") as fh:
+        j = json.load(fh)
+    p = j["other_builds"]["pc_p1"]
+    assert p["registration"] == "0x47c5a6"
+    assert p["counts"] == {"functions": 117, "properties": 19, "enum_members": 10}
+    assert p["missing_indices"] == j["other_builds"]["x360_p1"]["missing_indices"]
+    assert [(e["name"], e["index"]) for e in p["extra"]] == [
+        ("set_disc_error_message", 65),
+        ("disablecurrentloadscreen", 74),
+    ]
+    idx = p["index_in_pc_p1"]
+    assert len(idx) == 123
+    assert [i for i, v in enumerate(idx) if v is None] == p["missing_indices"]
+    kept = [v for v in idx if v is not None]
+    assert kept == sorted(kept)
+    assert sorted(kept + [e["index"] for e in p["extra"]]) == list(range(117))
+    assert idx[:65] == list(range(65))  # the same index up to 64, shifted from 65 on
+    assert idx[65] == 66
 
 
 def test_kynapse_bridge_functions_are_named():

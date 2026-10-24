@@ -299,7 +299,7 @@ def test_terrain_header_is_decoded_to_the_last_byte_and_rebuilds(bo):
         "decal_place_agree": 1,
         "sector_origin_agree": 1,
     }
-    assert "decals[].place" in doc["inferred"] and "decals[].b18" in doc["not_established"]
+    assert "decals[].place" in doc["inferred"] and "decals[].b18" not in doc["not_established"]
     assert ta.build(json.loads(json.dumps(doc))) == data
 
 

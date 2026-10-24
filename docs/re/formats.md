@@ -222,7 +222,9 @@ Flags (read from code): VB/IB `flags` bit 3 = bulk data deferred to the stream b
 `FUN_00429e11`); bits 0/1 = dynamic (`D3DUSAGE_DYNAMIC`, `FUN_00454159`). In files: 8 on static rigid meshes,
 0 on skinned ones — the data is in the stream blob either way.
 `ix` is the primitive type: 0 triangle strip, 1 triangle list (table 0xc7f398; 0 on 12 vegetation submeshes).
-Not established: `b24`, `u28` (0–10 observed), `u2c`, `u70`, `b4`, `e4`.
+All named now (KAPOW_NAZ_FORMAT.md §6b): `b4` = maxLodIndex (`ModelRes::GetNumLods` 0x497eff returns +0xb4 + 1;
+measured equal to the largest part LOD count − 1 on all 1,830 PC models of both parts), `e0` hasSkeleton, `e4`
+skinnedBoneCount, `e8` hasAnimation (the model's own `.animation`; KAPOW_NAZ_FORMAT §6b), `u2c` the pivot-book index, `u70` the parent part, `b24` skip flag, `u28` shadow-hull id.
 
 ### 3.4 Stream-blob layout
 
@@ -241,7 +243,8 @@ The field order is the order `FUN_00433ef4` reads bulk data (read from code); th
 and the buffer order are **validated**: the sum reproduces the stream length exactly for 740/740 models.
 `dynCopy` buffers (cloth; `FUN_00433c40` makes a runtime fmt-5 copy) add nothing to the stream.
 Not established: how the engine routes these bytes at load time (`FUN_004341f5` consumes a pointer table
-whose producer was not traced), and the unit of the cluster ranges `a, b` (0,150 / 150,303 / …).
+whose producer was not traced). The cluster ranges `a, b` are index positions (first index, end index; reader
+0x4326a0): KAPOW_NAZ_FORMAT.md "Stream blob".
 
 ### 3.5 Toolkit (`watchmen_extract.py`, `mesh_loader.py`)
 
@@ -394,9 +397,9 @@ produced by code that is not in this binary. No further claim is made.
 
 ## Not established (summary)
 
-- Block header: GUID @0x24 (no reader found), meaning of bytes @327, @328 and @388, which language slot the stream
-  reader uses.
-- ModelRes: `b24`, `u28`, `u2c`, `u70`, `b4`, `e4`; cluster range units; the runtime routing of stream bytes;
+- Block header: GUID @0x24 has no reader; @327, @328 and @388 are named in KAPOW_NAZ_FORMAT.md §2.1; which language
+  slot the stream reader uses.
+- ModelRes: the runtime routing of stream bytes;
   the physics/cloth tail.
 - Texture: the code that copies cube faces into the stream, the animation tail.
 - Console: everything in §5.3 and the 2D half of §5.4.

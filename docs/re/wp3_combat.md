@@ -548,7 +548,7 @@ Throw reactions are separate and probabilistic (2.8): `m_nprobblockthrow`, `m_np
 - Enemies receive weapons from their spawner via `command_set_weapon`, cloned from the CharacterDef's weapon model collection.
 - Holding a weapon sets animation enum 5 WEAPON_ANIMATION_TYPE (0 unarmed, 1 BASH_1H, 2 BASH_2H), which selects the Armed groups and the 1H/2H base damage, and makes every non-throw attack unblockable.
 - Durability starts at 1.0 [default] and drops by the weapon's loss-per-hit on every landed hit (not for states flagged `m_tignoreweaponsound`). At <= 0: break effect, then the weapon is detached and dropped, or merely disabled when `m_tdisableatbreak`. A broken or dropped weapon returns the holder to UNARMED.
-- Weapons are lost: on death; on the throw button; on the DROP_WEAPON events; when disarmed by a hero's Disarm counter (event COUNTER_ATTACK_WEAPON_STEAL - the hero takes it; handler not read).
+- Weapons are lost: on death; on the throw button; on the DROP_WEAPON events; when disarmed by a Disarm counter (event COUNTER_ATTACK_WEAPON_STEAL: the taker takes it, except from Rorschach, whose weapon is dropped; the Underboss keeps his; COMBAT_META.md `rules.weapon_steal`).
 - There is **no per-weapon damage**: damage depends only on the class (1H / 2H).
 
 | Collection | Class | Rorschach uses as 1H | Durability loss / hit | Hits to break | Disabled (not dropped) at break | Priority |
@@ -747,7 +747,7 @@ Kept with the decompilation outside this repository (`ghidra_kapow_out/engine/en
 
 ## 7. Not established, and what each would take
 
-Several of these are covered by `docs/COMBAT_META.md` (sweeps, bull rush, who may attack when, Twilight Lady reaction, Underboss, achievements) and `docs/ENGINE_CONSTANTS.md` (combo speed-up by animation type, kick damage, the damage-modifier inputs, the counter margin as clip time).
+Several of these are covered by `docs/COMBAT_META.md` (sweeps, bull rush, who may attack when, Twilight Lady reaction, punish and back-flip, weapon steal, Underboss, achievements) and `docs/ENGINE_CONSTANTS.md` (combo speed-up by animation type, kick damage, the damage-modifier inputs, the counter margin as clip time).
 
 | Item | What is missing | What it would take |
 |---|---|---|
@@ -757,8 +757,6 @@ Several of these are covered by `docs/COMBAT_META.md` (sweeps, bull rush, who ma
 | Throw: control flow of the block/dodge branch; THROW_MODE_STORE_TARGET / THROW_BRANCH_POINT event cases | lifted text only, events 38 and 70 skimmed | disassembly of 0x68d870 around the two RNG calls; read event cases 0x26, 0x46 |
 | Bull rush contact (CHARGE physics state -> BullmoveImpact pair), secondary victims | BULLMOVE_IMPACT read, contact not | read the physics-state-4 collision callback in CharacterRoot |
 | Nite Owl grenade and electric blast resolution (events 29-31), electrify charge bookkeeping | data known, handlers not read | read event cases 0x1d-0x1f and `CharacterEffectDef` |
-| Weapon steal on disarm (event 32) | not read | read event case 0x20 |
-| Twilight Lady reaction routine (`command_react_to_attack_twilight_lady`), Underboss `is_attack_successful` | not read | read those two handlers |
 | `takeahitstruct` | no use found in the handlers read | grep corpus for the struct type |
 | RELATIVE_HEAD_HEIGHT source (used for prone, block test and throw fail) | setter not read | read `CR.UpdateAnimationValues` value 14 |
 | Difficulty | no reader in the damage path; `g_nglobaldamagefactor` has no script writer | search native code for writers of the global and for the settings value |

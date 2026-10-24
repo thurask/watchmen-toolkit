@@ -291,10 +291,17 @@ decrease 2500/s, collider force scale 1.2, height mask 0.6 in the shipped fragme
    PhysX derives for the kinematic bodies that were following the animation (kinematic → dynamic switch):
    `CollisionNode::SetMovementType` → `RigidBody` slot 12 0x4fe5ed does `wakeUp([0xa23680])`, then `clearBodyFlag(NX_BF_KINEMATIC)` when the
    old type was 1, else `raiseBodyFlag(0x80)`; a change from or to static recreates the actor (slot 18).
-   No velocity is written **[code]**. The SDK text says a kinematic actor "lacks real velocity" and that
-   after a move "the velocity is returned to zero" **[SDK documentation; the 2.8.1 run-time behaviour is
-   not captured]**. Knock-downs are located in the D3D9 captures (`docs/RAGDOLL_RIG.md`), but the captures
-   hold no frame time and no engine state, so the first dynamic frame's velocity is **[not established]**.
+   No velocity is written by the game **[code]**. In PhysXCore 2.8.1.1 a kinematic body's velocity is set once
+   per simulate (0x10034c10): a pending target gives `v = Δx/(n·h)` and `ω` from the rotation; no target zeroes
+   both (the SDK's "returned to zero"), and the second target-less simulate in a row puts the body to sleep.
+   `Body::setKinematic(false)` (0x10037f30, branch 0x100380a7) does not write the velocity; after
+   `wakeUp(0.4)` (f32 0xa23680) the body is awake (body +0x70), so `setFlags` 0x10033600 puts it on the active
+   list (0x10033010), not on the scene's sleep list (+0x360, filled by 0x10033040), the only list whose
+   velocities the readback 0x100bf550 zeroes **[code]**. The bodies therefore start dynamic with the velocity of
+   the last kinematic move PhysX executed **[code]**; which game update's move that is (a target set in the
+   switch update is freed unexecuted) **[not established]**. Knock-downs are located in the D3D9 captures
+   (`docs/RAGDOLL_RIG.md`); the start speeds there are non-zero and correlate with the last animated frame
+   in 7 of 12 switches **[data]**.
 4. Per frame in that state: accumulated ragdoll damage > 1 → `CharacterRoot.command_give_ragdoll_damage_increment`
    0x6914f2; added damage decays 20/s (0x9e5c68); the first time the pelvis speed drops below 1.5 m/s
    (0x9e5ff0) `m_tcandamagebetransfered` is cleared and `command_reset_collision_group(1)` moves the bodies
@@ -484,8 +491,12 @@ anchors. In every interface slot 0 is one extra entry before the first documente
   `fetchResults` 142); slots 143–156 by header order only.
 - **NxD6Joint**: `loadFromDesc` = slot 25 (string); +0x6c `setDrivePosition`, +0x70 `setDriveOrientation`,
   +0x74 `setDriveLinearVelocity` follow — certain for +0x70 (called by `SetOrientMotorTargetOrient`).
-- **NxPhysicsSDK, NxController, NxControllerManager — inferred** from header order with 4 / 5 / 2 consistent
-  call sites each.
+- **NxPhysicsSDK — inferred** from header order. **NxController, NxControllerManager — read** in `NxCharacter.dll`
+  (RTTI vtables): `CharacterControllerManager` 0x10014494 slot 2 `createController` 0x100084b0, slot 3
+  `releaseController` 0x10008260 (removes it from the list, runs its deleting destructor); `CapsuleController`
+  0x10014354 slot 1 `move` 0x10005cc0, 2 `setPosition` (→ 0x10008700), 3 / 4 `getPosition` /
+  `getFilteredPosition` (+0x148), 5 `getDebugPosition` (+0x118), 6 `getActor` (+0x110). The game's calls
+  (+0x8, +0xc, +0x18) match.
 - **NxCloth** (member +0x9c of `Physics::Cloth`, 16 offsets used; 92 slots) and **NxMaterial** (23 slots)
   are named from their own name strings: `docs/RAGDOLL_RIG.md` "Cloth". **NxShape — not established.**
 
@@ -576,7 +587,7 @@ The toolkit's implementation and conventions: `docs/RAGDOLL_RIG.md`.
 |---|---|
 | Impact → ragdoll decision for a living character (thresholds 6000 / 2000 / 500, height mask) and ragdoll damage, impact sounds | read `CharacterVisual.ModelCollisionContactAdded` 0x69d00a (large), `DetermineDamageReaction` 0x6a18d1, `CharacterRoot.command_give_ragdoll_damage_increment` 0x6914f2 |
 | Exact blend of the mapped bones while ragdolled (`0x596525`) | read 0x596525 with the mapper 0x58edf9 / 0x58eea3 / 0x58f942 |
-| Velocity of the first dynamic frame at the kinematic → dynamic switch (no velocity is written, B.3) | a capture with frame time and engine state; the D3D9 captures hold neither |
+| Which game update's kinematic move is the last one PhysX executes before the switch (the body keeps that move's velocity, B.3) | the game-side order of `RigidBody` slot 28, slot 12 and `simulate` around the switch, or a live run |
 | Get-up position checks, expand volume | `VerifyCharacterLocation` 0x6a01d4, `solveStaticObject` 0x6a10cb, `staticDynamicOverlap` 0x6a0a60, `dynamic_getup_logic` 0x728e00, `CharacterExpandVolume` 0x66d0ec |
 | How `PELVIS_ROTATION` is formed from the pelvis axes (which axis = "face up") | read lines 1088–1310 of 0x6bc3e2 (vector algebra); needed only to reproduce clip choice offline |
 | Controller slope limit value; step limit after init | find the writers of `CharacterController::SetSlopeLimit` 0x4fe288 / `SetStepLimit` 0x4fe2cb in the script (`m_ninitsteplimit` user) |

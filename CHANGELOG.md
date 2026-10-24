@@ -1,5 +1,64 @@
 # Changelog
 
+## 1.6.0 — 2026-10-24
+
+**Part 1 character bakes match animation tracks by exact name**, as the game does in both
+parts (read from the PC Part 1 executable); bones that took a track only through the
+`'BipNN '`-insensitive lookup now keep their rest pose, and Part 1 bakes made by 1.5.0 bake
+again. Model sidecars gain the header tail (`animation`, `morph_channels`); the combat block
+gains Twilight Lady's punish and back-flip and the weapon steal of a disarm counter;
+`builtins.json` carries the PC Part 1 registration order. The entries below also list the
+smaller additions and text changes.
+
+- **`combat` meta, `rules.ragdoll_damage.visual_def`**: `m_nragdollimpactforcefromcollider`
+  is no longer listed in `unread_in_script`. `CharacterVisual.StateRagdollDriven` 0x69ed7c
+  multiplies the velocity and impulse a body knocked over by a thrown ragdoll takes from it by
+  this factor. The value is now exported (the stored one, else the registered default 1.2,
+  0x676a41; `null` without a `CharacterVisualDef`) with a `transfer_note`. The shipped fragment
+  stores 1.2. (2026-10-23)
+- **`.terrain` JSON**: `decals[].b18` leaves `not_established`. Only the terrain writer reads it
+  (0x52d14c) and it is 0 on every PC decal; the value is still written back as stored.
+  (2026-10-23)
+- **`fx_meta.json`, cut placement**: the root-height text and `not_established` now say what
+  the code shows: nothing moves a `CharacterRoot` in normal or paired play (the local-position setter
+  0x47da30 has no per-frame caller that targets one), so a cut's vertical reference is the floor where
+  the last teleport put the root; only an in-game confirmation is left. Text only; no number changes.
+  (2026-10-23)
+- **`.terrain` JSON**: `not_established` is empty. A decal's rotation, `uv_scale` and `uv_offset` are
+  read only by the terrain loader and writer (0x5397d0, 0x52cf69), so the decal vertex buffers carry the
+  final UVs; `inferred` says so. Text only; the values are still written back as stored. (2026-10-24)
+- **`<model>.model.json`**: a model with its own `.animation` (curtains, foliage: 26 PC Part 2
+  copies) gets `animation`, its path, and a model with a morph-channel list gets `morph_channels`
+  (`f0`, `name`, `targets` = [target, key]) and `morph_channel_note` (one PC Part 2 model,
+  `KnotTop_Small_ArmsBrokenS02`). Every other sidecar is unchanged. New
+  `parse_model_nodes.model_tail` reads the header after the articulated body to its last byte
+  (ModelRes::Read 0x547006); `parse_model_header`'s internal key `has_cloth` is `has_animation`,
+  which is what that bool is. (2026-10-24)
+- **`wlib/builtins.json`**: `other_builds.pc_p1` holds the PC Part 1 registration, read from its
+  `BuiltinModule::RegisterMembers` 0x47c5a6: 117 functions (the eight `x360_p1` lacks are absent,
+  `set_disc_error_message` and `disablecurrentloadscreen` are added at indices 65 and 74), 19
+  properties and 10 enum members in the Part 2 order; `index_in_pc_p1` maps each Part 2 function
+  index to the Part 1 one. The Part 2 table is unchanged. (2026-10-24)
+- **Part 1 character bakes match tracks by exact name**, as Part 2 always did. The PC Part 1
+  executable binds a clip track to the bone of the same name, case-sensitive, with the Part 2
+  code (channel table 0x5339d3 / 0x531a35, source map 0x58abd0), so the `'BipNN '`-insensitive
+  lookup the Part 1 export used gave bones tracks the game does not: an `Attach RHand` with only
+  a `Bip01 Attach RHand` track (983 Part 1 clips) now keeps its rest local.
+  `characters_export.track_names_for` and `watchmenlib.bake_track_names` return `"exact"` for
+  every set (`watchmenlib.PART1_MARK` is gone; `bake` stops reading the archive at the clip).
+  Part 1 bakes cached with the old lookup are not current and bake again. The head-model bakes
+  keep `track_names="prefix"`. (2026-10-24)
+- **`combat` meta, three new rule blocks**, read from code: `rules.twilight_lady_punish` (armed by
+  the player's completed or failed combo, due 0.5 s later, pushed to 1.5 s by DELAY_OPPONENT,
+  executed by `Enemy.StateActive` as a fast KNOCKDOWN attack once she is free, dropped after
+  2.0 s), `rules.twilight_lady_back_flip` (enemy state 9: an AREA_DAMAGE attack on an enemy
+  within 4.0 m, then a FLIP_MOVE retreat to the setup folder's PivotNode that lies most away from
+  the enemies) and `rules.weapon_steal` (event 32: the partner drops its weapon and the taker
+  attaches it over 0.1 s; not from the Underboss, and Rorschach's weapon stays on the ground).
+  `twilight_lady_reaction.not_exported` is replaced by `see_also`; `not_established` no longer
+  lists the two routines. `COMBAT_FORMAT` is unchanged, so a table built before this keeps its
+  old rules until the animation meta is rebuilt. (2026-10-24)
+
 ## 1.5.0 — 2026-10-10
 
 **Every rigged GLB carries a real skeleton.** A character GLB used to hold 46

@@ -56,14 +56,23 @@ Parser: `kapow_props.py` (name resolution via the hash dict).
   cannot read at all. The generic walk consumes the 89 Part 2 files but leaves 1,776 records
   with a hex key and 971 with a mis-cased name.
 - **.grass** (3/3, 0 trailing): grass template — texture, density, cell counts,
-  width/height+variance, sway (sinMod/cosMod), LOD, collisionPower etc.
+  width/height+variance, sway (sinMod/cosMod), LOD, collisionPower etc. The blades are built at
+  run time (`GrassAsset` rebuild 0x52a643) into a vertex buffer of **format 7** (stored at asset
+  +0x100, drawn by 0x52e3ab with per-cell constants from c40, `$grassData`, 11 registers).
+  Format 7 is the same 60-byte vertex as the detail meshes; its declaration (0x9ecba8, created
+  for format 7 by 0x45544e, set by the state flush from gfx +0x79c + 4 × format) is
+  POSITION f32×3 @0, NORMAL f32×3 @12, COLOR0 D3DCOLOR @24, TEXCOORD0 f32×2 @28,
+  TEXCOORD1 f32×3 @36, TEXCOORD2 f32×3 @48 (read from code). Of the 19 PC grass vertex programs, 4 declare
+  all six inputs, 12 (both `GrassDepthVS` among them) all but the normal and 3 all but TEXCOORD1
+  (measured with `sm3dis.py`), and the console stride table has 60 for
+  format 7 too (inferred: the same layout). Nothing in the toolkit exports grass.
 - **.detailmesh** (5/5): scatter template -> model path + lighting/sway/range params,
   then the mesh descriptors (reader `0x52de50`): `[u8 hasMesh]` and, when set, the vertex
   buffer `[u32 flags][u32 vertexCount][u32 formatId]` (`0x429e11`) and the index buffer
   `[u32 flags][u32 byteCount][u32 x]` (`0x429f21`). The format id is 7 (60-byte float
   vertex) in every file; `x` is the primitive type (1 = triangle list). The standalone Part 1
-  (PC, Xbox 360) has no `hasMesh` byte: its reader (`0x828dae50` in the Xbox 360 Part 1 image)
-  goes from the bag straight to the two descriptors, which is why those files end 24 bytes
+  (PC, Xbox 360) has no `hasMesh` byte: its reader (`0x525b7e` PC, `0x828dae50` Xbox 360)
+  goes from the bag straight to the two descriptors (version term 3, Part 2 4), which is why those files end 24 bytes
   after the bag and the others 25. `kapow_json.detailmesh_json` writes the descriptors as
   `mesh` (`has_mesh`, `has_mesh_byte`, `vertex_buffer`, `index_buffer`), `trailing_bytes` is
   0, and with the stream at hand a `stream` section gives the layout below. 30 of 30 files of
@@ -212,8 +221,15 @@ wrap, 0 = clamp; 0x4aebdb, 0x4aec0e, 0x458794); the index buffer's `primitive_ty
 0xc7f398; 1 = triangle list); buffer `flags` (index: bit 0 = dynamic; vertex: bit 0 or bit 1 =
 dynamic with a second buffer; bit 3 comes from the loader, not the file; 0x454159, 0x454a41).
 Measured: `uv_rotation_deg` (uv − 0.5 = R(angle)·(st − 0.5) on 131 decals, residual ≤ 6.1e-4)
-and `uv_scale` (v = t / 0.86 on 16 decals). **Not established**: `b18`; how `uv_offset` enters
-the UV (one configuration in the data). The offset-style keys (`b10`, `f14`, `b19`, `b1a`,
+and `uv_scale` (v = t / 0.86 on 16 decals). `b18`: the loader stores it at decal +0x18 (0x5399e5), the
+constructor sets 0 (0x543d4d), and the only reader is the terrain writer `TerrainAsset` slot 23 (0x52d14c),
+which saves it back; the decal draw (0x53886b) reads texture, wrap and buffers only (read from code: a scan of
+every byte read at +0x18 in the 318 terrain, decal and terrain-renderer functions). It is 0 on all 279 decals of
+the PC sets (measured), so it has no effect at run time. `uv_rotation_deg`, `uv_scale` and `uv_offset`
+(+0x14, +0x1c..+0x28) are stored only as well: the loader (slot 24 0x5397d0) and the writer (slot 23
+0x52cf69) are their only readers (read from code: every floating-point read of +0x24 / +0x28 in
+0x528000–0x548000; the other matches are grass and ModelRes records), so the decal vertex buffers carry
+the final UVs and the three values only describe how they were made. The offset-style keys (`b10`, `f14`, `b19`, `b1a`,
 `f1c`, `flag`, `x`) are aliases.
 
 `watchmen extract` writes beside the raw asset: `<name>.terrain.json` (format
@@ -430,6 +446,10 @@ every model.
 | 6 | sphere | f32 radius | 44 |
 | 7 | capsule | f32 diameter, f32 height along local Y | 48 |
 
+The second word (`base` in `skeleton_records`) is stored at volume +0x18 by `CollisionVolume` slot 2
+(0x521243; the constructor 0x522b91 sets 0); among the methods of the seven volume vtables (0xa2f1b4, 0xa2f330, 0xa2f358, 0xa2f380, 0xa2f3a8, 0xa2f3d0, 0xa2f450) only the writer, slot 1
+(0x521236), reads it (read from code). It is 0 in all 16,713 volumes of PC, Xbox 360 and PS3 Part 2 and PC Part 1
+(measured, `parse_model_nodes.model_physics` on every `.model`), so whatever it means, shipped data never uses it.
 `pos` / `quat` are the volume's placement in the node's (bone's) frame. The
 blob is a cooked PhysX mesh and exists only for the mesh types.
 
@@ -575,7 +595,7 @@ PS3:
 |---|---|---|
 | pe+0 | u8 | looping |
 | pe+1 | u8 | 3D |
-| pe+2 | u8 | 1 on every sound (meaning not established) |
+| pe+2 | u8 | compressed: 1 = the bytes-per-second field (pe+15) is stored; 0 = PCM16, the field is absent and the loader uses rate × 2 × channels (PS3 Part 2 reader 0x140f10, `sounddataps3.cpp`; read from code). 1 on every sound (all are MP3) |
 | pe+3 | u32 | rate |
 | pe+7 | u32 | channels |
 | pe+11 | u32 | samples: MP3 frames × 1,152 on a non-looping sound, (frames − 2) × 1,152 on a looping one (55 in Part 2, 90 in Part 1) |
@@ -623,7 +643,11 @@ NUL, u32 offset, u32 size}; offsets are relative to the end of the index; big-en
 0x444f. An entry is `"CGB\0"`, a 0x20-byte header, NV40 vertex or fragment microcode
 (vertex: 16 bytes per instruction, last-instruction flag in bit 0 of the fourth word),
 constants ({u16 size, u16 count, u16 index…, 4 floats}), then a parameter table and names.
-The Xbox 360 archive (md5 b83733fb…) and the PC archive differ and were not opened here.
+Xbox 360 (md5 b83733fb…): the same index (243 entries, the same names, big-endian, index ends
+at 0x4542); every entry is one compiled Xenos shader: u32 magic 0x102A1100 (148 pixel) or
+0x102A1101 (95 vertex), u32 header size, u32 microcode size, and header + microcode = the
+entry size on 243 of 243 (measured; the microcode is not decoded). PC: the same index,
+little-endian, each entry D3D9 SM3 bytecode with a constant table (`ghidra_kapow_out\shaders\sm3dis.py`).
 The toolkit does not read this file; the layout is measured on the PS3 file and is what the
 console joint order in [KAPOW_NAZ_FORMAT.md](KAPOW_NAZ_FORMAT.md) §6b was read through.
 

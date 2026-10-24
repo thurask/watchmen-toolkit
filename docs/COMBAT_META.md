@@ -26,7 +26,7 @@ the area attacks, the sweep and the enemy AI, each cited with its handler in
 | `classes.<Class>.states[*].criteria_rendered` | the state's own criteria, same rendering |
 | `classes.<Class>.states[*].combat` | per-state combat block (below); absent on states without a combat role |
 | `pairs[*].trigger` | what starts the paired move and what it does (below) |
-| `combat.rules` | the fixed rules as data: constants, damage formula with its receiving side, unblockable, defender options, impact and sweep, ragdoll contact damage (the throw), who may attack when, Twilight Lady's reaction, combo rule, finisher prompt, damage-pose conversions, pair rules and the area attacks, the bull rush, the partner AI (`partner_ai`), what special handling BULL_MOVE does, and — when the data has an `UnderbossDef` — `underboss` |
+| `combat.rules` | the fixed rules as data: constants, damage formula with its receiving side, unblockable, defender options, impact and sweep, ragdoll contact damage (the throw), who may attack when, Twilight Lady's reaction, punish and back-flip, the weapon steal of a disarm counter, combo rule, finisher prompt, damage-pose conversions, pair rules and the area attacks, the bull rush, the partner AI (`partner_ai`), what special handling BULL_MOVE does, and — when the data has an `UnderbossDef` — `underboss` |
 | `combat.enums` | enum tables the block uses that `enums` does not carry (TARGET_MODE, combo items, target status mask, AI definition type, buttons, and the partner AI families PARTNER_AI_STATE, PARTNER_MODIFIED_STATE, PLAYER_AI_STATES, REPEAT_DEFENCE, STOP_CRITERIA, TACTICAL_INFO), each with its evidence |
 | `combat.achievements` | the achievement controllers of the data: names, conditions, thresholds, two defects (below) |
 | `combat.combo_databases` | every `CharacterComboDatabase`: base damages and strings |
@@ -245,7 +245,13 @@ the hit they receive is multiplied by a constant 0.0 and carries a 3.0 s stun
 and one of four poses. Above `m_nragdollimpactragdolltrigger` (6000) the
 bystander is ragdolled itself and then takes contact damage under the same
 rule. `visual_def` holds the five `CharacterVisualDef` numbers the handler
-reads; `unread_in_script` names the two it stores without a reader.
+reads and `m_nragdollimpactforcefromcollider` ("Transfer Force Scale"): a body
+knocked over by a thrown ragdoll takes that ragdoll's mean velocity (and the
+impulse velocity) times this factor when its own ragdoll starts
+(`CharacterVisual.StateRagdollDriven` 0x69ed7c). The shipped fragment stores
+1.2, the same as the registered default (0x676a41), which is written when a node
+does not store it; `null` when the extract has no `CharacterVisualDef`. `unread_in_script` names the one number it
+stores without a reader.
 
 What is not established is how much health a throw removes in practice:
 contact forces and contact counts are run-time physics.
@@ -364,6 +370,40 @@ fast attack, a stun attack or a counter, using engine random numbers. The
 four constants, the rule that attacks from behind are not exempt and the
 clamp of `dodges_before_counter` rest on two independent reads; the branch
 order on one.
+
+**Punish** (`rules.twilight_lady_punish`, read from code). When the human
+player completes a combo on her (or fails or lets fade one of more than one
+item), she arms a punish: the attacker becomes the target, due 0.5 s later.
+The attacker's DELAY_OPPONENT event (86) pushes the due time to now + 1.5 s.
+Once due, `Enemy.StateActive` waits until she is free (not in an
+IMMUNE_TO_BREAK_ATTACK state before play position 0.7, not in slave mode,
+prone or the master of a pair, and the target may be attacked by her), then
+attacks fast with override KNOCKDOWN, ONE_FRAME_ACTION, NORMAL_ATTACK, PUNCH and
+ATTACK_MOVE_DIST 1.5; after 2.0 s of waiting she drops it. Arming is skipped
+while armed, and only an attack or the give-up disarms, both of which need a
+target, so a combo that ends before a delayed due time leaves her armed with
+no target for good (inferred from the code).
+
+**Back-flip** (`rules.twilight_lady_back_flip`, read from code). Enemy state 9,
+entered only by a forced state (the four Bordello triggers). With an enemy
+within 4.0 m she first attacks slow with override AREA_DAMAGE (HEAVY_PUNCH,
+ATTACK_MOVE_DIST = that distance); then she picks the PivotNode under
+`TwilightLadySceneSetupFolder` that lies most away from the enemies (points
+within 4.0 m excluded) and flips backwards towards it (FLIP_MOVE every frame,
+moving towards the point while facing away from it) until 2.0 m from it, at
+most 7.0 m of travel and 3.0 s. The shipped forced states last at most 0.2125 s
+(the first evaluation after 0.05 s), so the 3.0 s limit is not reached and what
+the routine started runs on as animation (`docs/re/wp4_ai.md` 3.5). Its
+`StateCounterAttackAndBreak` has no entry.
+
+### Weapon steal (`rules.weapon_steal`)
+
+Event COUNTER_ATTACK_WEAPON_STEAL (32) on the taker (read from code,
+`CharacterRootLogic.command_animation_event_received` 0x6a525e): the taker's
+animation partner drops its weapon, unless it is the Underboss; a taker that
+is armed drops its own; the dropped weapon attaches to the taker's attach bone
+over 0.1 s, except when the victim is Rorschach, whose weapon stays on the
+ground.
 
 ### Underboss (Part 1) (`rules.underboss`)
 
@@ -652,9 +692,8 @@ table is not rebuilt on every run (ANIMATION_META.md, `characters_export.anim_me
 See `combat.not_established`: ragdoll contact force magnitudes and contact
 counts (so the health a thrown body really loses), the AI behaviours behind
 the attack permission rules (the enemy side; the partner's rules are in
-`rules.partner_ai`) and the orchestrator's level presets, Twilight Lady's
-punish and back-flip routines, a native or data writer of the global damage
-factor outside the files scanned (script code has no difficulty input),
+`rules.partner_ai`) and the orchestrator's level presets, a writer of the
+global damage factor (none in script or native code, ENGINE_CONSTANTS.md),
 property defaults (a registered default is parsed into the slot at instance
 creation, 0x47dfed; nine combat defaults absent from every decoded JSON of the
 six sets (1,207 / 1,174 files); a property without a registered default starts

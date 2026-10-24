@@ -48,7 +48,9 @@ language seek table. Any system language not listed gives **English**:
 
 The PC table was checked by emulating the branch code for every id 0..0xFFFF. The meaning of
 0x800 and of the console ids is from the platform SDKs, not from the game's code. On PC an
-override field exists (platform+0x88, 6 = none); nothing was found that writes it. `textmeta`
+override field exists (platform+0x88, 6 = none); only the platform constructor 0x45fb96 writes it (6): none of
+the 39 functions that load the platform object (0xd92a14) stores to +0x88 and no setter exists, so the PC language
+is always the system default locale's (read from code). `textmeta`
 carries all of this as `selection`.
 
 | Asset | Content |
@@ -123,8 +125,12 @@ Read from the lifted scripts `SoundDef` and `SubtitleHUD`; `textmeta` carries th
   `GameStateCtrl.command_get_subtitles` through the by-hash helper 0x82917100, which tests the
   target for null itself, where Part 2 tests inline and sends by dispatch index 0x2f (read from
   code). SoundDef's native base is SoundSlot, so the
-  definition is a valid argument. PC Part 1 is not established: there is no PC Part 1
-  executable.
+  definition is a valid argument. PC Part 1 (`part1_pc\Watchmen\data\Engine\KapowMulti.exe.unpacked.exe`)
+  follows the other Part 1 builds: `SoundDef.Active` 0x7eb39b sends `command_show_subtitle` (hash
+  0xfd4cfd40, at 0x7eb4e6) through the by-hash send 0x4f1592 before its first native sound call
+  (0x441f44 at 0x7eb566); only script-VM helpers run before the request (read from code;
+  `SubtitleHUD` registers `command_set_slot` 0x80abe4, `command_show_subtitle` 0x80acde, `StateMain`
+  0x80955d).
 - 56 of the 1,205 subtitled Part 2 waves are reachable by no reference in the 906 fragments: 54
   are leaves of SoundDefs nothing points at, and 2 are the `SoundCtrl.testSound3` /
   `testSound4` values. `EN2_THGSpotRSH_GMP1_11` has rows in the German and Spanish tables only,
@@ -380,12 +386,11 @@ the Warnings table no row 39.
   constants were confirmed from exe bytes. Whether any shipped row has a colour code before a wrap point
   was not measured; the colour carry-over is read from code only.
 - Danish: the slot exists and holds English. It is reachable only on a console set to Danish
-  (see the selection table); whether anything writes the PC language override is not established.
-  A Direct3D capture cannot answer it (it records no process memory); it needs a write watch on
-  the override field (platform object +0x88) in a debugger on the running game.
+  (see the selection table); on PC the override (platform object +0x88) stays 6 (none), so Danish is
+  unreachable there (read from code: only the constructor 0x45fb96 writes it).
 - Whether the Part 1 rule (the subtitle of the SoundDef that entered `Active`, read from code on
   Xbox 360 Part 1 0x82b21808 and PS3 Part 1 0xb67090) changes an exported `mission_speak` on
-  Part 1 was not measured. PC Part 1: not established (no executable).
+  Part 1 was not measured (the rule itself is read on all three Part 1 builds).
 - Whether the subtitle option hides cutscene subtitles (which movie uses which slot is data,
   above).
 - A subtitle request sent by a run-time name string (none is visible in the lifted scripts).

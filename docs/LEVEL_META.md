@@ -187,7 +187,9 @@ filter shows for the action type (0x861606), a reference as the target's name:
   `sound_done: false` marks held children of other types. Measured: the flag is set on 38
   actions of PC Part 2, all SOUND_PLAY, and on PC Part 1 on 100 SOUND_PLAY and 12 SOUND_STOP
   actions (Streets); the 12 have no child node, so no edge of the 13 PC levels carries the
-  mark. The Part 1 executable was not read.
+  mark. PC Part 1 holds the children on the same flag: `TriggerActionSound.command_fire_action`
+  0x818d87 fires them at once (hash 0xa7574a17) only when `_tchildrenafter` (+0x48) is 0, as Part 2's
+  0x86150a does (read from code).
 - DEACTIVATE_MUSIC acts only with a non-null `m_etarget1` (0x8524bb).
 - ADJUST_SOUND sends `SoundDef.command_adjust_volume` (0x852584).
 - "Play Static" of ACTIVATE_MUSIC_STATE has no effect (0x7d1113).

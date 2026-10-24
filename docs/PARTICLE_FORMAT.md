@@ -205,7 +205,7 @@ not enforced by the setters unless stated.
 | Property | Hash | Type | Default | Offset | UI range / items | Meaning |
 |---|---|---|---|---|---|---|
 | `particleAmount` | `65f64da9` | number | 0.1 | +0x50 | 0..100 "Particles/m2" | particles per m2 of emitter surface: budget = trunc(particleAmount × the summed `area_weight` of the collected triangles), 0x553c41 (model node surface lists, FORMATS_MISC.md "Particle emission surfaces") |
-| `radius` | `29e0c05b` | number | 100.0 | +0x54 | 0..100 "radius" | m; nodes within this radius are queried |
+| `radius` | `29e0c05b` | number | 100.0 | +0x54 | 0..100 "radius" | m; nodes within this radius are queried, and a triangle is kept only when the horizontal (x, z) distance from its world centroid to the emitter is within it (0x54decc / 0x54e23e) |
 | `speed` | `78a2e46d` | number | 0.0 | +0x58 | 0..100 "speed" | m/s |
 | `lifeVariance` | `5667c2dd` | number | 0.0 | +0x5c | 0..100 "Life Variance" | s |
 | `faceCullLimit` | `c9a564f1` | number | 0.0 | +0x60 | -1..1 "Face Cull" | -1..1; a triangle is used when its world normal Y >= this |
@@ -660,17 +660,24 @@ shortest decimal in the tree (0.01); a null string is `""` there and `null` in t
 
 ## 8. Limits and open items
 
-- The untyped Part 1 PC / X360 record layout is read from data only (no Part 1 executable). The
-  older build stores every registered property except `simulationMode`, `renderInstanced`,
-  `numVariations`, which it lacks (it has `localMode`); all other values equal the PS3 Part 1
+- The untyped Part 1 PC / X360 record layout: the PC Part 1 executable
+  (`part1_pc\Watchmen\data\Engine\KapowMulti.exe.unpacked.exe`) registers no `simulationMode`
+  (`ParticleType`, 35 properties against Part 2's 36) and no `renderInstanced` / `numVariations`
+  (`ParticleSystemAsset`, 10 against 12); every other property name of the two classes is the same
+  in both builds, `localMode` included (read from code: the Set / Get registration strings). The
+  files store every registered property; all other values equal the PS3 Part 1
   copy except `alwaysUpdate` in 46 files (measured, 130 files per set). `absent` on those files
   therefore lists exactly these three.
 - The writer (Entity vfunc 7, 0x5016d8) skips a property when it is `script`, has no setter
   (record +0x20 == 0), has flag bit 0 or bit 1 of record +0x38, or is `assetName` on an entity
   whose native class is SceneNode. The properties carrying bit 0 (never written) and bit 1
   (deprecated alias) are listed in `wlib/property_store_flags.json`.
-- Not read: `SurfaceSpawner` triangle walk (0x54decc / 0x54e23e), `ProximityNoise`,
-  `PlaneCollision` / `TerrainCollision` (the last three are in no file of the sets counted).
+- `SurfaceSpawner` triangle walk (read from code): 0x54fc6b picks 0x54decc when `materialId` ≥ 0 and
+  0x54e23e (no material test) when it is negative; per triangle: material id equal, world normal y ≥ `faceCullLimit`,
+  horizontal centroid distance (centroid factor 1/3, 0xa37828) ≤ `radius`; a kept triangle is written as
+  three world vertices, the world normal and the weight to a shared buffer of 1,500 records (0x44 bytes each),
+  and the spawner counts it and adds its weight.
+- Not read: `ProximityNoise`, `PlaneCollision` / `TerrainCollision` (in no file of the sets counted).
   `EventSpawner`, `UVArrayAffector` and the `RotateAffector` body are read.
 - Use of the less common classes, measured on pc_p2, pc_p1, x360_p2, ps3_p1:
 
