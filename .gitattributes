@@ -1,1 +1,56 @@
-* text=auto
+# Line endings. Every tracked text file is stored with LF and checked out with
+# LF on every OS, whatever core.autocrlf says, so the bytes the tests and the
+# shipped tables see are the same on Windows and Linux.
+* text=auto eol=lf
+
+# Shell scripts must be LF (a CRLF script fails with "$'\r': command not found").
+*.sh text eol=lf
+# cmd.exe needs CRLF: an LF batch file can misparse labels and GOTO targets.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary: shipped pickles, NumPy arrays, images, models, audio, archives, and
+# the game's own formats. Never converted, never diffed as text.
+*.pkl binary
+*.npz binary
+*.npy binary
+*.png binary
+*.jpg binary
+*.dds binary
+*.tga binary
+*.bmp binary
+*.ico binary
+*.glb binary
+*.bin binary
+*.wav binary
+*.ogg binary
+*.mp3 binary
+*.xma binary
+*.zip binary
+*.gz binary
+*.7z binary
+*.gzf binary
+*.exe binary
+*.dll binary
+*.pdb binary
+*.blend binary
+*.naz binary
+*.block binary
+*.block_h_z binary
+*.block_s_z binary
+*.stream binary
+
+# Diff hunk headers name the enclosing function or heading.
+*.py diff=python
+*.md diff=markdown
+*.java diff=java
+*.c diff=cpp
+
+# Machine-written tables (`watchmen gendata`, the Ghidra scripts, the research
+# dumps): GitHub collapses them in diffs and leaves them out of the language
+# statistics. Local `git diff` still shows them.
+wlib/reg_dump.json linguist-generated
+wlib/registered_names.json linguist-generated
+wlib/command_signatures.json linguist-generated
+docs/re/*.json linguist-generated
+tools/ghidra/*.tsv linguist-generated
