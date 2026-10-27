@@ -79,7 +79,11 @@ def test_the_module_lookups_are_find_ci(tmp_path):
         assert pm._lookup(ex, asset) == wutil.find_ci(ex, asset)
         assert fx_meta.FxDB.asset_path(_F(), asset) == wutil.find_ci(ex, asset)
     got = ce._asset_file(str(tmp_path), ["art", "EFFECTS", "blood02.bmp"])
-    assert got == os.path.join(ex, "Art", "Effects", "Blood02.bmp")
+    want = os.path.join(ex, "Art", "Effects", "Blood02.bmp")
+    # on a case-insensitive file system the path as asked exists and is returned as is
+    assert os.path.samefile(got, want)
+    if _case_sensitive(tmp_path):
+        assert got == want
 
 
 class _Layers(dict):

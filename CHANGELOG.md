@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **`test_shared_lookups` passes on a case-insensitive file system.** On Windows the path as
+  asked exists, so `characters_export._asset_file` returns it unchanged; the test now checks
+  that it names the same file, and the exact spelling only where letter case matters. The
+  Windows CI jobs failed on this assertion alone (reproduced on a case-insensitive mount).
+  (2026-10-26)
 - **Xbox 360 textures: normal maps in the packed tail keep X first; `ArrowMore` decodes.**
   `_x360_base_level` swapped the two BC4 halves of non-square ATI2 bases in the packed tail.
   X360 format 10 is X-first everywhere and is decoded so, so the swap exchanged X and Y:
