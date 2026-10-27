@@ -1311,7 +1311,13 @@ show them:
   `BS2_COM_ATT_cattleprod_counter_NTO_A` and `_RSH_A` have other key
   counts and end times per platform (`NTO_A`: PC 131 keys to 4.15 s, PS3
   139 to 4.26 s, Xbox 360 139 to 4.19 s; measured on `Dominatrix_1`);
-  their body tracks agree. Why is not established.
+  their body tracks agree. Both clips open the mouth with a voice line of
+  one fixed wave, and the talk ends when that wave does (`talk_s`, see
+  `anim_meta.json`). The console waves are longer by whole codec frames
+  (see "Console sound decoding" above): `talk_s` is 2.4497 / 2.464 / 2.496 s
+  for `NTO_A` and 2.8096 / 2.816 / 2.856 s for `RSH_A` on PC / Xbox 360 /
+  PS3 (measured), so the face track ends at another time on each
+  platform, as the game's face would.
 - **The terrain GLB** has no textures (each node names its layer's texture
   path) and holds the first draw pass only; decal rectangles and the blend
   pass are in the JSON. The detail mesh geometry is located (`stream`) but
@@ -1656,11 +1662,19 @@ the default, and `pinned` take the spring and damping from the game files.
 - The test suite without `test_s8_review_fixes.py` ran on Windows-native
   Python (Python 3.13.13, numpy 2.4.6) in both frames (measured); the
   full test suite has not run on Windows.
-- What has not run on Windows: the commands the export batch
-  does not call (`all`, `char`, `bake`, `charlibs`, `text`, `ragdoll`,
-  `savemeta`, `scriptdb`, `fragment`, `hash`, `gendata`, and stand-alone
-  `animmeta`, `soundmeta`, `navmeta`); `--frame mirrored` and every other
-  non-default switch.
+- The commands the export batch does not call ran once each on Windows
+  against the PC Part 2 export (Python 3.13, measured), all with exit code 0
+  and no WARNING line: `hash`, `fragment`, `savemeta`, `scriptdb`,
+  `ragdoll`, `text`, `animmeta`, `soundmeta`, `navmeta`, `bake`, `char`,
+  `charlibs`, `gendata` (respell, propnames, keys-export / keys-import,
+  check) and `all`. Output identical to the export's: `fragment`, `text`
+  (226 files), `navmeta` (10), `animmeta` / `soundmeta` (equal JSON), and
+  `all` (24,596 files: extracted, files, textures, models, audio, text,
+  nav, skeletons, binds, characters); `gendata respell` gives the shipped
+  dictionary byte for byte and the fragment keys survive export, import,
+  export. `--frame mirrored` ran on `ragdoll`, `animmeta`, `navmeta` and
+  `char` (output written, not compared). Every other non-default switch has
+  not run on Windows.
 - Platform differences: identical across the three platforms of a part are
   the asset names, the skeleton JSON, the Part 2 navigation JSON,
   `fx_meta.json` and `grade_meta.json`, the counts, names and joint counts

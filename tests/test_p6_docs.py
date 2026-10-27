@@ -9,7 +9,7 @@ overtook, where they live in code.
    state "is not read"; it is (m_edefaultanimstate, command_get_valid_state).
 3. The 28 command handlers that the function dump lacks are all in reg_dump.json
    (the table comes from the registration calls, not from the function list).
-4. One heading per release in the CHANGELOG, newest first (1.6.0, 1.5.0, 1.4.0, 1.3.0 ...).
+4. One heading per release in the CHANGELOG, newest first (1.6.1, 1.6.0, 1.5.0, 1.4.0 ...).
 """
 
 import json
@@ -123,9 +123,10 @@ def test_changelog_has_one_entry_per_release_and_the_docs_do_not_date_it_backwar
     heads = re.findall(r"^## .*$", log, re.M)
     if heads[0] == "## Unreleased":  # changes collected for the next release
         heads = heads[1:]
-    assert heads[0] == "## 1.6.0 — 2026-10-24" and heads[1] == "## 1.5.0 — 2026-10-10"
-    assert heads[2].startswith("## 1.4.0") and heads[3].startswith("## 1.3.0")
-    for v in ("1.6.0", "1.5.0", "1.4.0"):
+    assert heads[0] == "## 1.6.1 — 2026-10-27" and heads[1] == "## 1.6.0 — 2026-10-24"
+    assert heads[2] == "## 1.5.0 — 2026-10-10"
+    assert heads[3].startswith("## 1.4.0") and heads[4].startswith("## 1.3.0")
+    for v in ("1.6.1", "1.6.0", "1.5.0", "1.4.0"):
         assert sum(h.startswith("## %s" % v) for h in heads) == 1
     assert not any("unreleased" in h.lower() for h in heads)  # one pending section, at the top
     # "until 1.4.0" read as if 1.4.0 were already behind us

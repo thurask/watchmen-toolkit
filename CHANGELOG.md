@@ -1,7 +1,22 @@
 # Changelog
 
-## Unreleased
+## 1.6.1 — 2026-10-27
 
+**Xbox 360 textures decode as on PC where the data allows it.** `ArrowMore` (16×24 DXT1, both
+parts) is read as the tiled surface of its own it is stored as and comes out byte-identical to
+PC; the `SawmillRope` and `HarleyMotorcycleSpokes01` normal maps no longer have X and Y
+exchanged. On the Xbox 360 sets those three layers, and the model GLBs that carry them, are the
+only output change of an export; the Underboss phase ends change only for values the game does
+not ship. The rest is one asset lookup without regard to letter case, child processes that read
+their input from `DEVNULL` (a run without a console no longer loses tests to WinError 6), a fix
+of a test that assumed a case-sensitive file system, and documentation: platform differences of
+face bones and face timing (the timing follows the console voice waves, longer by whole codec
+frames), and the commands that have now run on Windows.
+
+- **README: the commands the export batch does not call have run on Windows** (`all`, `char`,
+  `bake`, `charlibs`, `text`, `ragdoll`, `savemeta`, `scriptdb`, `fragment`, `hash`, `gendata`,
+  stand-alone `animmeta` / `soundmeta` / `navmeta`, `--frame mirrored` on four commands), with
+  output identical to the PC Part 2 export where compared. Documentation only. (2026-10-27)
 - **`test_shared_lookups` passes on a case-insensitive file system.** On Windows the path as
   asked exists, so `characters_export._asset_file` returns it unchanged; the test now checks
   that it names the same file, and the exact spelling only where letter case matters. The
