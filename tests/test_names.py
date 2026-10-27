@@ -71,6 +71,7 @@ def test_cli_hash_command_uses_the_engine_fold():
         capture_output=True,
         text=True,
         cwd=str(ROOT),
+        stdin=subprocess.DEVNULL,
     )
     assert r.returncode == 0 and r.stdout.strip() == "ee2a40a0"
 

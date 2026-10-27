@@ -740,9 +740,12 @@ against the bind's 'Bip02 RUpArmTwist...'; large models 'Bip01 Attach RHand' aga
 RHand'.
 
 Toolkit: `bake` matches track names exactly and places the twist bones with the twist pass;
-the character export and `watchmen bake` use exact matching in both parts. The
-prefix-insensitive lookup (`'BipNN '`-prefix-insensitive, exact match wins) is kept as
-`track_names="prefix"` for the head-model bakes, whose bind is the head model's own. Mesh palette matching (`char_lib.load_parts`) is
+the character export and `watchmen bake` use exact matching in both parts (measured on the
+Part 1 exports against the prefix lookup: `Attach RHand` on every skeleton and the medium
+skeleton's `Bip02 L/RUpArmTwist(1)` lose the track it gave them, the twist bones then placed by
+the twist pass). The prefix-insensitive lookup (`'BipNN '`-prefix-insensitive, exact match wins)
+is kept as `track_names="prefix"` for the head-model bakes, whose bind is the head model's own.
+Mesh palette matching (`char_lib.load_parts`) is
 prefix-insensitive with exact match winning; a dropped mid-list palette name shifts every
 later skin index and is a red flag — only leading mesh-object names (before 'Bip') and a
 trailing 'Interact' may drop. On medium with prefix matching the twist locals span 71.45deg /
@@ -3879,6 +3882,15 @@ book `/pivotbooks/default.pb` (0xa2f164).
     / 2,187) and 188 / 187 / 187 (Part 1, of 3,525) name their texture in another letter case
     than its folder has (raw model headers of the six sources); 173 texture paths have such a
     reference in a `.model` or `.fragment` of at least one set.
+  - Texture-sheet records (`textureSheetsDescription`, `characters_export.sheet_records`) are
+    read through `characters_export._asset_file`: the exact path, else the file whose parts match
+    ignoring letter case, else nothing. Measured on the 1.6.0 PC export: 129 of the 671 distinct
+    sheet paths of Part 2 (750 of 5,422 records) and 197 of 900 of Part 1 (1,495 of 7,927) miss
+    under exact case; 88 / 166 of them exist in another case, 41 / 31 name a texture the set does
+    not ship (21 of the Part 2 ones are Part 1 textures). On a case-sensitive copy of each
+    `extracted/` tree (same names, empty files) the lookup returns the case twin for all 88 / 166
+    and nothing for the 41 / 31; it also finds the 50 model-header texture paths of Part 2 that
+    miss exactly (models resolve those through the lower-case `TextureIndex` keys anyway).
   - The tables written from an export spell a string that names an exported file as the file
     is written (`ExportIndex`, `respell_export`: level JSON, particle index, `fx_meta.json`,
     `grade_meta.json`, `anim_meta.json`, `sound_meta.json`), with the stored string under

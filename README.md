@@ -1283,13 +1283,14 @@ show them:
   0.045 s; the MP3 encoder delay and padding are inside the count),
   measured on all 2,921 and 3,953 sounds. No shipped console sound has a
   cue point, so the console cue reader is untested on data.
-- **Xbox 360 textures that still differ from PC** (seven layers per part
-  by the metric of the table): `ArrowMore`; the alpha
+- **Xbox 360 textures that still differ from PC:** the alpha
   byte of four (Part 2) or five (Part 1) A8R8G8B8 effect maps, 0 where PC
-  has 255; the `SawmillRope` and `HarleyMotorcycleSpokes01` normal maps
-  (their place in the packed mip tail is not known). `streamingwater`
-  specSize in Part 1 is below the line by that metric (6.28 over R, G, B,
-  A) and above it over the colour channels alone (8.37). The slot-7
+  has 255; the `SawmillRope` and `HarleyMotorcycleSpokes01` normal maps,
+  which the console stores re-encoded (7 and 6 mips against PC's 3) and
+  which differ by a mean of 4.5 and 0.7 over X and Y. `ArrowMore` (16×24)
+  is stored as a tiled surface of its own 28 blocks into its tile and
+  decodes byte-identical. `streamingwater` specSize in Part 1 differs by a
+  mean of 6.28 over R, G, B, A and 8.37 over the colour channels alone. The slot-7
   specular-size map
   is DXT1 on this console and is written as its red channel (measured
   against the PC map, not read from the shader). PS3 stores DXT5 where PC
@@ -1298,6 +1299,19 @@ show them:
   PC (steps of up to 0.5 m on the Part 2 sky domes, 1.0 m in Part 1). The
   console vertex layouts of models and terrain are matched against the PC
   values, not read from console code.
+- **Console face bones:** three Part 2 head models place one face bone
+  differently on the consoles (read from the `.model` files; PS3 and
+  Xbox 360 agree). `FemaleHead_White1` and `FemaleHead_White1_Gimp` store
+  `LowerLip` at local z −0.402229 against −0.401741 on PC (4.9e-4), and
+  `TwilightLady_Head` moves `Leye` 1.2e-4 along x. The face clips of a
+  character with such a head carry the offset: on `Dominatrix_1`
+  `f_LowerLip` translation differs from PC by up to 4.1e-4 in 199 of its
+  202 clips, and no other face channel differs (measured).
+- **Console face timing:** the face tracks of
+  `BS2_COM_ATT_cattleprod_counter_NTO_A` and `_RSH_A` have other key
+  counts and end times per platform (`NTO_A`: PC 131 keys to 4.15 s, PS3
+  139 to 4.26 s, Xbox 360 139 to 4.19 s; measured on `Dominatrix_1`);
+  their body tracks agree. Why is not established.
 - **The terrain GLB** has no textures (each node names its layer's texture
   path) and holds the first draw pass only; decal rectangles and the blend
   pass are in the JSON. The detail mesh geometry is located (`stream`) but
@@ -1424,7 +1438,9 @@ What the test files pin:
   JSON floats in both modes (NaN and infinities included), MS-ADPCM against
   ffmpeg's output (a 4.4 KB fixture in `tests/data/`, no ffmpeg needed), the
   Vorbis setup reader and the Ogg paging, and the faster header scans
-  against frozen copies of their earlier code.
+  against frozen copies of their earlier code. `test_shared_lookups`: the asset
+  lookup without regard to letter case that four modules share, and the one
+  material builder of the body, attachment and face primitives.
 - `test_p8_canonical_names`: the naming (`--names`). The ten `test_s2_*`
   files: the restored eyelash UVs, the movie strings, a light layer's
   opacity in the sky pass, the platform-independent jiggle bake and tables,

@@ -636,6 +636,7 @@ def test_cli_navmeta(tmp_path):
         [sys.executable, os.path.join(ROOT, "watchmen.py"), "navmeta", str(root), str(out)],
         capture_output=True,
         text=True,
+        stdin=subprocess.DEVNULL,
     )
     assert r.returncode == 0, r.stderr
     assert "wrote 2 level(s)" in r.stdout and "0 undecoded bytes" in r.stdout
@@ -660,6 +661,7 @@ def test_cli_navmeta(tmp_path):
         [sys.executable, os.path.join(ROOT, "watchmen.py"), "navmeta", str(root), str(out)],
         capture_output=True,
         check=True,
+        stdin=subprocess.DEVNULL,
     )
     assert first == ((out / "Demo.nav.json").read_bytes(), (out / "Demo.nav.glb").read_bytes())
 
@@ -667,19 +669,28 @@ def test_cli_navmeta(tmp_path):
 def test_cli_navmeta_errors(tmp_path):
     exe = [sys.executable, os.path.join(ROOT, "watchmen.py"), "navmeta"]
     r = subprocess.run(
-        exe + [str(tmp_path / "nope"), str(tmp_path / "o")], capture_output=True, text=True
+        exe + [str(tmp_path / "nope"), str(tmp_path / "o")],
+        capture_output=True,
+        text=True,
+        stdin=subprocess.DEVNULL,
     )
     assert r.returncode == 2 and "does not exist" in r.stderr
     (tmp_path / "empty").mkdir()
     r = subprocess.run(
-        exe + [str(tmp_path / "empty"), str(tmp_path / "o")], capture_output=True, text=True
+        exe + [str(tmp_path / "empty"), str(tmp_path / "o")],
+        capture_output=True,
+        text=True,
+        stdin=subprocess.DEVNULL,
     )
     assert r.returncode == 1 and "no .hpd" in r.stderr
     bad = tmp_path / "bad" / "x" / "gameplay"
     bad.mkdir(parents=True)
     (bad / "x.hpd").write_bytes(demo_hpd()[:200])
     r = subprocess.run(
-        exe + [str(tmp_path / "bad"), str(tmp_path / "o")], capture_output=True, text=True
+        exe + [str(tmp_path / "bad"), str(tmp_path / "o")],
+        capture_output=True,
+        text=True,
+        stdin=subprocess.DEVNULL,
     )
     assert r.returncode == 1 and "ERROR" in r.stdout and "1 failed" in r.stdout
 

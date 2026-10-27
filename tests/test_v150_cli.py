@@ -358,6 +358,7 @@ def test_version_command():
         capture_output=True,
         text=True,
         timeout=60,
+        stdin=subprocess.DEVNULL,
     )
     assert (
         r.returncode == 0 and r.stdout.strip() == "watchmen-kapow-toolkit %s" % _pyproject_version()

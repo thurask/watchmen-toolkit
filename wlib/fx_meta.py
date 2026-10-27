@@ -58,6 +58,7 @@ if _HERE not in sys.path:
 
 import anim_state_machine as asm  # noqa: E402
 import engine_enums as ee  # noqa: E402
+from wutil import find_ci  # noqa: E402
 
 FORMAT = "watchmen-fx-meta/1"
 
@@ -1049,23 +1050,9 @@ class FxDB:
         return sorted(out)
 
     def asset_path(self, asset):
-        """File of an asset path ('/Art/x.particle') under extracted/, any case."""
-        if not isinstance(asset, str) or not asset:
-            return None
-        rel = asset.replace("\\", "/").lstrip("/")
-        p = os.path.join(self.db.root, *rel.split("/"))
-        if os.path.exists(p):
-            return p
-        cur = self.db.root
-        for part in rel.split("/"):
-            try:
-                names = {n.lower(): n for n in os.listdir(cur)}
-            except OSError:
-                return None
-            if part.lower() not in names:
-                return None
-            cur = os.path.join(cur, names[part.lower()])
-        return cur
+        """File of an asset path ('/Art/x.particle') under extracted/, any case
+        (wutil.find_ci)."""
+        return find_ci(self.db.root, asset)
 
     def particle(self, asset):
         """Key of a particle asset in the `particles` table (its facts are

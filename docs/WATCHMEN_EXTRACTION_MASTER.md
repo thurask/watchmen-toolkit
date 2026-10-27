@@ -674,15 +674,20 @@ X360 & PS3: nightowlbelt 20/0.58, dominatrix 43/1.17).
   (256×16 = 64×4 blk) and `HoneyPot_lightChain_01` (128×4 = 32×1 blk); of the
   45 aspect-ratio thin textures the other 43 decode at row 0. 16-byte ATI2
   tail bases are shape-dependent: full-tile-wide thin rows (we≥32, he≤4) sit at
-  y=16 ELEMENTS unswapped (HoneyPot_lightChain exact); other non-square shapes
-  use the standard 16-texel spot but need the two 8-byte BC4 half-blocks
-  SWAPPED per block (SawMillRope 4.5, Harley spokes 0.7 — noise-level); square
-  4×4-block (NeonSign, Huey window: exact) and single-block (26,0) layers are
-  unswapped. DXT5 (also 16 B) needs NO swap (valuearrows exact). Empirical,
-  validated on all 8 known instances across P1+P2. After this: P1 X360 small +
-  32bpp = 41 identical + 19 noise + 1 residual (ArrowMore); OUT_x360_p2's 36
-  affected dirs + the standalone `gray.texture` = 34 pixel-identical + 7
-  recompression-noise vs PC, 1 residual (ArrowMore).
+  y=16 ELEMENTS (HoneyPot_lightChain exact); every other shape uses the
+  standard 16-texel spot. The X360 normal format (10) keeps the X block first
+  in every place, so no half-block swap is applied: `SawmillRope` (64×16) and
+  `HarleyMotorcycleSpokes01` (16×32) then differ from PC by a mean of 4.5 and
+  0.7 over X and Y, because the X360 copies are re-encoded (7 and 6 mips
+  against PC's 3; no block is byte-equal). Square 4×4-block (NeonSign, Huey
+  window) and single-block (26,0) layers are exact. The one packed DXT1 base
+  with a side that is not a power of two, `ArrowMore` (16×24, both parts), is
+  not at a place in the tile: its 4×6 blocks are a tiled surface of their own
+  starting at element 28, byte-identical to PC after the 16-bit swap
+  (measured; no other such texture ships). After this: P1 X360 small +
+  32bpp = 42 identical + 19 noise; OUT_x360_p2's 36 affected dirs + the
+  standalone `gray.texture` = 35 pixel-identical + 7 recompression-noise vs
+  PC.
 - **Uncompressed 32bpp** (`_texel32_to_pc()`): PS3/RSX stores big-endian
   `A,R,G,B`; X360 stores PLAIN BE `A,R,G,B` (NOT GPU 8-in-16 swapped, so an
   unconditional `_bswap16` scrambles it to `R,A,B,G`). Both are reordered to
@@ -707,13 +712,10 @@ X360 & PS3: nightowlbelt 20/0.58, dominatrix 43/1.17).
   8×32 / 16×24 / solid) exist on ALL platforms, and X360's layer padding
   inflates every stream to ≥ 8192 B. Texture dir sets are byte-for-byte EQUAL
   across the three platforms (1281 = 1281 = 1281).
-- **Residuals (X360, accepted):** `ArrowMore` (16×24 DXT1; both parts, same
-  bytes): PC==PS3; the X360 8192-B stream tile decodes to a white bar +
-  garbage; no crop / linear pitch (4-64) / transposition / rot90/270 of the
-  bswapped or raw tile matches PC (best mean 57) — possibly
-  partially-initialized padding or an X360-specific UI variant. `SawMillRope`
-  1_normal 64×16 ATI2 (best mean 33 @ (2,4) without the half-swap; 4.5 with
-  it). `lensflare_donut.bmp` = genuine per-build recompression diff. X360 DXT1
+- **Residuals (X360, accepted):** the re-encoded `SawmillRope` and
+  `HarleyMotorcycleSpokes01` normal maps (above). The rest of `ArrowMore`'s
+  8192-byte tile holds other data (an icon and noise), not padding.
+  `lensflare_donut.bmp` = genuine per-build recompression diff. X360 DXT1
   diffs at mean 1-2 (e.g. brick specmaps) are recompression noise in the X360
   build. The slot-7 specSize map that X360 re-encodes as DXT1 (48 PC/PS3 L8 vs
   31+ X360 DXT1 in Part 1) is written from its red channel.

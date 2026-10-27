@@ -2402,7 +2402,7 @@ def _xg_untile(data, we, he, bpe, alw=None, yoff=0):
 
 
 def _x360_packed_offset(kind, unit, w, h, we, he):
-    """Element (x,y) offset of the BASE level inside an X360 packed-mip tile.
+    """Where the BASE level of an X360 layer sits in its tile: (xo, yo, start).
     Levels whose pow2-padded TEXEL dims are both >= 32 are stored normally at
     (0,0). Smaller bases live in the shared packed tail; empirically (P1
     console audit, brute-forced vs PC ground truth on all 55
@@ -2411,32 +2411,31 @@ def _x360_packed_offset(kind, unit, w, h, we, he):
     short axis — x for taller-or-square, y for wider — i.e. 16//blk elements.
     4x4-texel single-block layers sit at special spots: element (1,0) for
     8-byte blocks (DXT1), (26,0) for 16-byte blocks (ATI2/DXT5).
-    A wide blk layer (we>=32 & he<=4) comes out at y 4."""
+    A wide blk layer (we>=32 & he<=4) comes out at y 4.
+
+    `start` is None, or the element at which a base stored as its own tiled
+    surface (not at a place in the tile) begins. That is the case for the one
+    packed DXT1 base with a side that is not a power of two (ArrowMore 16x24,
+    both parts): its 24 blocks are byte-identical to PC's (after the 16-bit
+    swap) as a 4x6-block tiled surface starting at element 28, while at
+    (4,0) of the tile only half of its columns lie (measured; no other
+    shipped texture to generalise from)."""
     pw = 1 << max(0, (max(w, 1) - 1).bit_length())
     ph = 1 << max(0, (max(h, 1) - 1).bit_length())
     if min(pw, ph) >= 32:
-        return 0, 0, False
+        return 0, 0, None
     blk = 4 if kind == "blk" else 1
     if kind == "blk" and we <= 1 and he <= 1:
-        return (1 if unit == 8 else 26), 0, False
-    if unit == 16 and kind == "blk":
-        # ATI2 128-bit blocks pack differently (empirical, exact/noise-level vs
-        # PC on all 8 known instances across P1+P2): full-tile-wide thin rows
-        # sit at y=16 ELEMENTS; other non-square shapes additionally need the
-        # two 8-byte BC4 half-blocks swapped. Square (4x4-block) and single-
-        # block layers use the standard spots unswapped. DXT5 (also 16B)
-        # follows the standard rule (verified exact on 4x8) — the swap flag is
-        # consumed only for ATI2 by the caller.
-        if we >= 32 and he <= 4:
-            return 0, 16, False
-        if pw > ph:
-            return 0, 16 // blk, True
-        if he > we:
-            return 16 // blk, 0, True
-        return 16 // blk, 0, False
+        return (1 if unit == 8 else 26), 0, None
+    if kind == "blk" and unit == 8 and (w, h) == (16, 24):
+        return 0, 0, 28
+    if unit == 16 and kind == "blk" and we >= 32 and he <= 4:
+        # full-tile-wide thin rows of 128-bit blocks sit at y=16 ELEMENTS
+        # (HoneyPot_lightChain's ATI2 normal: exact vs PC)
+        return 0, 16, None
     if pw > ph:
-        return 0, 16 // blk, False
-    return 16 // blk, 0, False
+        return 0, 16 // blk, None
+    return 16 // blk, 0, None
 
 
 def _thin_mip_yoff(kind, we, he):
@@ -2628,18 +2627,17 @@ def _x360_base_level(raw, en, w, h):
     # blocks and zero-fill the tail of the untiled layer.
     need = ((we + 31) & ~31) * ((he + 31) & ~31) * unit
     buf = _bswap16(raw[:need])
-    xo, yo, hswap = _x360_packed_offset(kind, unit, w, h, we, he)
-    if (xo or yo) and (max(we + xo, 32) * max(he + yo, 32) * unit) <= len(buf):
+    xo, yo, start = _x360_packed_offset(kind, unit, w, h, we, he)
+    if start is not None:
+        lin = _xg_untile(buf[start * unit :], we, he, unit, alw=32)
+    elif (xo or yo) and (max(we + xo, 32) * max(he + yo, 32) * unit) <= len(buf):
         import numpy as _np  # packed-tail base: untile the
 
         tw = max(we + xo, 32)
         th = max(he + yo, 32)  # full tile, crop at (xo,yo)
         full = _xg_untile(buf, tw, th, unit, alw=tw)
         t = _np.frombuffer(full, _np.uint8).reshape(th, tw, unit)
-        sub = t[yo : yo + he, xo : xo + we].reshape(-1, unit)
-        if hswap and TEX_FMT[en][0] == "ATI2":  # BC4 half-block swap (see rule)
-            sub = _np.concatenate([sub[:, 8:], sub[:, :8]], axis=1)
-        lin = sub.tobytes()
+        lin = t[yo : yo + he, xo : xo + we].reshape(-1, unit).tobytes()
     else:
         lin = _xg_untile(buf, we, he, unit, alw=we, yoff=_thin_mip_yoff(kind, we, he))
     if kind == "lin" and unit == 4:  # 32bpp: undo bswap16-scramble -> PC BGRA
@@ -7171,6 +7169,7 @@ def _emit_audio(container, ext, name, out_dir, vgmstream_cli, log, tag, keep_con
                 [str(vgmstream_cli), "-o", str(wav), tf.name],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
             )
             if pr.returncode == 0 and wav.exists():
                 kept = " +%s" % _keep().name if keep_container else ""

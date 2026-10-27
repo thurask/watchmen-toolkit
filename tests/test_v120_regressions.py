@@ -361,7 +361,9 @@ def _checkout_without_key_table(tmp_path):
 
 def _run(args, cwd, code=None):
     cmd = [sys.executable] + (["-c", code] if code else args)
-    return subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True, timeout=120)
+    return subprocess.run(
+        cmd, cwd=str(cwd), capture_output=True, text=True, timeout=120, stdin=subprocess.DEVNULL
+    )
 
 
 def test_missing_key_table_raises_import_error_not_system_exit(tmp_path):

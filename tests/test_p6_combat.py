@@ -127,9 +127,9 @@ def test_underboss_phases_of_the_shipped_fractions():
     six = cm.underboss_phases(0.8, 0.7, 0.5, 6)
     assert len(six["phases"]) == 7 and six["phase4_reaches_zero"] is False
     assert six["phases"][-1]["end"] == pytest.approx(0.5 - 4 * 0.5 / 6, abs=1e-6)
-    # two steps: the floor is 0 from stage 2 on
+    # two steps: the bound the engine sends goes below 0 from stage 3 on (not floored)
     two = cm.underboss_phases(0.8, 0.7, 0.5, 2)
-    assert [p["end"] for p in two["phases"][3:]] == [0.25, 0.0, 0.0, 0.0]
+    assert [p["end"] for p in two["phases"][3:]] == [0.25, 0.0, -0.25, -0.5]
     assert cm.underboss_phases(0.8, None, 0.5, 4) is None
 
 

@@ -1,5 +1,47 @@
 # Changelog
 
+## Unreleased
+
+- **Xbox 360 textures: normal maps in the packed tail keep X first; `ArrowMore` decodes.**
+  `_x360_base_level` swapped the two BC4 halves of non-square ATI2 bases in the packed tail.
+  X360 format 10 is X-first everywhere and is decoded so, so the swap exchanged X and Y:
+  the `SawmillRope` and `HarleyMotorcycleSpokes01` normal maps differed from PC by a mean of
+  74 and 57 over R, G, B and now by 4.5 and 0.7 (the console re-encodes them; no block is
+  byte-equal). `ArrowMore` (16×24 DXT1, both parts) is stored as a 4×6-block tiled surface
+  of its own starting at element 28 of its tile; it now decodes byte-identical to PC (was a
+  mean of 140). Measured on the shipped files; the rule is gated to that one size.
+  (2026-10-26)
+- **README: console face bones and face timing** (platform differences). The `f_LowerLip` difference
+  between the PC and console `Dominatrix_1` clips comes from the head model: `FemaleHead_White1`
+  (and `_Gimp`) store `LowerLip` 4.9e-4 further along z on PS3 and Xbox 360; `TwilightLady_Head`
+  moves `Leye` 1.2e-4. The cattle-prod counter clips' face tracks differ in key count and length
+  per platform. Documentation only. (2026-10-26)
+- **Child processes read their input from `DEVNULL`.** The vgmstream call of `extract` and every
+  CLI test that starts `watchmen.py` pass `stdin=subprocess.DEVNULL`. A run started without a
+  console (a scheduler, another program) has an invalid stdin handle, and a child that inherits
+  it fails in `DuplicateHandle` with WinError 6: the 1.6.0 export's own suite step lost 35 tests
+  that way. A test now scans the toolkit and its tests for a `subprocess` call without `stdin`.
+  (2026-10-25)
+- **One asset lookup without regard to letter case** (`wutil.find_ci`). The lookups of
+  `anim_state_machine._find_ci`, `particle_meta._lookup` and `FxDB.asset_path` (and through
+  the first `characters_export._asset_file`) were three copies that differed when a folder
+  holds two names equal but for case: the name as written now wins everywhere, else the
+  first sorted twin. Empty, `.` and `..` parts are dropped. No output changes: on
+  case-sensitive copies of the PC Part 1 and Part 2 `extracted/` trees the old and new
+  lookups return the same path for 11,482 asset paths (every texture-sheet record and
+  model-header texture path, case-mangled copies and 3,500 file paths), measured. (2026-10-25)
+- **`write_glb` builds a material in one place** (`_mkmat`). The body, attachment and face
+  primitives each carried a copy of the textured / grey material block; a GLB with
+  textured body, attachment and face materials is byte-identical before and after
+  (measured), as are the 387 GLBs the suite writes. (2026-10-25)
+- **Underboss phase 4 ends are the bounds the engine sends.** `underboss_phases` floored
+  each stage's end at 0; `UnderbossPhase1.StateActive` (0x8927b0) sends f2 − stage · step
+  as is (read from code). The shipped values (0.5, four steps) end at 0 either way, so
+  the three Part 1 exports do not change (measured); with fewer steps the last ends are
+  negative. (2026-10-25)
+- **docs/re/formats.md: the MeshBuffer box is two corners.** It called the header's two vec3 a
+  centre and half-extent; the reader and KAPOW_NAZ_FORMAT.md read minimum then maximum. (2026-10-25)
+
 ## 1.6.0 — 2026-10-24
 
 **Part 1 character bakes match animation tracks by exact name**, as the game does in both
@@ -10,6 +52,11 @@ gains Twilight Lady's punish and back-flip and the weapon steal of a disarm coun
 `builtins.json` carries the PC Part 1 registration order. The entries below also list the
 smaller additions and text changes.
 
+- **Packaging and CI**: `pyproject.toml` declares the licence as the SPDX string `MIT` with
+  `license-files` (setuptools >= 77; the table form is deprecated). A GitHub Actions workflow
+  (`.github/workflows/ci.yml`) runs ruff, the suite on Ubuntu and Windows with Python 3.13 / 3.14
+  (latest dependencies, and 3.13 at the floors), the glTF validator and a build-and-install check
+  on every push and pull request; Dependabot proposes action updates monthly. (2026-10-12)
 - **`combat` meta, `rules.ragdoll_damage.visual_def`**: `m_nragdollimpactforcefromcollider`
   is no longer listed in `unread_in_script`. `CharacterVisual.StateRagdollDriven` 0x69ed7c
   multiplies the velocity and impulse a body knocked over by a thrown ragdoll takes from it by

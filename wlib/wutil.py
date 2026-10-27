@@ -3,7 +3,8 @@
 One copy of what many modules need: reading a file's bytes,
 loading the toolkit's ``.npz`` files without pickle, loading the shipped
 ``.pkl`` tables without letting them name a class or function, the
-quaternion -> matrix conventions, and the GLB buffer packer.
+quaternion -> matrix conventions, the GLB buffer packer, and the lookup of an
+asset path below an extracted tree without regard to letter case.
 
 This module imports only the standard library at import time (numpy is
 imported inside the functions that need it): ``watchmen hash`` and
@@ -33,6 +34,7 @@ __all__ = [
     "rel_path",
     "order_name",
     "platform_name",
+    "find_ci",
 ]
 
 
@@ -366,3 +368,43 @@ def rel_path(path, start):
     import os
 
     return os.path.relpath(plain_path(path), plain_path(start))
+
+
+def find_ci(root, asset, cache=None, json_twin=False):
+    """The file or folder of asset path `asset` ('/Art/x.bmp', '\\' or '/') below
+    `root`, or None when it is not there.  The engine finds an asset by a
+    case-folding hash and compare (0x54ba59), so every part is matched as the
+    engine does: the name as written when the folder lists it, else the first name
+    (sorted) that equals it ignoring case.  The result carries the names of the file
+    system, also on a case-insensitive one.  Empty, '.' and '..' parts are dropped.
+
+    cache: {folder: sorted names}, so a folder is listed once.
+    json_twin: a part that exists only as '<part>.json' matches that file, returned
+    without the suffix (a raw asset the extract wrote as JSON alone)."""
+    import os
+
+    if not root or not isinstance(asset, str):
+        return None
+    parts = [x for x in asset.replace("\\", "/").split("/") if x not in ("", ".", "..")]
+    if not parts:
+        return None
+    cur = root
+    for part in parts:
+        names = cache.get(cur) if cache is not None else None
+        if names is None:
+            try:
+                names = sorted(os.listdir(cur))
+            except OSError:
+                return None
+            if cache is not None:
+                cache[cur] = names
+        if part not in names:
+            low = part.lower()
+            hit = [n for n in names if n.lower() == low]
+            if not hit and json_twin:
+                hit = [n[:-5] for n in names if n.lower() == low + ".json"]
+            if not hit:
+                return None
+            part = hit[0]
+        cur = os.path.join(cur, part)
+    return cur

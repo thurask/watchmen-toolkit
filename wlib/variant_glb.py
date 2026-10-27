@@ -823,106 +823,10 @@ def write_glb(
     ibmacc = ac(
         av(np.array([m.T.reshape(16) for m in IBM], np.float32).tobytes()), 5126, NB, "MAT4"
     )
-    prims = []
-    for _part in parts:
-        V, SI, SW, T, UV, nm = _part
-        Vg = np.ascontiguousarray(V, np.float32)
-        T, _pend, _vblend = _vprep(_part, Vg, T)
-        ap = ac(
-            av(Vg.tobytes(), 34962), 5126, len(Vg), "VEC3", Vg.min(0).tolist(), Vg.max(0).tolist()
-        )
-        aj = ac(av(_used_joints(SI, SW).tobytes(), 34962), 5123, len(Vg), "VEC4")
-        aw = ac(av(np.ascontiguousarray(SW).tobytes(), 34962), 5126, len(Vg), "VEC4")
-        auv = ac(av(np.ascontiguousarray(UV).tobytes(), 34962), 5126, len(Vg), "VEC2")
-        ai = ac(
-            av(np.ascontiguousarray(T.astype(np.uint32)).tobytes(), 34963), 5125, T.size, "SCALAR"
-        )
-        png = (textures or {}).get(nm)
-        if png is not None and nm in _texdone:
-            mi = _texdone[nm]
-        elif png is not None:
-            layers = png if isinstance(png, dict) else {"diffuse": png}
-
-            def _tex(data, label):
-                bvi = av(data)
-                j["images"].append(
-                    {"bufferView": bvi, "mimeType": "image/png", "name": nm + "_" + label}
-                )
-                j["textures"].append({"source": len(j["images"]) - 1, "sampler": 0})
-                return len(j["textures"]) - 1
-
-            mat = {
-                "name": nm,
-                "pbrMetallicRoughness": {"metallicFactor": 0, "roughnessFactor": 0.85},
-                "doubleSided": True,
-            }
-            if "diffuse" in layers:
-                mat["pbrMetallicRoughness"]["baseColorTexture"] = {
-                    "index": _tex(layers["diffuse"], "diffuse")
-                }
-            if "mr" in layers:
-                mat["pbrMetallicRoughness"]["metallicRoughnessTexture"] = {
-                    "index": _tex(layers["mr"], "mr")
-                }
-                mat["pbrMetallicRoughness"]["roughnessFactor"] = 1.0
-            if "normal" in layers:
-                mat["normalTexture"] = {"index": _tex(layers["normal"], "normal")}
-            if layers.get("alphaMask"):
-                mat["alphaMode"] = "MASK"
-                mat["alphaCutoff"] = 0.5
-            _sheet_material(mat, layers)
-            if "spec" in layers and layers.get("materials") != "engine":
-                mat.setdefault("extensions", {})["KHR_materials_specular"] = {
-                    "specularColorTexture": {"index": _tex(layers["spec"], "spec")}
-                }
-                j.setdefault("extensionsUsed", [])
-                if "KHR_materials_specular" not in j["extensionsUsed"]:
-                    j["extensionsUsed"].append("KHR_materials_specular")
-            j["materials"].append(mat)
-            mi = _texdone[nm] = len(j["materials"]) - 1
-        else:
-            j["materials"].append(
-                {
-                    "name": nm,
-                    "pbrMetallicRoughness": {
-                        "baseColorFactor": [0.8, 0.8, 0.82, 1],
-                        "metallicFactor": 0,
-                        "roughnessFactor": 0.8,
-                    },
-                    "doubleSided": True,
-                }
-            )
-            mi = len(j["materials"]) - 1
-        prims.append(
-            {
-                "attributes": _vwrite(
-                    _pend, {"POSITION": ap, "JOINTS_0": aj, "WEIGHTS_0": aw, "TEXCOORD_0": auv}
-                ),
-                "indices": ai,
-                "material": _blend(mi, _vblend),
-                "mode": 4,
-            }
-        )
-    j["meshes"].append({"name": "variant", "primitives": prims})
-    mnode = len(j["nodes"])
-    j["nodes"].append({"name": "mesh", "mesh": 0, "skin": 0})
-    j["skins"].append({"joints": bnode, "inverseBindMatrices": ibmacc})
-    if _skel:
-        j["skins"][0]["extras"] = {"watchmen": _skel}
-
-    def _anim(animname, sm, chn, frames, fps, finfo=None):
-        a = {"name": animname, "samplers": sm, "channels": chn}
-        ex = None
-        if meta is not None:
-            ex = _am.clip_extras(meta, animname, fps=fps, frames=frames)
-        if finfo is not None:  # what the face channels of this clip show
-            ex = dict(ex or {}, face=finfo)
-        if ex is not None:
-            a["extras"] = {"watchmen": ex}
-        return a
 
     def _mkmat(nm):
-        """material index for nm using `textures` (same rules as body prims)."""
+        """Material index for nm: the textured material of `textures[nm]` (made once per
+        name, for the body, attachment and face primitives alike), else a new grey one."""
         png = (textures or {}).get(nm)
         if png is not None and nm in _texdone:
             return _texdone[nm]
@@ -979,6 +883,49 @@ def write_glb(
             }
         )
         return len(j["materials"]) - 1
+
+    prims = []
+    for _part in parts:
+        V, SI, SW, T, UV, nm = _part
+        Vg = np.ascontiguousarray(V, np.float32)
+        T, _pend, _vblend = _vprep(_part, Vg, T)
+        ap = ac(
+            av(Vg.tobytes(), 34962), 5126, len(Vg), "VEC3", Vg.min(0).tolist(), Vg.max(0).tolist()
+        )
+        aj = ac(av(_used_joints(SI, SW).tobytes(), 34962), 5123, len(Vg), "VEC4")
+        aw = ac(av(np.ascontiguousarray(SW).tobytes(), 34962), 5126, len(Vg), "VEC4")
+        auv = ac(av(np.ascontiguousarray(UV).tobytes(), 34962), 5126, len(Vg), "VEC2")
+        ai = ac(
+            av(np.ascontiguousarray(T.astype(np.uint32)).tobytes(), 34963), 5125, T.size, "SCALAR"
+        )
+        mi = _mkmat(nm)
+        prims.append(
+            {
+                "attributes": _vwrite(
+                    _pend, {"POSITION": ap, "JOINTS_0": aj, "WEIGHTS_0": aw, "TEXCOORD_0": auv}
+                ),
+                "indices": ai,
+                "material": _blend(mi, _vblend),
+                "mode": 4,
+            }
+        )
+    j["meshes"].append({"name": "variant", "primitives": prims})
+    mnode = len(j["nodes"])
+    j["nodes"].append({"name": "mesh", "mesh": 0, "skin": 0})
+    j["skins"].append({"joints": bnode, "inverseBindMatrices": ibmacc})
+    if _skel:
+        j["skins"][0]["extras"] = {"watchmen": _skel}
+
+    def _anim(animname, sm, chn, frames, fps, finfo=None):
+        a = {"name": animname, "samplers": sm, "channels": chn}
+        ex = None
+        if meta is not None:
+            ex = _am.clip_extras(meta, animname, fps=fps, frames=frames)
+        if finfo is not None:  # what the face channels of this clip show
+            ex = dict(ex or {}, face=finfo)
+        if ex is not None:
+            a["extras"] = {"watchmen": ex}
+        return a
 
     attnodes = []
     _hidden = set()  # node indices that go to the "alternatives" scene only
@@ -1134,64 +1081,7 @@ def write_glb(
                 T.size,
                 "SCALAR",
             )
-            png = (textures or {}).get(nm)
-            if png is not None and nm in _texdone:
-                mi = _texdone[nm]
-            elif png is not None:
-                layers = png if isinstance(png, dict) else {"diffuse": png}
-
-                def _tex2(data, label):
-                    bvi = av(data)
-                    j["images"].append(
-                        {"bufferView": bvi, "mimeType": "image/png", "name": nm + "_" + label}
-                    )
-                    j["textures"].append({"source": len(j["images"]) - 1, "sampler": 0})
-                    return len(j["textures"]) - 1
-
-                mat = {
-                    "name": nm,
-                    "pbrMetallicRoughness": {"metallicFactor": 0, "roughnessFactor": 0.85},
-                    "doubleSided": True,
-                }
-                if "diffuse" in layers:
-                    mat["pbrMetallicRoughness"]["baseColorTexture"] = {
-                        "index": _tex2(layers["diffuse"], "diffuse")
-                    }
-                if "mr" in layers:
-                    mat["pbrMetallicRoughness"]["metallicRoughnessTexture"] = {
-                        "index": _tex2(layers["mr"], "mr")
-                    }
-                    mat["pbrMetallicRoughness"]["roughnessFactor"] = 1.0
-                if "normal" in layers:
-                    mat["normalTexture"] = {"index": _tex2(layers["normal"], "normal")}
-                if layers.get("alphaMask"):
-                    mat["alphaMode"] = "MASK"
-                    mat["alphaCutoff"] = 0.5
-                _sheet_material(mat, layers)
-                # spec layer of face-first materials: the same as the body-prim
-                # block above.
-                if "spec" in layers and layers.get("materials") != "engine":
-                    mat.setdefault("extensions", {})["KHR_materials_specular"] = {
-                        "specularColorTexture": {"index": _tex2(layers["spec"], "spec")}
-                    }
-                    j.setdefault("extensionsUsed", [])
-                    if "KHR_materials_specular" not in j["extensionsUsed"]:
-                        j["extensionsUsed"].append("KHR_materials_specular")
-                j["materials"].append(mat)
-                mi = _texdone[nm] = len(j["materials"]) - 1
-            else:
-                j["materials"].append(
-                    {
-                        "name": nm,
-                        "pbrMetallicRoughness": {
-                            "baseColorFactor": [0.8, 0.8, 0.82, 1],
-                            "metallicFactor": 0,
-                            "roughnessFactor": 0.8,
-                        },
-                        "doubleSided": True,
-                    }
-                )
-                mi = len(j["materials"]) - 1
+            mi = _mkmat(nm)
             fprims.append(
                 {
                     "attributes": _vwrite(

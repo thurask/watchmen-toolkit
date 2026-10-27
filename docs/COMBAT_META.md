@@ -408,7 +408,9 @@ ground.
 ### Underboss (Part 1) (`rules.underboss`)
 
 Present only when the data has an `UnderbossDef` (Part 1). Read from code (PC
-executable); the hit / block counts, the shockwave numbers and the target
+Part 2 executable, whose addresses are cited; the Underboss classes are registered in both
+executables, e.g. `ntargetlocktime` with default "6.000000" at 0x8a1b34 in Part 2 and
+0x847b50–0x847b5c in Part 1, read from code); the hit / block counts, the shockwave numbers and the target
 re-check time (6.0, `UnderbossLib.ntargetlocktime`) are registered defaults —
 the shipped fragment stores neither count property, so whether 3 / 2 are live
 rests on the property-default rule (see "Not exported"); no writer of the
@@ -454,8 +456,11 @@ re-check time was found (`attack.target_recheck_is`).
   `m_nhealthfractiongotonextphase`, phase 2 to
   `m_nhealthfraction1gotonextphase`, phase 3 to
   `m_nhealthfraction2gotonextphase` (f2). Phase 4 always has four stages k =
-  1..4, from f2 − (k−1)·step to max(0, f2 − k·step), step = (1 − f2) /
-  `m_istepsinphase4`; the stage count is hard-coded, not that property. Health
+  1..4, from f2 − (k−1)·step to f2 − k·step, step = (1 − f2) /
+  `m_istepsinphase4`; the stage count is hard-coded, not that property. The end is
+  the lower bound the engine sends, not floored at 0 (read from code, 0x8927b0); with
+  fewer than four steps the last stages' bounds are negative, which presumably sets no floor
+  (inferred). The shipped values (f2 0.5, 4 steps) end at exactly 0. Health
   cannot go below the current threshold (`command_set_lower_bound`, 0x8932d1;
   sent by `UnderbossPhase1.StateActive` on every entry); death at health ≤ 1.
   Max health is `CharacterDef.m_nmaxhealth` of the character type

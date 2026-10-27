@@ -46,7 +46,11 @@ def _validate(files, tmp_path):
     lst.write_text("\n".join(str(f) for f in files) + "\n")
     out = tmp_path / "report.json"
     r = subprocess.run(
-        [node, str(RUNNER), pkg, str(lst), str(out)], capture_output=True, text=True, timeout=600
+        [node, str(RUNNER), pkg, str(lst), str(out)],
+        capture_output=True,
+        text=True,
+        timeout=600,
+        stdin=subprocess.DEVNULL,
     )
     assert r.returncode == 0, r.stderr
     return json.loads(out.read_text())

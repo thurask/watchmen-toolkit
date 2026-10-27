@@ -455,3 +455,46 @@ def test_pc_cube_switch_off_gives_the_1_3_0_reading(tmp_path, monkeypatch):
     got = _face_colours(tmp_path / "t")
     assert got[0] == _rgb(_FACE[0])
     assert got[1:] != [_rgb(c) for c in _FACE[1:]]
+
+
+# ---------------------------------------------------------------------------
+# packed-tail bases (watchmen_extract._x360_packed_offset)
+# ---------------------------------------------------------------------------
+
+
+def _rand_blocks(n, unit, seed):
+    return np.random.default_rng(seed).integers(0, 256, n * unit, dtype=np.uint8).tobytes()
+
+
+@pytest.mark.parametrize("w,h,xo,yo", [(64, 16, 0, 4), (16, 32, 4, 0), (16, 16, 4, 0)])
+def test_x360_normal_in_the_packed_tail_is_x_first_without_a_half_swap(w, h, xo, yo):
+    """X360 format 10 keeps the X block first wherever the base sits; PC format 9
+    keeps Y first.  The same blocks, Y-first on PC and X-first on X360, give the
+    same image (SawmillRope 64x16 and HarleyMotorcycleSpokes01 16x32 came out
+    with X and Y exchanged while a half-block swap was applied to them)."""
+    bw, bh = w // 4, h // 4
+    pc = _rand_blocks(bw * bh, 16, w + h)
+    xfirst = b"".join(pc[i + 8 : i + 16] + pc[i : i + 8] for i in range(0, len(pc), 16))
+    raw = _x360_tile(xfirst, bw, bh, 16, xo, yo)
+    a = we._decode_one_layer(pc, 9, w, h)
+    b = we._x360_base_level(raw, 10, w, h)
+    assert np.array_equal(np.asarray(a), np.asarray(b))
+
+
+def test_x360_arrowmore_base_is_its_own_tiled_surface_at_element_28():
+    """The one packed DXT1 base with a side that is not a power of two (ArrowMore,
+    16x24): its 4x6 blocks are a tiled surface of their own starting at element 28
+    of the 32x32 tile (measured on the shipped file, both parts)."""
+    lin = _rand_blocks(4 * 6, 8, 7)
+    tile = bytearray(32 * 32 * 8)
+    for y in range(6):
+        for x in range(4):
+            d = (28 + we._xg2d(x, y, 32, 8)) * 8
+            tile[d : d + 8] = lin[(y * 4 + x) * 8 : (y * 4 + x + 1) * 8]
+    raw = we._bswap16(bytes(tile))
+    assert we._x360_packed_offset("blk", 8, 16, 24, 4, 6) == (0, 0, 28)
+    a = we._decode_one_layer(lin, 5, 16, 24)
+    b = we._x360_base_level(raw, 5, 16, 24)
+    assert np.array_equal(np.asarray(a), np.asarray(b))
+    # any other packed DXT1 base keeps its place in the tile
+    assert we._x360_packed_offset("blk", 8, 16, 32, 4, 8) == (4, 0, None)

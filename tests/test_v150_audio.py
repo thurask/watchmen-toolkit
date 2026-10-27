@@ -225,7 +225,13 @@ def test_the_setup_checks_survive_python_O():
         "print(__debug__)\n"
     )
     env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
-    r = subprocess.run([sys.executable, "-O", "-c", code], capture_output=True, text=True, env=env)
+    r = subprocess.run(
+        [sys.executable, "-O", "-c", code],
+        capture_output=True,
+        text=True,
+        env=env,
+        stdin=subprocess.DEVNULL,
+    )
     assert r.returncode == 0, r.stderr
     lines = r.stdout.splitlines()
     assert lines[0] == "[0, 1]" and lines[-1] == "False"

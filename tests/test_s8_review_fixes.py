@@ -156,6 +156,7 @@ def test_extract_of_a_missing_archive_exits_with_2(tmp_path):
         capture_output=True,
         text=True,
         env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"),
+        stdin=subprocess.DEVNULL,
     )
     assert r.returncode == 2, r.stdout + r.stderr
 
@@ -455,6 +456,7 @@ def test_a_folder_that_is_not_an_extract_is_an_error(cmd, tmp_path):
         capture_output=True,
         text=True,
         env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"),
+        stdin=subprocess.DEVNULL,
     )
     assert r.returncode == 2, r.stdout + r.stderr
     assert not missing.exists()  # nothing is created in the mistyped folder
@@ -472,6 +474,7 @@ def test_an_existing_folder_without_extracted_is_an_error(cmd, tmp_path):
         capture_output=True,
         text=True,
         env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"),
+        stdin=subprocess.DEVNULL,
     )
     assert r.returncode == 2, r.stdout + r.stderr
     assert "not an extract output" in r.stderr

@@ -278,6 +278,7 @@ def test_cli_fragment_writes_nan_and_infinity_without_a_traceback(tmp_path, mode
         text=True,
         env=env,
         timeout=120,
+        stdin=subprocess.DEVNULL,
     )
     assert "Traceback" not in r.stderr, r.stderr
     assert r.returncode == 0, r.stderr

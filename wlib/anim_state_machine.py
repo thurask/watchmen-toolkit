@@ -76,6 +76,8 @@ import os
 import random
 import struct
 
+from wutil import find_ci
+
 # ---------------------------------------------------------------- tree
 
 CLS_CLASS = "AnimationClassWM"
@@ -226,24 +228,11 @@ HOSTS_GROUPS, HOSTS_ALL = "groups", "all"
 
 
 def _find_ci(base, rel):
-    """`base/rel` with every path part matched case-insensitively: the engine
-    finds an asset by a case-folding hash and compare (0x54ba59), so
-    "/tnt/Production/x.fragment" names the file extracted as "TNT/Production/...".
-    A file that exists only as `<name>.json` is returned without the suffix."""
-    p = base
-    for part in rel.replace("\\", "/").strip("/").split("/"):
-        try:
-            names = os.listdir(p)
-        except OSError:
-            return None
-        low = part.lower()
-        hit = sorted(x for x in names if x.lower() == low)
-        if not hit:
-            hit = sorted(x[:-5] for x in names if x.lower() == low + ".json")
-        if not hit:
-            return None
-        p = os.path.join(p, hit[0])
-    return p
+    """`base/rel` with every path part matched as the engine does, ignoring letter
+    case (wutil.find_ci): "/tnt/Production/x.fragment" names the file extracted as
+    "TNT/Production/...".  A file that exists only as `<name>.json` is returned
+    without the suffix."""
+    return find_ci(base, rel, json_twin=True)
 
 
 def load_tree(path, resolve_fragments=True, _seen=None, hosts=HOSTS_GROUPS, _host=None):

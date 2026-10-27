@@ -317,7 +317,13 @@ def test_watchmen_py_on_an_older_python_stops_before_importing_wlib():
         % (script, script)
     )
     env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
-    p = subprocess.run([sys.executable, "-I", "-c", probe], capture_output=True, text=True, env=env)
+    p = subprocess.run(
+        [sys.executable, "-I", "-c", probe],
+        capture_output=True,
+        text=True,
+        env=env,
+        stdin=subprocess.DEVNULL,
+    )
     assert p.stderr == "error: watchmen-kapow-toolkit needs Python 3.13 or later (this is 3.12)\n"
     assert p.stdout == "exit 2 False False\n"
 

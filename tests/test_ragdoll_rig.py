@@ -695,6 +695,7 @@ def _cli(*args, **env):
         stderr=subprocess.STDOUT,
         text=True,
         env=e,
+        stdin=subprocess.DEVNULL,
     )
 
 

@@ -10,6 +10,8 @@
     csv_cell        a text CSV cell is never a spreadsheet formula
     safe            trailing dots / spaces, the Windows extended-length form
     exact_math      nearest_rotation of a reflection (documented behaviour)
+    child stdin     every subprocess.run reads stdin from DEVNULL (WinError 6 without a
+                    console)
 
 Synthetic data only: no game files.
 """
@@ -104,6 +106,7 @@ def test_cli_reports_an_object_bind_as_one_error_line(tmp_path):
         capture_output=True,
         text=True,
         timeout=120,
+        stdin=subprocess.DEVNULL,
     )
     assert r.returncode == 2, (r.stdout, r.stderr)
     assert r.stderr.strip().splitlines()[-1].startswith("error: ")
@@ -241,7 +244,12 @@ def test_a_bad_key_table_is_an_import_error_with_the_recovery(tmp_path, kind):
     }[kind]
     root = _checkout(tmp_path, table)
     r = subprocess.run(
-        [sys.executable, "-c", _IMPORT], cwd=str(root), capture_output=True, text=True, timeout=120
+        [sys.executable, "-c", _IMPORT],
+        cwd=str(root),
+        capture_output=True,
+        text=True,
+        timeout=120,
+        stdin=subprocess.DEVNULL,
     )
     lines = r.stdout.splitlines()
     assert r.returncode == 0, r.stderr
@@ -255,6 +263,7 @@ def test_a_bad_key_table_is_an_import_error_with_the_recovery(tmp_path, kind):
         capture_output=True,
         text=True,
         timeout=120,
+        stdin=subprocess.DEVNULL,
     )
     assert r.returncode == 2 and r.stderr.startswith("error: watchmen: unreadable data table")
 
@@ -276,6 +285,7 @@ def test_variant_glb_bank_refuses_a_code_pickle(tmp_path):
         capture_output=True,
         text=True,
         timeout=120,
+        stdin=subprocess.DEVNULL,
     )
     assert r.returncode != 0 and "UnpicklingError" in r.stderr and "plain data only" in r.stderr
     assert not marker.exists() and not (tmp_path / "o.glb").exists()
@@ -436,3 +446,27 @@ def test_nearest_rotation_keeps_a_reflection():
     S = np.array(em.nearest_rotation(skewed))
     U, _s, Vt = np.linalg.svd(np.array(skewed))
     assert np.allclose(S, U @ Vt, atol=1e-12) and np.linalg.det(S) == pytest.approx(-1.0)
+
+
+def test_every_child_process_reads_its_input_from_devnull():
+    """A child process inherits the parent's stdin unless told otherwise; a run started without
+    a console (a scheduler, another program) hands on an invalid handle and subprocess fails in
+    DuplicateHandle with WinError 6. Every subprocess.run in the toolkit and its tests passes
+    stdin (or input)."""
+    import ast
+
+    missing = []
+    files = [REPO / "watchmen.py", *sorted((REPO / "wlib").glob("*.py"))]
+    files += sorted((REPO / "tests").glob("*.py")) + sorted((REPO / "tools").glob("*.py"))
+    for path in files:
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            f = node.func if isinstance(node, ast.Call) else None
+            if (
+                isinstance(f, ast.Attribute)
+                and f.attr in ("run", "Popen", "call", "check_call", "check_output")
+                and isinstance(f.value, ast.Name)
+                and f.value.id == "subprocess"
+                and not {k.arg for k in node.keywords} & {"stdin", "input"}
+            ):
+                missing.append("%s:%d" % (path.relative_to(REPO), node.lineno))
+    assert missing == []

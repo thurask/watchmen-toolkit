@@ -1387,7 +1387,9 @@ def underboss_phases(f0, f1, f2, steps):
 
     f0, f1, f2: UnderbossDef.m_nhealthfractiongotonextphase, m_nhealthfraction1gotonextphase,
     m_nhealthfraction2gotonextphase; steps: m_istepsinphase4.  Phase 4 always has four
-    stages of (1 - f2) / steps each, floored at 0.  None when a value is missing."""
+    stages of (1 - f2) / steps each; a stage's end is the lower bound the engine sends
+    (f2 - stage * step, UnderbossPhase1.StateActive 0x8927b0), not floored at 0 (that a
+    negative bound sets no floor is inferred).  None when a value is missing."""
     if None in (f0, f1, f2) or not steps:
         return None
     f0, f1, f2 = float(f0), float(f1), float(f2)
@@ -1404,7 +1406,7 @@ def underboss_phases(f0, f1, f2, steps):
                 "phase": 4,
                 "stage": k,
                 "start": r(f2 - (k - 1) * step),
-                "end": r(max(0.0, f2 - k * step)),
+                "end": r(f2 - k * step),
             }
         )
     return {

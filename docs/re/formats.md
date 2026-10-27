@@ -158,7 +158,7 @@ Nothing else occurs.
 
 | field | finding | evidence |
 |---|---|---|
-| Position | raw `float32 × 3`. **No quantisation, scale or bias in any format.** The two vec3 in the MeshBuffer header are the AABB centre and half-extent, not dequantisation terms. | read from code |
+| Position | raw `float32 × 3`. **No quantisation, scale or bias in any format.** The two vec3 in the MeshBuffer header are the AABB minimum and maximum corners (`_mr_meshbuffer`, FUN_004336ec), not dequantisation terms. | read from code |
 | Normal | `half × 3`; 4th half is never written by the fmt 5/6 writers and is zeroed for fmt 9/10 | read from code; validated: 4th half = 0 on 13,521 sampled vertices, \|N\| = 1.000 |
 | COLOR0 @20 | D3DCOLOR `A<<24 \| R<<16 \| G<<8 \| B` = `ftol(c × 255.0)` (constant at 0x9e6ce8); memory order **B, G, R, A**. Defaults to 1.0 when the mesh has no colours. | read from code |
 | UV @24 | two raw half floats. **No scale, no bias, no V flip** in the exe. One UV set only in fmt 5/6. | read from code; observed range −1.24…1.92 (tiling) |

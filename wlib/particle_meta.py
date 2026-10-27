@@ -33,6 +33,7 @@ if _HERE not in sys.path:
 import canonical_names  # noqa: E402
 import f32json  # noqa: E402
 import particle_asset  # noqa: E402
+from wutil import find_ci  # noqa: E402
 
 FORMAT = "watchmen-particle-meta/1"
 
@@ -122,33 +123,10 @@ def texture_tree(src, textures=None):
 
 
 def _lookup(root, asset, cache=None):
-    """Path of asset '/Art/x.bmp' below `root`, or None when it is not there.  Every
-    component is taken from the directory listing -- as written when that name is
-    listed, else the first name (sorted) that equals it ignoring case -- so the
-    result has the names of the file system, also on a case-insensitive one.
-    `cache` ({dir: sorted names}) saves listing a folder twice."""
-    if not root or not isinstance(asset, str):
-        return None
-    parts = [x for x in asset.replace("\\", "/").split("/") if x not in ("", ".", "..")]
-    if not parts:
-        return None
-    cache = {} if cache is None else cache
-    cur = root
-    for part in parts:
-        names = cache.get(cur)
-        if names is None:
-            try:
-                names = sorted(os.listdir(cur))
-            except OSError:
-                names = []
-            cache[cur] = names
-        if part not in names:
-            hit = [n for n in names if n.lower() == part.lower()]
-            if not hit:
-                return None
-            part = hit[0]
-        cur = os.path.join(cur, part)
-    return cur
+    """Path of asset '/Art/x.bmp' below `root`, or None when it is not there
+    (wutil.find_ci: each part as listed, else the first sorted name equal to it
+    ignoring case).  `cache` ({dir: sorted names}) saves listing a folder twice."""
+    return find_ci(root, asset, cache)
 
 
 def _rel(path, root):
