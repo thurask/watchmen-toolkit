@@ -33,6 +33,26 @@
   `tests/test_module_homes.py` checks the forwarding and that every wlib module is imported
   from `wlib/`. `python wlib/watchmen_extract.py` still runs. `text_assets` imports `Path`
   itself. (2026-11-11)
+- **Archive, block, texture and material-reference code split out of `watchmen_extract`.**
+  Eight flat modules, definitions moved unchanged: `extract_paths` (`OutputNames`, `safe`,
+  `out_rel`, `standalone_output_name`), `naz_archive` (entries, keys, `naz_read`, `inflate`,
+  `block_plan`, `iter_blocks`), `kapow_block` (block header, directory and trailer,
+  `BLOCK_ORDER`, `extract_block`, asset types, `prop_walk`), `texture_header` (descriptors,
+  slots, frames, the layer plan), `texture_sheet` (the TextureSheet records and `sheet.json`),
+  `texture_decode` (DDS, block decoders, the console layouts), `texture_carve`
+  (`carve_texture`) and `material_refs` (`texture_ref`, `extract_materials`,
+  `submesh_materials`). Private helpers another module calls have public names in their home:
+  `names_module`, `header_order_or_none`, `props_module`, `propbag_end`, `is_normal_layer`,
+  `is_texture_header`, `mark_texture_decode`, `sheet_warning`, `image_coherence`,
+  `console_recover_layers`, `looks_like_normal`, `ps3_segments`, `unpad_linear`,
+  `x360_layer_bytes`, `x360_level0_bytes`, `material_stem`, `u32_at`; the old spellings and
+  the private aliases stay readable and patchable through `watchmen_extract` (`_HOMES`).
+  `_name_hash` keeps its name in `kapow_block`, and the descriptor-scan helpers `_valid_rec`,
+  `_stride_layers`, `_tex_path_off` stay private in `texture_header`. `watchmen_extract`
+  imports `texture_sheet` as `texture_sheet_mod`: under its own name the module would sit in
+  the namespace where the forwarded function `texture_sheet` is served, and Python 3.15 reads
+  the namespace before the forwarding property (measured: three tests failed on Windows,
+  Python 3.15, none on Python 3.13). Output unchanged. (2026-11-11)
 
 ## 1.7.0 — 2026-11-11
 

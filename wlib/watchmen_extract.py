@@ -75,6 +75,7 @@ import kapow_block  # noqa: E402
 # Python 3.15 reads a module's own namespace before a property of its type
 import texture_sheet as texture_sheet_mod  # noqa: E402
 import texture_carve  # noqa: E402
+import material_refs  # noqa: E402
 
 # MS-ADPCM tables (SFX 'sound' assets are MS-ADPCM/PCM -> WAV; music stays Ogg)
 _COEF = (256, 0, 512, -256, 0, 0, 192, 64, 240, 0, 460, -208, 392, -232)
@@ -89,7 +90,7 @@ def sheet_layer_dirs(tex_index, sheet, warn=None):
     (its <layer>MapOverride paths), resolved in `tex_index`; missing ones are left out."""
     out = {}
     for layer, path in sorted((sheet or {}).get("overrides", {}).items()):
-        d = resolve_texture(tex_index, texture_ref(path), warn) if tex_index else None
+        d = resolve_texture(tex_index, material_refs.texture_ref(path), warn) if tex_index else None
         if d is not None:
             out[layer] = d
     return out
@@ -166,14 +167,6 @@ def _pick_vb(stream):
     return None
 
 
-def _u32le(b, o):
-    return struct.unpack_from("<I", b, o)[0]
-
-
-def _u32(b, o, bo="<"):
-    return struct.unpack_from(bo + "I", b, o)[0]
-
-
 def find_descriptors(header, order="<"):
     """Deterministic per-submesh geometry descriptors:
     [flag][vertexCount][G][flag][idxBytes][1], flag in {0,8}, G 5=rigid/44 6=skin/56.
@@ -185,12 +178,12 @@ def find_descriptors(header, order="<"):
     last = -100
     n = len(header)
     for p in range(0, n - 24):
-        fa = _u32(header, p, order)
-        nv = _u32(header, p + 4, order)
-        G = _u32(header, p + 8, order)
-        fb = _u32(header, p + 12, order)
-        ib = _u32(header, p + 16, order)
-        one = _u32(header, p + 20, order)
+        fa = material_refs.u32_at(header, p, order)
+        nv = material_refs.u32_at(header, p + 4, order)
+        G = material_refs.u32_at(header, p + 8, order)
+        fb = material_refs.u32_at(header, p + 12, order)
+        ib = material_refs.u32_at(header, p + 16, order)
+        one = material_refs.u32_at(header, p + 20, order)
         if (
             G in (5, 6)
             and fa == fb
@@ -555,173 +548,6 @@ def _decode_sub_np(stream, vbo, nv, stride, be, restored, notes):
     return verts, norms, uvs
 
 
-_TEX_RE = re.compile(rb"/[ -~]*?\.(?:bmp|tga|dds|png|jpg)", re.I)
-
-
-def texture_key(path):
-    """Asset path -> the key it has in a TextureIndex: '/'-separated, lower case, no
-    leading slash, the same parts `safe()` keeps ('' / '.' / '..' dropped, ':' -> '_')."""
-    parts = [p for p in str(path).replace("\\", "/").split("/") if p not in ("", ".", "..")]
-    return "/".join(p.replace(":", "_") for p in parts).lower()
-
-
-class TexRef(str):
-    """A material name that remembers the texture ASSET PATH its model stores.
-
-    The model header lists full paths ('/art/characters/bikers/textures/head.bmp',
-    ModelRes::Read 0x547006) and the engine loads exactly that asset (0x49b2b2 ->
-    AssetManager 0x55243f); the bare name ('head') is not unique in the game data.
-    It still reads, prints and compares like the plain name, but two TexRefs with
-    different paths are different materials (dict / set keys included)."""
-
-    __slots__ = ("path",)
-
-    def __new__(cls, name, path=None):
-        o = str.__new__(cls, name)
-        o.path = path or None
-        return o
-
-    def __eq__(self, other):
-        if not str.__eq__(self, other):
-            return False
-        po = getattr(other, "path", None)
-        return not (self.path and po) or texture_key(self.path) == texture_key(po)
-
-    def __ne__(self, other):
-        return not self.__eq__(other)
-
-    __hash__ = str.__hash__
-
-    def __reduce__(self):
-        return (TexRef, (str(self), self.path))
-
-
-def texture_ref(path):
-    """Texture asset path -> TexRef(bare name, path).
-
-    With --names canonical (default) the path is first given its canonical
-    spelling (canonical_names.canonical: the shipped table, and during an
-    `extract` the spelling the texture was written under), so a material is
-    named like the texture folder it resolves to whatever letter case the
-    referring model stores."""
-    path = extract_paths.names_module().canonical(path)
-    return TexRef(_material_stem(path), path)
-
-
-def extract_materials(header):
-    """Ordered texture names from the ModelRes header material list (one per
-    render submesh, in submesh order, for character/prop models).  Each is a
-    TexRef: the bare name, with the full asset path in `.path`."""
-    out = []
-    for m in _TEX_RE.finditer(header):
-        out.append(texture_ref(m.group().decode("latin1")))
-    return out
-
-
-def _u32_all(header, order="<"):
-    """numpy uint32 array W with W[o] = the u32 at byte offset o, for every o with
-    four bytes left (one view per byte phase, interleaved)."""
-    n = len(header) - 3
-    if n <= 0:
-        return np.zeros(0, np.uint32)
-    W = np.empty(n, np.uint32)
-    dt = np.dtype(order + "u4")
-    for ph in range(4):
-        k = (len(header) - ph) // 4
-        W[ph::4] = np.frombuffer(header, dt, count=k, offset=ph)[: len(W[ph::4])]
-    return W
-
-
-def _descriptor_candidates(header, order="<"):
-    """Offsets p (0 <= p < len - 24) that pass the geometry-descriptor test of
-    find_descriptors: [fa][nv][G 5|6][fb = fa, 0|8][ib even 6..8e6][1].
-    Vectorised over every byte offset."""
-    n = len(header)
-    if n - 24 <= 0:
-        return []
-    W = _u32_all(header, order)
-    m = n - 24
-    fa, nv, G, fb, ib, one = (W[k : k + m] for k in (0, 4, 8, 12, 16, 20))
-    ok = (
-        ((G == 5) | (G == 6))
-        & (fa == fb)
-        & ((fa == 0) | (fa == 8))
-        & (one == 1)
-        & (nv >= 3)
-        & (nv <= 300000)
-        & (ib >= 6)
-        & (ib <= 8000000)
-        & (ib % 2 == 0)
-    )
-    return np.nonzero(ok)[0].tolist()
-
-
-def submesh_materials(header, order="<"):
-    """Per-submesh material indices, in submesh (descriptor) order.
-
-    Engine layout (verified on Rorschach vs in-Blender ground truth): each
-    render-piece record is
-        [u32 len][pieceName..\0] ... [u32 1][u32 materialIndex] ... [geometry descriptor]
-    i.e. the NAME+MATERIAL precede their descriptor.  Positional pairing with
-    extract_materials() order is WRONG whenever one material covers several
-    submeshes (Rorschach trenchcoat).  Returns list of (pieceName, matIndex),
-    one per descriptor; matIndex indexes extract_materials(header)."""
-    nmats = len(extract_materials(header))
-    recs = []
-    i = 0
-    n = len(header)
-    # offsets whose u32 can be a name length 2..48: only these need the record
-    # test, every other offset just steps on
-    lenpat = re.compile(
-        (rb"(?=[\x02-\x30]\x00\x00\x00)" if order == "<" else rb"(?=\x00\x00\x00[\x02-\x30])"),
-        re.S,
-    )
-    while i < n - 8:
-        m = lenpat.search(header, i, n - 8 + 3)
-        if m is None or m.start() >= n - 8:
-            break
-        i = m.start()
-        ln = _u32(header, i, order)
-        if 2 <= ln <= 48 and i + 4 + ln <= n:
-            sb = header[i + 4 : i + 4 + ln]
-            if sb[-1] == 0 and all(32 <= c < 127 for c in sb[:-1]) and sb[:1].isalpha():
-                for o in range(i + 4 + ln, min(i + 4 + ln + 24, n - 8), 4):
-                    a, b = _u32(header, o, order), _u32(header, o + 4, order)
-                    if a == 1 and b < max(nmats, 1):
-                        recs.append((i, sb[:-1].decode("latin1"), b))
-                        break
-                i += 4 + ln
-                continue
-        i += 1
-    # descriptor positions (same predicate as find_descriptors)
-    dpos = []
-    last = -100
-    for p_ in _descriptor_candidates(header, order):
-        fa = _u32(header, p_, order)
-        nv = _u32(header, p_ + 4, order)
-        G = _u32(header, p_ + 8, order)
-        fb = _u32(header, p_ + 12, order)
-        ib = _u32(header, p_ + 16, order)
-        one = _u32(header, p_ + 20, order)
-        if (
-            G in (5, 6)
-            and fa == fb
-            and fa in (0, 8)
-            and one == 1
-            and 3 <= nv <= 300000
-            and 6 <= ib <= 8000000
-            and ib % 2 == 0
-        ):
-            if p_ - last >= 24:
-                dpos.append(p_)
-                last = p_
-    out = []
-    for k, dp in enumerate(dpos):
-        prev = [r for r in recs if r[0] < dp]
-        out.append((prev[-1][1], prev[-1][2]) if prev else ("sub%d" % k, k if k < nmats else 0))
-    return out
-
-
 #: directory-name endings that mark a carved texture (`<asset name>/<layer>.png`)
 TEXTURE_DIR_EXTS = (".bmp", ".tga", ".dds", ".png", ".jpg", ".texture")
 
@@ -757,7 +583,7 @@ class TextureIndex(dict):
                 named = os.path.basename(dp).lower().endswith(TEXTURE_DIR_EXTS)
                 if has_dif or (named and not require_diffuse):
                     rel = os.path.relpath(dp, str(self.root)).replace(os.sep, "/")
-                    found.append((texture_key(rel), rel, Path(dp)))
+                    found.append((material_refs.texture_key(rel), rel, Path(dp)))
         except (OSError, ValueError) as e:  # ValueError: relpath across drives
             extract_log.warn(
                 "      WARNING: texture index of %s incomplete (%s: %s)"
@@ -782,9 +608,9 @@ class TextureIndex(dict):
         path = getattr(ref, "path", None)
         text = str(ref)
         if path is None and ("/" in text or "\\" in text):
-            path, text = text, _material_stem(text)
+            path, text = text, material_refs.material_stem(text)
         if path:
-            d = self.by_path.get(texture_key(path))
+            d = self.by_path.get(material_refs.texture_key(path))
             if d is not None:
                 return d
         name = text.strip().lower()
@@ -835,7 +661,7 @@ def unique_material_names(mats):
     first, out = {}, []
     for m in mats:
         k = getattr(m, "path", None)
-        k = texture_key(k) if k else None
+        k = material_refs.texture_key(k) if k else None
         seen = first.setdefault(str(m), [])
         if k not in seen:
             seen.append(k)
@@ -1588,10 +1414,6 @@ def model_stream_layout(model, stream, order="<"):
     except struct.error:
         return None
     return model["buffers"] if p == n else None
-
-
-def _material_stem(path):
-    return path.replace("\\", "/").split("/")[-1].rsplit(".", 1)[0]
 
 
 def check_lod(lod):
@@ -2403,7 +2225,7 @@ def decode_model_mesh(header, stream, lod=0, kinds=("render",), order=None, part
             "vb": b["vb"],
             "ib": b["ib"],
             "texture": tex,
-            "material": texture_ref(tex) if tex else None,
+            "material": material_refs.texture_ref(tex) if tex else None,
             "positions": verts,
             "normals": norms,
             "uvs": uvs,
@@ -2657,7 +2479,7 @@ def _decode_model(header, stream, out_path, tex_index, log, order, lod, status, 
         didx = []  # no descriptors -> no per-submesh material records
     if not T:
         return _model_skipped(log, out_path, "every triangle of the scanned buffer is degenerate")
-    mats = extract_materials(header)
+    mats = material_refs.extract_materials(header)
     materials = None
     if hplan and didx and len(didx) == len(subs):
         # the submesh record carries the index into the model's texture list
@@ -2667,7 +2489,7 @@ def _decode_model(header, stream, out_path, tex_index, log, order, lod, status, 
         for k in didx:
             ti = hplan[1][k]["tex_index"]
             ok = ti and ti[0] < len(tex)
-            materials.append(texture_ref(tex[ti[0]]) if ok else "submesh_%d" % k)
+            materials.append(material_refs.texture_ref(tex[ti[0]]) if ok else "submesh_%d" % k)
     # Per-submesh materialIndex read from the header records: positional
     # pairing is WRONG whenever one material covers several submeshes (see the
     # submesh_materials docstring; Rorschach trenchcoat) -- same pattern as
@@ -2675,7 +2497,7 @@ def _decode_model(header, stream, out_path, tex_index, log, order, lod, status, 
     # are unavailable/unparsable (or the _pick_vb path, which has no descriptors).
     if materials is None and mats and didx and len(didx) == len(subs):
         try:
-            smat = submesh_materials(header, order)
+            smat = material_refs.submesh_materials(header, order)
         except Exception:
             smat = []
         if smat:
@@ -5803,6 +5625,17 @@ _HOMES = {
     "_carve_texture": ("texture_carve", "_carve_texture"),
     "_carve_texture_legacy": ("texture_carve", "_carve_texture_legacy"),
     "_rescue_texture_plan": ("texture_carve", "rescue_texture_plan"),
+    "_u32le": ("material_refs", "_u32le"),
+    "_u32": ("material_refs", "u32_at"),
+    "_TEX_RE": ("material_refs", "_TEX_RE"),
+    "texture_key": ("material_refs", "texture_key"),
+    "TexRef": ("material_refs", "TexRef"),
+    "texture_ref": ("material_refs", "texture_ref"),
+    "extract_materials": ("material_refs", "extract_materials"),
+    "_u32_all": ("material_refs", "_u32_all"),
+    "_descriptor_candidates": ("material_refs", "_descriptor_candidates"),
+    "submesh_materials": ("material_refs", "submesh_materials"),
+    "_material_stem": ("material_refs", "material_stem"),
 }
 
 
