@@ -11,6 +11,7 @@
 Synthetic data only: no game files.
 """
 
+import itertools
 import struct
 import zlib
 
@@ -224,7 +225,7 @@ def test_cli_prints_the_notes_under_the_error(monkeypatch, capsys):
 
 def test_batched_pairs_and_cached_tables_match_the_loops():
     v = tuple(range(12))
-    assert list(we.itertools.batched(v, 2)) == [(v[2 * k], v[2 * k + 1]) for k in range(6)]
+    assert list(itertools.batched(v, 2)) == [(v[2 * k], v[2 * k + 1]) for k in range(6)]
     assert we.ADPCM_COEF_PAIRS == tuple(zip(we._C1, we._C2))
     assert we.asset_type_name(kapow_props.name_hash("Texture")) == "Texture"
     assert we.asset_type_name(0) == ""

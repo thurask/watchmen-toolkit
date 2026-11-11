@@ -37,6 +37,7 @@ import os
 import re
 import struct
 import sys
+from pathlib import Path
 
 from wutil import rel_path
 
@@ -825,7 +826,7 @@ class TextWriter:
     def _safe(self, code, name, suffix=""):
         import watchmen_extract as wx
 
-        return str(wx.safe(wx.Path(self.root) / code, name + suffix))
+        return str(wx.safe(Path(self.root) / code, name + suffix))
 
     def write(self):
         """Write everything collected; returns the index dict (None when no

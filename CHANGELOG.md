@@ -22,6 +22,17 @@
   `tests/test_v150_mesh_loader.py`. Both are declared dependencies, so nothing changes where
   they are installed; without them the module no longer imports (before, `extract` skipped
   textures and models with a note). (2026-11-11)
+- **First modules split out of `watchmen_extract`.** `extract_log` holds `is_warning_line`,
+  `extract_logger` and `warn` (was `_run_warning`), which writes through the run's log between
+  `push(log)` and `pop()`; `byte_reader` holds `ByteReader`. `watchmen_extract` forwards the
+  moved names, old private spellings included (`_RUN_LOG`, `_run_warning`, `_Rd`), to their
+  home module for reads, writes and deletes (`_HOMES`; one property per name on the module's
+  type, which pytest 9.2's monkeypatch needs to restore the home's value), so
+  `watchmen_extract.<name>` and `monkeypatch.setattr(watchmen_extract, ...)` keep working;
+  code left in `watchmen_extract` calls them as `extract_log.warn` and so on.
+  `tests/test_module_homes.py` checks the forwarding and that every wlib module is imported
+  from `wlib/`. `python wlib/watchmen_extract.py` still runs. `text_assets` imports `Path`
+  itself. (2026-11-11)
 
 ## 1.7.0 — 2026-11-11
 

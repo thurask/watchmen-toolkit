@@ -50,12 +50,14 @@ Requires numpy and Pillow. Python 3.13+.
 import argparse
 import functools
 import hashlib
+import importlib
 import io
 import itertools
 import os
 import re
 import struct
 import sys
+import types
 import zlib
 import array
 import wave
@@ -71,6 +73,9 @@ _WLIB = os.path.dirname(os.path.abspath(__file__))
 if _WLIB not in sys.path:
     sys.path.append(_WLIB)
 from wutil import long_path, order_name, platform_name, qrows_conj_xyzw, rel_path  # noqa: E402
+
+import byte_reader  # noqa: E402
+import extract_log  # noqa: E402
 
 # MS-ADPCM tables (SFX 'sound' assets are MS-ADPCM/PCM -> WAV; music stays Ogg)
 _COEF = (256, 0, 512, -256, 0, 0, 192, 64, 240, 0, 460, -208, 392, -232)
@@ -1368,7 +1373,7 @@ def texture_alpha_flag(header, order="<", name=None):
             return None
         return bool(header[info["images"][0]["rec_off"] + 25] & 1)
     except (struct.error, ValueError, IndexError, KeyError) as e:
-        _run_warning(
+        extract_log.warn(
             "      WARNING: texture %s: alpha flag not read, textureHasAlpha left out (%s: %s)"
             % (name or "?", type(e).__name__, e)
         )
@@ -1414,20 +1419,9 @@ def write_sheet_json(header, out_dir, order="<"):
 _write_sheet_json = write_sheet_json  # the private spelling, kept for existing callers
 
 
-#: the `log` of the extract run in progress (set by _extract_main), for the few
-#: WARNING lines written by helpers that take no log argument
-_RUN_LOG = []
-
-
-def _run_warning(line):
-    """One WARNING line from a helper that takes no log argument: through the
-    running extract's log (to stderr under --quiet), else stdout."""
-    (_RUN_LOG[-1] if _RUN_LOG else print)(line)
-
-
 def _sheet_warning(out_dir, what, e):
     """One WARNING line for a sheet.json that could not be written or updated."""
-    _run_warning(
+    extract_log.warn(
         "      WARNING: texture %s: %s (%s: %s)"
         % (getattr(out_dir, "name", out_dir), what, type(e).__name__, e)
     )
@@ -3952,7 +3946,7 @@ class TextureIndex(dict):
                     rel = os.path.relpath(dp, str(self.root)).replace(os.sep, "/")
                     found.append((texture_key(rel), rel, Path(dp)))
         except (OSError, ValueError) as e:  # ValueError: relpath across drives
-            _run_warning(
+            extract_log.warn(
                 "      WARNING: texture index of %s incomplete (%s: %s)"
                 % (self.root, type(e).__name__, e)
             )
@@ -4434,7 +4428,7 @@ def _model_palette(header, name=None):
 
         sk = _es.skeleton_from_header(header, "palette")
     except (struct.error, ValueError, IndexError, KeyError) as e:
-        _run_warning(
+        extract_log.warn(
             "      WARNING: model %s: joint table not read from the header, joints named "
             "bone_<n> (%s: %s)" % (name or "?", type(e).__name__, e)
         )
@@ -4457,7 +4451,7 @@ def _model_is_body(header, name=None):
             return True  # nothing decoded -> assume body, never silently unrig
         return any(("Calf" in n) or ("Thigh" in n) for n in names)
     except (struct.error, ValueError, IndexError, KeyError) as e:
-        _run_warning(
+        extract_log.warn(
             "      WARNING: model %s: node list not read from the header, rigged as a body "
             "(%s: %s)" % (name or "?", type(e).__name__, e)
         )
@@ -4546,63 +4540,6 @@ def vertex_strides(order="<"):
 def vertex_formats(order="<"):
     """Element offsets per format id for a byte order ("<" PC, ">" console)."""
     return CONSOLE_VERTEX_FORMATS if order == ">" else VERTEX_FORMATS
-
-
-class ByteReader:
-    """Bounds-checked sequential reader (raises ValueError past the end)."""
-
-    def __init__(s, b, order="<"):
-        s.b, s.p, s.o = b, 0, order
-
-    def _need(s, n):
-        if n < 0 or s.p + n > len(s.b):
-            raise ValueError("read past end")
-
-    def u32(s):
-        s._need(4)
-        v = struct.unpack_from(s.o + "I", s.b, s.p)[0]
-        s.p += 4
-        return v
-
-    def u8(s):
-        s._need(1)
-        v = s.b[s.p]
-        s.p += 1
-        return v
-
-    def boolean(s):
-        v = s.u8()
-        if v > 1:
-            raise ValueError("bool %d" % v)
-        return v
-
-    def floats(s, n):
-        s._need(4 * n)
-        v = struct.unpack_from(s.o + "%df" % n, s.b, s.p)
-        s.p += 4 * n
-        return v
-
-    def skip(s, n):
-        s._need(n)
-        s.p += n
-
-    def count(s, item_bytes=1):
-        """u32 element count, rejected when the elements cannot fit."""
-        n = s.u32()
-        if n * item_bytes > len(s.b) - s.p:
-            raise ValueError("count %d" % n)
-        return n
-
-    def string(s):
-        n = s.count()
-        if n > 65536:  # merged-mesh names run to a few KB (TwilightMansion_Attic)
-            raise ValueError("string %d" % n)
-        v = s.b[s.p : s.p + n]
-        s.p += n
-        return v.split(b"\0", 1)[0].decode("latin1")
-
-
-_Rd = ByteReader  # the private spelling, kept for existing callers
 
 
 def read_meshbuffer(r):
@@ -4749,7 +4686,7 @@ def model_header_layout_hint(header, order="<"):
 
 def _parse_model_header_as(header, order, layout):
     try:
-        r = ByteReader(header, order)
+        r = byte_reader.ByteReader(header, order)
         M = {"type": r.string()}
         r.skip(r.count(4) * 4)  # property bag: dword count (FUN_00511f96)
         r.u32()
@@ -6626,7 +6563,7 @@ def ogg_from_packets(pk, exact, end=None):
                 g += (bss[n - 1] + bss[n]) // 4
                 gr.append(g)
         except (struct.error, ValueError, IndexError) as e:  # setup header not walked
-            _run_warning(
+            extract_log.warn(
                 "      WARNING: Ogg granule positions estimated at 1024 samples per packet, "
                 "playback may stutter (%s: %s)" % (type(e).__name__, e)
             )
@@ -7569,7 +7506,7 @@ def prop_walk(H, order="<"):
         key = hashlib.sha1(bytes(H[:q])).digest()
         if key not in _PROP_WALK_WARNED:
             _PROP_WALK_WARNED.add(key)
-            _run_warning(
+            extract_log.warn(
                 "      WARNING: %s header: property bag has more than %d records; the walk "
                 "stopped inside it, offsets read after the bag are not reliable"
                 % (
@@ -8056,31 +7993,6 @@ class ModelSpool:
             self._f = None
 
 
-def is_warning_line(text):
-    """True for a log line of `extract` that reports a problem: one whose text
-    starts with '!' (an asset or a step that failed) or that carries
-    'WARNING:' (content not decoded, or not decoded completely)."""
-    for ln in str(text).splitlines():
-        t = ln.lstrip()
-        if t.startswith("!") or "WARNING:" in t:
-            return True
-    return False
-
-
-def extract_logger(quiet=False, out=None, err=None):
-    """The `log` of an extract run: every line to stdout (`out`), as print()
-    writes it; with `quiet` only the warning lines (is_warning_line), and those
-    to stderr (`err`), so --quiet never hides a problem."""
-
-    def log(*x):
-        if not quiet:
-            print(*x, file=out if out is not None else sys.stdout)
-        elif is_warning_line(" ".join(str(v) for v in x)):
-            print(*x, file=err if err is not None else sys.stderr)
-
-    return log
-
-
 def main(argv):
     """`extract`: see --help.  The run's name record (canonical_names.Run) is
     closed however the extraction ends."""
@@ -8235,7 +8147,7 @@ def _extract_main(argv):
             file=sys.stderr,
         )
         _RIG["on"] = False
-    log = extract_logger(a.quiet)
+    log = extract_log.extract_logger(a.quiet)
     do_tex = not a.no_textures
     do_mdl = not a.no_models
     do_extract_all = not a.no_extract_all
@@ -8372,7 +8284,7 @@ def _extract_main(argv):
     # (header, stream, out_path, order, platform) -- deferred until all textures
     # are dumped; header and stream wait in a spool file under the output folder
     model_jobs = ModelSpool(a.out)
-    _RUN_LOG.append(log)
+    extract_log.push(log)
     try:
         return _extract_blocks_and_rest(
             a,
@@ -8406,7 +8318,7 @@ def _extract_main(argv):
             do_extract_all,
         )
     finally:
-        _RUN_LOG.pop()
+        extract_log.pop()
         model_jobs.close()
 
 
@@ -9130,6 +9042,50 @@ def _extract_blocks_and_rest(
         )
         return 1
     return 0
+
+
+# ===========================================================================
+# Names that live in other modules
+# ===========================================================================
+#: name here -> (home module, name there).  Reading `watchmen_extract.<name>`
+#: gives the home's object; setting or deleting it (monkeypatch included) sets or
+#: deletes it in the home, so every caller that looks it up there sees the change.
+#: Code here calls such a name as `home.name`.
+_HOMES = {
+    "_RUN_LOG": ("extract_log", "_RUN_LOG"),
+    "_run_warning": ("extract_log", "warn"),
+    "is_warning_line": ("extract_log", "is_warning_line"),
+    "extract_logger": ("extract_log", "extract_logger"),
+    "ByteReader": ("byte_reader", "ByteReader"),
+    "_Rd": ("byte_reader", "ByteReader"),
+}
+
+
+def _forwarding_type(homes):
+    """A module type with one property per name in `homes` that reads, sets and
+    deletes the name in its home module.  A property is a data descriptor, so
+    attribute access goes through it before the module's own namespace, and
+    monkeypatch (pytest 9.2 restores a module attribute from the module's
+    namespace unless a data descriptor serves it) records and restores the
+    home's value."""
+
+    def forward(home, there):
+        def get(_mod):
+            return getattr(importlib.import_module(home), there)
+
+        def put(_mod, value):
+            setattr(importlib.import_module(home), there, value)
+
+        def drop(_mod):
+            delattr(importlib.import_module(home), there)
+
+        return property(get, put, drop, "%s.%s" % (home, there))
+
+    names = {name: forward(*home) for name, home in homes.items()}
+    return type("_Forwarding", (types.ModuleType,), names)
+
+
+sys.modules[__name__].__class__ = _forwarding_type(_HOMES)
 
 
 if __name__ == "__main__":
