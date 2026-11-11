@@ -30,6 +30,7 @@ HOMES = {
     "kapow_block",
     "texture_header",
     "texture_sheet",
+    "texture_decode",
 }
 
 
