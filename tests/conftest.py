@@ -446,6 +446,9 @@ def export_env(tmp_path, monkeypatch, rig):
         return np.asarray(pal, np.float32) * np.float32(1.0)
 
     monkeypatch.setattr(jiggle_d6, "apply_jiggle", apply_jiggle)
+    # the rig's bones are named bone0 .. bone4; here they stand for a skeleton with
+    # jiggle bones, whose jiggled palettes the export keeps in a memo
+    monkeypatch.setattr(jiggle_d6, "jiggle_bones", lambda names: [str(n) for n in names])
     calls["jiggle"] = jig
     return ex, out, calls
 

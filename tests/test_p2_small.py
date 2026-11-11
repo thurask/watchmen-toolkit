@@ -77,6 +77,21 @@ def test_output_names_a_later_stream_completes_a_copy_that_had_none():
     assert n.variants == []
 
 
+def test_output_names_same_bytes_marks_a_repeat_with_the_same_stream_state():
+    """Only a repeat whose header and stream state equal the copy written can be
+    skipped whole; one that lacks the earlier copy's stream is still a repeat."""
+    n = wx.OutputNames()
+    n.place("/a/Fire.bmp", "/l/a.block", b"H", b"S")
+    assert n.same_bytes is False  # new
+    assert n.place("/a/Fire.bmp", "/l/b.block", b"H", b"S")[1] == "repeat" and n.same_bytes
+    assert n.place("/a/Fire.bmp", "/l/c.block", b"H", None)[1] == "repeat"
+    assert n.same_bytes is False  # the stream the first copy had is missing here
+    n.place("/a/Frag.fragment", "/l/a.block", b"F", None)
+    assert n.place("/a/Frag.fragment", "/l/b.block", b"F", None)[1] == "repeat" and n.same_bytes
+    n.place("/a/Frag.fragment", "/l/c.block", b"G", None)
+    assert n.same_bytes is False  # variant
+
+
 def test_output_names_different_bytes_get_their_own_documented_name():
     logged = []
     n = wx.OutputNames(logged.append)
@@ -198,6 +213,37 @@ def test_extract_writes_a_repeated_name_once_and_keeps_both_contents(tmp_path, r
     assert "names       : 2 stored under a second spelling" in log
     assert "/art/M/Rubble_RoofTop_02.model (= /art/M/Rubble_Rooftop_02.model)" in log
     assert "names       : 1 stored with different content in different blocks" in log
+
+
+def test_extract_writes_the_raw_dump_of_an_identical_copy_once(
+    tmp_path, recorded, capsys, monkeypatch
+):
+    files = _two_block_tree(tmp_path)
+    out = tmp_path / "out"
+    written = []
+    real = type(out).write_bytes
+
+    def write_bytes(self, data):
+        if "extracted" in self.parts:
+            written.append(self.relative_to(out / "extracted").as_posix().lower())
+        return real(self, data)
+
+    monkeypatch.setattr(type(out), "write_bytes", write_bytes)
+    assert wx.main([str(files), "-o", str(out), "--no-files", "--no-text", "--no-audio"]) == 0
+    capsys.readouterr()
+    # the texture twin, the model twin and the stream-less skeleton: one write each;
+    # Rock has other bytes in `b` and is written under its own name
+    assert sorted(written) == [
+        "art/m/medium_skeleton.model",
+        "art/m/rock.model",
+        "art/m/rock.model.stream",
+        "art/m/rock~b.model",
+        "art/m/rock~b.model.stream",
+        "art/m/rubble_rooftop_02.model",
+        "art/m/rubble_rooftop_02.model.stream",
+        "art/t/wall.bmp",
+        "art/t/wall.bmp.stream",
+    ]
 
 
 def test_extract_summary_stays_plain_without_repeats(tmp_path, recorded, capsys):

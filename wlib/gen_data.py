@@ -49,9 +49,6 @@ Provenance of the data files shipped in wlib/ (see docs/INDEX.md):
                            `gen_data keys-export/keys-import` converts it
                            to/from readable JSON so it is at least transparent
                            and hand-maintainable.
-  jiggle_params.npz        A capture-fit AR(2) table, not shipped: without it
-                           jiggle_pass delegates to the file-only jiggle_d6
-                           model (the default).
 
 Usage (via the CLI: `watchmen gendata SUBCMD ...`):
   gendata strings   EXE [NAZ_OR_DIR ...] [-o OUT.pkl]   rebuild prop_hash_dict
@@ -149,11 +146,10 @@ def exe_string_map(d):
 def naz_source_strings(src):
     """String harvest over every decompressed block payload of a naz archive
     (or Part 1 loose directory): asset names + all inline string payloads."""
-    import export_female_anims as efa
     import watchmen_extract as we
 
     out = set()
-    for _stem, b in efa.iter_blocks(src):
+    for _stem, b in we.iter_blocks(src):
         if "h" not in b:
             continue
         for e, h, st in we.extract_block(b["h"], b.get("s")):

@@ -19,7 +19,6 @@ import pytest
 
 import characters_export as ce
 import jiggle_d6
-import jiggle_pass
 from conftest import rot_vector
 
 LEVER = np.array([0.0, 0.05, 0.1225])
@@ -169,8 +168,8 @@ def test_model_pinned_reproduces_the_previous_default_bit_for_bit(tmp_path):
         for kw in (dict(), dict(loop=True), dict(loop=False)):
             new = jiggle_d6.apply_jiggle(P, fps, bind, props=PROPS, model="pinned", **kw)
             assert new.dtype == ref.dtype and new.tobytes() == ref.tobytes(), (fps, kw)
-        via_pass = jiggle_pass.apply_jiggle(P, fps, bind, model="pinned", loop=True)
-        assert via_pass.tobytes() == old.apply_jiggle(P, fps, bind).tobytes()
+        via_d6 = jiggle_d6.apply_jiggle(P, fps, bind, model="pinned", loop=True)
+        assert via_d6.tobytes() == old.apply_jiggle(P, fps, bind).tobytes()
         ref = old.apply_jiggle(loop_clip, fps, bind, props=PROPS)
         new = jiggle_d6.apply_jiggle(loop_clip, fps, bind, props=PROPS, model="pinned", loop=True)
         assert new.tobytes() == ref.tobytes()
@@ -418,7 +417,7 @@ def test_short_clips_are_returned_unchanged_looping_or_not(tmp_path, frames):
         st = {}
         out = _solver(P, 30.0, bind, stats=st, **kw)
         assert out is P and st == {}, kw
-    assert jiggle_pass.apply_jiggle(P, 30.0, bind, loop=True) is P
+    assert jiggle_d6.apply_jiggle(P, 30.0, bind, loop=True) is P
 
 
 def test_four_frame_loop_is_baked_and_closed(tmp_path):
@@ -454,16 +453,6 @@ def test_clip_loops_reads_the_game_loop_flag():
     assert ce.clip_loops(meta, "GRIP_pose") is False  # not a game clip
     assert ce.clip_loops(None, "EN4_EXP_MOV_walk_cycle") is False  # extract without metadata
     assert ce.clip_loops({}, "EN4_EXP_MOV_walk_cycle") is False
-
-
-def test_jiggle_pass_forwards_the_loop_flag(tmp_path):
-    bind = _bind(tmp_path)
-    P = _cycle(40)
-    a = jiggle_pass.apply_jiggle(P, 30.0, bind, loop=True)
-    assert np.array_equal(a, jiggle_d6.apply_jiggle(P, 30.0, bind, loop=True))
-    b = jiggle_pass.apply_jiggle(P, 30.0, bind)
-    assert np.array_equal(b, jiggle_d6.apply_jiggle(P, 30.0, bind))
-    assert not np.allclose(a, b, atol=1e-4)
 
 
 def test_export_passes_each_clip_its_loop_flag(export_env, monkeypatch):

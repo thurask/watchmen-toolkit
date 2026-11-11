@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **`characters` walks the model tree once; no jiggle memo for skeletons without jiggle
+  bones; `extract` skips identical repeat copies.** `characters_export._model_index` is built
+  once per `export` call and shared (it was a recursive glob of `extracted/` per variant,
+  about 55 per PC Part 2 run). A skeleton whose bind has no bone `jiggle_d6.jiggle_bones`
+  selects writes no `_bake/<key>_j_*` memo (on PC Part 2: large, medium, small, rsh, nto;
+  1,194 files); its palettes still pass through `apply_jiggle`, so the GLBs are unchanged.
+  `extract` writes the raw dump, its JSON and the files beside it once per name when a later
+  block's copy has the same header and stream (`OutputNames.same_bytes`); a copy that lacks
+  the stream the first had is still written as before. Retired: `jiggle_pass.py` (no
+  importer) and `export_female_anims.py`; `mesh_arrays` is now `mesh_loader.mesh_arrays`, the
+  archive walk is `watchmen_extract.iter_blocks` / `watchmenlib.grab_blocks`. PC Part 2
+  `characters`: 2,407 files byte-identical, 168.6 s -> 149.7 s (measured, Windows). (2026-11-11)
 - **Same-named fragments are tried nearest folder first, by whole folder names.** When an
   entity reference names a fragment that exists in several folders (`Sound.fragment` of every
   level, say), `sound_meta` tries first the one sharing the longest folder path with the

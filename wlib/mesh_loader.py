@@ -474,3 +474,27 @@ def load_submeshes(
         )
         raise
     return subs, rep
+
+
+def mesh_arrays(mh, ms, name="body"):
+    """A skinned model's pieces as one buffer -> (V [(x, y, z)], SI (n,4) uint8 palette
+    indices, SW (n,4) float32, T [(a, b, c)] whole-mesh indices, subs [(vertex base,
+    vertex count, first triangle, triangle count)]), read through load_submeshes
+    like every character loader.  A piece without skin is left out and logged."""
+    pieces, _rep = load_submeshes(mh, ms, name, attrs=False)
+    V, SI, SW, T, subs = [], [], [], [], []
+    for sb in pieces:
+        si, sw = sb["skin"]
+        if si is None:
+            print("  ! %s sub%d: no skin, left out" % (name, sb["index"]))
+            continue
+        base = len(V)
+        ts = len(T)
+        T.extend((base + int(x), base + int(y), base + int(z)) for x, y, z in sb["T"])
+        V.extend(map(tuple, sb["V"].tolist()))
+        SI.append(si)
+        SW.append(sw)
+        subs.append((base, len(sb["V"]), ts, len(T) - ts))
+    SI = np.concatenate(SI).astype(np.uint8) if SI else np.zeros((0, 4), np.uint8)
+    SW = np.concatenate(SW).astype(np.float32) if SW else np.zeros((0, 4), np.float32)
+    return V, SI, SW, T, subs

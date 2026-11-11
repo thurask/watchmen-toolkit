@@ -12,7 +12,7 @@ import zlib
 import pytest
 
 import watchmen_extract as we
-import export_female_anims as efa
+import watchmenlib as wl
 import test_p1_formats as tp1
 import test_p2_part1 as tpp
 
@@ -45,7 +45,7 @@ def test_iter_blocks_yields_what_grab_blocks_returns_in_the_same_order(tmp_path)
         "Levels/Yard/Orphan.block",
         "Levels/Yard/Yard.block",
     ]
-    assert dict(got) == efa.grab_blocks(naz)
+    assert dict(got) == wl.grab_blocks(naz)
     byname = {n: d for n, d, _m in ents}
     assert got[0][1] == {
         "h": byname["Levels/Prison/Prison.block_h_z"],
@@ -56,7 +56,7 @@ def test_iter_blocks_yields_what_grab_blocks_returns_in_the_same_order(tmp_path)
     heads = list(we.iter_blocks(naz, streams=False))
     assert [st for st, _ in heads] == ["Levels/Prison/Prison.block", "Levels/Yard/Yard.block"]
     assert all(set(hs) == {"h"} for _st, hs in heads)
-    assert list(efa.iter_blocks(naz, False)) == heads
+    assert list(wl.iter_blocks(naz, False)) == heads
 
 
 def test_iter_blocks_reads_one_block_at_a_time(tmp_path, monkeypatch):
@@ -78,7 +78,7 @@ def test_a_later_entry_of_the_same_name_replaces_the_earlier_one(tmp_path):
         tmp_path,
         [("B.block_h_z", b"old", 0), ("B.block_s_z", a, 0), ("B.block_h_z", h, 0)],
     )
-    assert efa.grab_blocks(naz) == {"B.block": {"h": h, "s": a}}
+    assert wl.grab_blocks(naz) == {"B.block": {"h": h, "s": a}}
     assert list(we.iter_blocks(naz)) == [("B.block", {"h": h, "s": a})]
 
 

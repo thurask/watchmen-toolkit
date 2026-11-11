@@ -7,7 +7,6 @@ import sys
 import struct
 import numpy as np
 import watchmen_extract as we
-import export_female_anims as efa
 from wutil import load_npz, order_name, qmats_xyzw
 
 # bake() takes bind= and conj= directly; argv is parsed only under __main__,
@@ -241,7 +240,7 @@ def archive_clip(clipname, naz, marks=None):
     instead of stopping at the clip."""
     clip = None
     # headers only: a clip is all header (its stream half is never read)
-    for st, hs in efa.iter_blocks(naz, streams=False):
+    for st, hs in we.iter_blocks(naz, streams=False):
         try:
             it = list(we.extract_block(hs["h"], None))
         except Exception:

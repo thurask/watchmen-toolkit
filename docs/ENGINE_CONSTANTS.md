@@ -1908,13 +1908,12 @@ ps3_p1, x360_p1.
 ### Toolkit: `wlib/jiggle_d6.py`
 
 `jiggle_d6.apply_jiggle(P, fps, bind, model='solver'|'pivot'|'pinned', mode=..., props=,
-extract_root=, latency=None, warmup=None)` — the interface of `jiggle_pass`. It reads the
+extract_root=, latency=None, warmup=None)`. It reads the
 PhysicsWorld props from `GameEssentials.fragment.json` and the geometry from the bind npz.
 `jiggle_d6.DEFAULT_MODEL` = `'solver'`; `pinned` and `pivot` are opt-in (`--jiggle-model pivot`,
 `--jiggle-model pinned`).
-`jiggle_pass.py` without a `jiggle_params.npz` delegates to jiggle_d6 (the npz is not shipped
-in the toolkit; the capture-fit path stays for comparison). `variant_glb.py --jiggle` uses
-jiggle_d6.
+`variant_glb.py --jiggle` uses jiggle_d6. `jiggle_d6.jiggle_bones(names)` lists the bones a
+model moves; `characters` keeps no jiggled-palette memo for a skeleton where it is empty.
 
 - **solver** (`jiggle_d6.SoftLimitJoint`): steps the PhysX soft-limit row with the file
   constants only (`k`, `d`, `limit` per group, `rate_hz`); its one mode is `'file'`

@@ -1,7 +1,6 @@
 """jiggle_d6: FILE-ONLY jiggle pass -- NxD6 swing-soft-limit pendulum integrator.
 
-Drop-in for jiggle_pass.apply_jiggle (same signature); pure file-side data, no
-capture-fit AR(2) params (jiggle_params.npz):
+Pure file-side data, no capture-fit AR(2) params:
 
   spring/damping/limit : GameEssentials.fragment PhysicsWorld node
                          (m_n{breast,belly,hair}springconstant/springdamping/
@@ -121,6 +120,13 @@ def _group(bone):
     if "hair" in b or "ponytail" in b:
         return "hair"
     return None
+
+
+def jiggle_bones(names):
+    """The bones of a skeleton's name list that a jiggle model moves (_group selects
+    them); empty for a skeleton without jiggle bones, whose palettes every model
+    returns unchanged in value."""
+    return [str(n) for n in names if _group(str(n))]
 
 
 def _orth(R):
@@ -398,7 +404,7 @@ def _apply_jiggle_pinned(
                 v = v * t
             x[i] = xi
         x *= gain
-        # back to clip grid + apply (same convention as jiggle_pass)
+        # back to clip grid + apply
         for i, ti in enumerate(t_o):
             j = min(int(ti * hz), N - 2)
             # clamp w: on clips faster than the sim grid (4x dense bakes,

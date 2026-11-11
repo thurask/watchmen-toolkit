@@ -22,7 +22,6 @@ import pytest
 
 import extract_skeletons as es
 import jiggle_d6
-import jiggle_pass
 import parse_model_nodes as pmn
 import skeleton_records as sr
 from conftest import joint_origin, rot_vector
@@ -120,15 +119,6 @@ def test_pinned_model_keeps_the_old_numbers(tmp_path):
     expect = np.linalg.norm(np.cross(r, [0.0, -14.82, 0.0])) / K  # static balance of r x g
     assert sag == pytest.approx(expect, rel=0.05)
     assert np.allclose(joint_origin(out, 2, tb), joint_origin(P, 2, tb), atol=1e-6)  # origin pinned
-
-
-def test_jiggle_pass_forwards_the_model(tmp_path):
-    bind, _tb = _bind(tmp_path)
-    P = _palettes(SWING, [0, 0, 1])
-    a = jiggle_pass.apply_jiggle(P, 60.0, bind, model="pinned")
-    b = jiggle_pass.apply_jiggle(P, 60.0, bind)
-    assert np.array_equal(a, jiggle_d6.apply_jiggle(P, 60.0, bind, model="pinned"))
-    assert np.array_equal(b, jiggle_d6.apply_jiggle(P, 60.0, bind))
 
 
 # ---------------------------------------------------------------------------

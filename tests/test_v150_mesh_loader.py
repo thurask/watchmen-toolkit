@@ -14,7 +14,7 @@ the numpy vertex decoder.
                   (weight 0, the rest renormalised), never clamped onto
                   another bone; a vertex left with no weight drops its piece
     callers       char_lib.load_parts, variant_glb.load_parts, the weapon
-                  attachment and export_female_anims.mesh_arrays all read
+                  attachment and mesh_loader.mesh_arrays all read
                   through it; one unreadable archive block is logged
     half floats   half_to_float equals numpy's float16 on all 65,536 codes; a
                   non-finite normal or UV drops that attribute with a note
@@ -32,7 +32,6 @@ import pytest
 
 import char_lib
 import characters_export as ce
-import export_female_anims as efa
 import mesh_loader as ml
 import variant_glb as vg
 import watchmen_extract as we
@@ -347,7 +346,7 @@ def test_variant_glb_drops_an_outside_index_too(monkeypatch):
     hdr, stream = tv.skinned_model("<", [(1, 0, 0, 0)] * 8, names=tv.MESH_NODES)
     stream = _skin(stream, 2, (2, 9, 0, 0), (0.25, 0.75, 0, 0))
     monkeypatch.setattr(
-        vg.efa, "iter_blocks", lambda naz, streams=True: iter([("blk", {"h": b"H", "s": b"S"})])
+        vg.we, "iter_blocks", lambda naz, streams=True: iter([("blk", {"h": b"H", "s": b"S"})])
     )
     monkeypatch.setattr(
         we, "extract_block", lambda h, s: iter([(tv._Entry("/x/Body.model"), hdr, stream)])
@@ -372,7 +371,7 @@ def test_the_weapon_attachment_reads_the_header(no_scan, tmp_path):
 def test_one_unreadable_block_is_logged_and_the_walk_goes_on(monkeypatch, capsys):
     hdr, stream = tv.skinned_model("<", [(i % 5, 0, 0, 0) for i in range(8)], names=tv.MESH_NODES)
     blocks = [("/Levels/A/Bad.block", {"h": b"bad", "s": b""}), ("/L/Good", {"h": b"H", "s": b"S"})]
-    monkeypatch.setattr(vg.efa, "iter_blocks", lambda naz, streams=True: iter(blocks))
+    monkeypatch.setattr(vg.we, "iter_blocks", lambda naz, streams=True: iter(blocks))
 
     def extract_block(h, s):
         if h == b"bad":
@@ -387,7 +386,7 @@ def test_one_unreadable_block_is_logged_and_the_walk_goes_on(monkeypatch, capsys
 def test_an_interrupt_during_the_walk_is_not_swallowed(monkeypatch):
     """1.4.0 had a bare `except:` there."""
     monkeypatch.setattr(
-        vg.efa, "iter_blocks", lambda naz, streams=True: iter([("blk", {"h": b"H", "s": b"S"})])
+        vg.we, "iter_blocks", lambda naz, streams=True: iter([("blk", {"h": b"H", "s": b"S"})])
     )
 
     def interrupt(h, s):
@@ -398,11 +397,11 @@ def test_an_interrupt_during_the_walk_is_not_swallowed(monkeypatch):
         vg.load_parts(["Body"], tv.PALETTE, naz="x.naz")
 
 
-def test_export_female_anims_reads_its_body_through_the_loader(capsys):
+def test_mesh_arrays_reads_the_body_through_the_loader(capsys):
     hdr, stream = tv.skinned_model(
         "<", [(i % 5, 0, 0, 0) for i in range(8)], names=tv.MESH_NODES, nsub=2
     )
-    V, SI, SW, T, subs = efa.mesh_arrays(hdr, stream, "Body")
+    V, SI, SW, T, subs = ml.mesh_arrays(hdr, stream, "Body")
     assert len(V) == 16 and SI.dtype == np.uint8 and SW.dtype == np.float32
     assert SI[:, 0].tolist() == [i % 5 for i in range(8)] * 2  # palette indices, as stored
     assert subs == [(0, 8, 0, 6), (8, 8, 6, 6)] and T[6] == (8, 9, 10)

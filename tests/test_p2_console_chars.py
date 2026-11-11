@@ -181,7 +181,7 @@ def test_variant_glb_load_parts_keeps_it_too(monkeypatch):
     hdr, stream = console_skinned_model()
     # load_parts walks the archive one block at a time (iter_blocks, 1.5.0)
     monkeypatch.setattr(
-        vg.efa, "iter_blocks", lambda naz, streams=True: iter([("blk", {"h": b"H", "s": b"S"})])
+        vg.we, "iter_blocks", lambda naz, streams=True: iter([("blk", {"h": b"H", "s": b"S"})])
     )
     monkeypatch.setattr(
         we, "extract_block", lambda h, s: iter([(tv._Entry("/x/Body.model"), hdr, stream)])

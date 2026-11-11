@@ -5848,7 +5848,12 @@ class OutputNames:
     archive's entry order.
 
     `run` (a canonical_names.Run) gives every name its canonical spelling before
-    it is placed and records the stored one; without it names stay as stored."""
+    it is placed and records the stored one; without it names stay as stored.
+
+    `same_bytes` is True after place() returned "repeat" for a copy whose header
+    AND stream state equal the copy already written (both with the same stream, or
+    both without one); a repeat that lacks the stream the earlier copy had is
+    "repeat" with same_bytes False."""
 
     def __init__(self, log=None, run=None):
         self._log = log if callable(log) else (lambda *a: None)
@@ -5856,6 +5861,7 @@ class OutputNames:
         self._by = {}  # lower-case name -> [variant dict]
         self._taken = set()  # lower-case output names
         self.repeats = 0
+        self.same_bytes = False
         self.case_twins = []  # (spelling skipped, spelling written)
         self.variants = []  # (name as stored, name written, block)
 
@@ -5887,6 +5893,7 @@ class OutputNames:
         key = name.replace("\\", "/").lower()
         hd, sd = self._digest(header, stream)
         known = self._by.setdefault(key, [])
+        self.same_bytes = False
         for v in known:
             if v["hd"] != hd or (sd is not None and v["sd"] is not None and v["sd"] != sd):
                 continue
@@ -5900,6 +5907,7 @@ class OutputNames:
                 v["sd"] = sd
                 return v["name"], "fill"
             self.repeats += 1
+            self.same_bytes = v["sd"] == sd
             return v["name"], "repeat"
         out, k = name, 1
         if known:
@@ -8636,8 +8644,10 @@ def _extract_blocks_and_rest(
                     )
             if not a.no_audio and low.endswith(".fragment") and b"MusicStreamSlot" in header:
                 music_frags.append((name, header, BLOCK_ORDER))
-            # dump EVERY asset raw (header + optional stream) to extracted/ for offline analysis
-            if do_extract_all:
+            # dump EVERY asset raw (header + optional stream) to extracted/ for offline
+            # analysis; a later copy with the same header and stream wrote the same files
+            # under the same name already (raw, JSON, the files beside it), so it is skipped
+            if do_extract_all and not (placed == "repeat" and names.same_bytes):
                 _ep = safe(a.out / "extracted", name)
                 _ep.parent.mkdir(parents=True, exist_ok=True)
                 _ep.write_bytes(header if header else b"")
@@ -8660,8 +8670,8 @@ def _extract_blocks_and_rest(
                     )
                 ):
                     _kind = "." + low.rsplit(".", 1)[-1]
-                    # counted once per output name (an identical copy in a later block
-                    # is written again but is the same asset)
+                    # counted once per output name (a later copy without the stream the
+                    # first one had is written again but is the same asset)
                     _one = 1 if placed != "repeat" else 0
                     _cnt = misc.setdefault(_kind, [0, 0])
                     _cnt[0] += _one

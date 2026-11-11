@@ -22,7 +22,6 @@ if _HERE not in sys.path:
     sys.path.append(_HERE)  # append, never insert: must not shadow stdlib
 
 import watchmen_extract as _we  # naz walk, block extract, model decode  # noqa: E402
-import export_female_anims as _efa  # grab_blocks + clip helpers  # noqa: E402
 import extract_skeletons as _es  # skeleton .model record parsing  # noqa: E402
 import rig_glb as _rig  # skin indices/weights decode  # noqa: E402
 import kapow_props as _kp  # property hash + prop-bag JSON  # noqa: E402
@@ -173,7 +172,7 @@ def grab_blocks(naz=None):
     reads one at a time)."""
     if naz is None:
         naz = default_naz()  # 01_game.naz, else game.naz
-    return _efa.grab_blocks(naz)
+    return dict(_we.iter_blocks(naz))
 
 
 def iter_blocks(naz=None, streams=True):
@@ -181,7 +180,7 @@ def iter_blocks(naz=None, streams=True):
     (watchmen_extract.iter_blocks; streams=False reads the headers only)."""
     if naz is None:
         naz = default_naz()  # 01_game.naz, else game.naz
-    return _efa.iter_blocks(naz, streams)
+    return _we.iter_blocks(naz, streams)
 
 
 def block_order(naz=None):

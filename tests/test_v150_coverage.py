@@ -11,7 +11,7 @@
     watchmen_extract._carve_texture_legacy  the coherence-search carve
     watchmen_extract.carve_texture_console  a PS3 L8 and an X360 DXT1 texture with
                                known pixels, the early returns
-    export_female_anims        the archive shims and mesh_arrays' skipped pieces
+    mesh_loader.mesh_arrays    the archive walk and mesh_arrays' skipped pieces
 
 No game files.
 """
@@ -410,18 +410,16 @@ def test_legacy_carve_without_a_normal_map_and_of_noise(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# export_female_anims: what is left
+# watchmenlib's archive walk and mesh_loader.mesh_arrays
 # ---------------------------------------------------------------------------
 
 
-def test_export_female_anims_shims(monkeypatch, capsys):
-    import export_female_anims as efa
+def test_archive_walk_and_mesh_arrays(monkeypatch, capsys):
     import mesh_loader
     import watchmenlib as wl
 
     blocks = [("a", {"h": b"1", "s": b"2"}), ("b", {"h": b"3", "s": b"4"})]
     monkeypatch.setattr(we, "iter_blocks", lambda naz, streams=True: iter(blocks))
-    assert efa.grab_blocks("x.naz") == dict(blocks)
     assert list(wl.iter_blocks("x.naz")) == blocks and wl.grab_blocks("x.naz") == dict(blocks)
     V = np.zeros((3, 3), np.float32)
     pieces = [
@@ -436,9 +434,9 @@ def test_export_female_anims_shims(monkeypatch, capsys):
     monkeypatch.setattr(
         mesh_loader, "load_submeshes", lambda mh, ms, name, attrs=False: (pieces, {})
     )
-    Vs, SI, SW, T, subs = efa.mesh_arrays(b"", b"", "Body")
+    Vs, SI, SW, T, subs = mesh_loader.mesh_arrays(b"", b"", "Body")
     assert "Body sub0: no skin, left out" in capsys.readouterr().out
     assert len(Vs) == 3 and subs == [(0, 3, 0, 1)] and SI.shape == (3, 4)
     monkeypatch.setattr(mesh_loader, "load_submeshes", lambda mh, ms, name, attrs=False: ([], {}))
-    Vs, SI, SW, T, subs = efa.mesh_arrays(b"", b"", "Body")
+    Vs, SI, SW, T, subs = mesh_loader.mesh_arrays(b"", b"", "Body")
     assert SI.shape == (0, 4) and SW.dtype == np.float32 and subs == []

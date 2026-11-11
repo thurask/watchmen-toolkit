@@ -258,7 +258,7 @@ def _run_load_parts(monkeypatch, order, joints):
     hdr, stream = skinned_model(order, joints, names=MESH_NODES)
     # load_parts walks the archive one block at a time (iter_blocks, 1.5.0)
     monkeypatch.setattr(
-        vg.efa, "iter_blocks", lambda naz, streams=True: iter([("blk", {"h": b"H", "s": b"S"})])
+        vg.we, "iter_blocks", lambda naz, streams=True: iter([("blk", {"h": b"H", "s": b"S"})])
     )
     monkeypatch.setattr(
         we, "extract_block", lambda h, s: iter([(_Entry("/x/Body.model"), hdr, stream)])

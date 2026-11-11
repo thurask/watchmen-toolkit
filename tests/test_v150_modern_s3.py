@@ -248,7 +248,7 @@ def test_variant_mesh_failure_names_model_archive_and_platform(monkeypatch):
 
     entry = types.SimpleNamespace(name="art/characters/Body.model")
     monkeypatch.setattr(
-        vg.efa,
+        vg.we,
         "iter_blocks",
         lambda naz, streams=True: iter([("derived_ps3/levels/x", {"h": b"h", "s": b"s"})]),
     )

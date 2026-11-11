@@ -556,9 +556,28 @@ def _brown_hair_layers(texroots, hair_mat, tint_mat):
     return out
 
 
+#: model indexes of the `export` call in progress (extract folder -> index), None
+#: outside one.  The extracted tree does not change while characters are exported, so
+#: one walk serves discover, the bind check and every variant.
+_MODEL_INDEX_RUN = None
+
+
 def _model_index(extract_out):
     """model base name -> base path.  Two models may share a name (AirVent_01): the
-    one whose path sorts first is taken, whatever order the file system lists in."""
+    one whose path sorts first is taken, whatever order the file system lists in.
+    Inside `export` the index is built once per extract folder and shared (callers
+    only read it); outside it every call walks the tree."""
+    run = _MODEL_INDEX_RUN
+    if run is not None:
+        key = os.path.abspath(extract_out)
+        if key not in run:
+            run[key] = _scan_model_index(extract_out)
+        return run[key]
+    return _scan_model_index(extract_out)
+
+
+def _scan_model_index(extract_out):
+    """_model_index without the run cache: one recursive walk of extracted/."""
     idx = {}
     hits = glob.glob(os.path.join(extract_out, "extracted", "**", "*.model"), recursive=True)
     for p in sorted(hits, key=lambda q: (q.replace(os.sep, "/").lower(), q)):
@@ -1278,6 +1297,31 @@ def export(
     ragdoll: True (default; $WATCHMEN_RAGDOLL=0 turns it off) = the ragdoll rig of the
     variant's slot-0 model as helper nodes in the GLB (node "ragdoll", outside the
     scene) and <Variant>.ragdoll.json beside it (ragdoll_rig)."""
+    global _MODEL_INDEX_RUN
+    outer = _MODEL_INDEX_RUN
+    if outer is None:
+        _MODEL_INDEX_RUN = {}
+    try:
+        return _export_run(
+            extract_out,
+            outdir,
+            naz,
+            budget,
+            only,
+            jiggle_model,
+            face_rule,
+            face_idle,
+            parts,
+            ragdoll,
+        )
+    finally:
+        _MODEL_INDEX_RUN = outer
+
+
+def _export_run(
+    extract_out, outdir, naz, budget, only, jiggle_model, face_rule, face_idle, parts, ragdoll
+):
+    """The body of `export` (which holds the run's model index around it)."""
     if naz is None:
         naz = default_naz()  # 01_game.naz, else game.naz
     import char_lib
@@ -1343,10 +1387,16 @@ def export(
                     # memo exists, read pal from the memo ONLY (raw npz is
                     # opened just for dur/fps), halving mount I/O per skeleton.
                     anims = []
+                    import jiggle_d6
                     from jiggle_d6 import apply_jiggle, cache_file
 
                     jdir = jiggle_cache_dir(cdir, jiggle_model, world)  # disk memo (chunked runs)
-                    os.makedirs(jdir, exist_ok=True)
+                    # a skeleton without jiggle bones gets no memo: its "jiggled" palette
+                    # equals the raw bake, and solving it again costs a copy
+                    with load_npz(bind) as _bz:
+                        memo = bool(jiggle_d6.jiggle_bones(_bz["names"]))
+                    if memo:
+                        os.makedirs(jdir, exist_ok=True)
                     jn = 0
                     jig_todo = []  # anim indices needing a jiggle attempt
                     for f in sorted(glob.glob(os.path.join(cdir, "*.npz"))):
@@ -1357,7 +1407,7 @@ def export(
                         d = np.load(f)
                         fps = bake_fps(d)  # header-exact, for every clip
                         jf = os.path.join(jdir, cache_file(nm, jiggle_model, clip_loops(meta, nm)))
-                        if jiggle_memo_is_current(jf, f, nm, fps):
+                        if memo and jiggle_memo_is_current(jf, f, nm, fps):
                             anims.append((nm, np.load(jf)["pal"], fps))
                             jn += 1
                         else:
@@ -1379,12 +1429,17 @@ def export(
                             if jn == 0:
                                 break  # skeleton without jiggle bones
                             continue
-                        jf = os.path.join(jdir, cache_file(nm, jiggle_model, clip_loops(meta, nm)))
-                        np.savez(jf + ".tmp.npz", pal=jp.astype(np.float32), fps=np.float32(fps))
-                        os.replace(jf + ".tmp.npz", jf)
+                        if memo:
+                            jf = os.path.join(
+                                jdir, cache_file(nm, jiggle_model, clip_loops(meta, nm))
+                            )
+                            np.savez(
+                                jf + ".tmp.npz", pal=jp.astype(np.float32), fps=np.float32(fps)
+                            )
+                            os.replace(jf + ".tmp.npz", jf)
                         anims[i] = (nm, jp, fps)
                         jn += 1
-                    if jn:
+                    if jn and memo:
                         print("  jiggle_d6: %d clips [%s]" % (jn, key))
                 bv = load_npz(bind)
                 bn = [str(x) for x in bv["names"]]

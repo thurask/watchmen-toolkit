@@ -16,7 +16,6 @@ _D = os.path.dirname(os.path.abspath(__file__))
 if _D not in sys.path:
     sys.path.append(_D)  # append, never insert(0): flat module names must not shadow the stdlib
 import watchmen_extract as we  # noqa: E402
-import export_female_anims as efa  # noqa: E402
 import rig_glb  # noqa: E402
 
 # AXIS: the Kapow engine is ALREADY Y-up, so no axis conversion is needed for
@@ -330,7 +329,7 @@ def load_parts(mesh_names, palette_names, naz=None):
     import mesh_loader as ml
 
     found = {}
-    for st, hs in efa.iter_blocks(naz):
+    for st, hs in we.iter_blocks(naz):
         if "h" not in hs:
             continue
         try:
@@ -1800,7 +1799,7 @@ def build(
 
     # jiggle_d6 'engine' is the bake default: it is at capture parity (dance
     # capture 3.1-3.8deg vs d6 2.65 / AR2+gain 4.4; ENGINE_CONSTANTS.md) and
-    # file-only.  AR2 alternative: from jiggle_pass import apply_jiggle
+    # file-only.
     from jiggle_d6 import apply_jiggle, load_world_props
 
     world = load_world_props(extract_root) if jiggle else None

@@ -168,7 +168,7 @@ header).
   (`ENGINE_CONSTANTS.md`, "How a model's textures are resolved").
 - **The character pieces read the header too.** `char_lib.load_parts`,
   `variant_glb.load_parts`, the weapon / rigid attachments of
-  `characters_export` and `export_female_anims.mesh_arrays` all go through
+  `characters_export` and `mesh_loader.mesh_arrays` all go through
   `wlib/mesh_loader.py` `load_submeshes`: every render buffer of format 5 / 6
   at the stream offset `decode_model_mesh` gives (part-local positions, the
   primitive type honoured), paired with its geometry descriptor so that the

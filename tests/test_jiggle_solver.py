@@ -20,7 +20,6 @@ import pytest
 
 import characters_export as ce
 import jiggle_d6
-import jiggle_pass
 from conftest import joint_origin, rot_vector
 
 LEVER = np.array([0.0, 0.05, 0.1225])  # parent -> bone, in the parent frame (|r| = 0.1323)
@@ -387,10 +386,6 @@ def test_cli_and_wrappers_accept_the_solver_model(tmp_path, monkeypatch, capsys)
     assert calls["characters"] == "solver"
     assert watchmen.main(["w", "characters", "-h"]) == 0
     assert "solver|pivot|pinned" in capsys.readouterr().out
-    bind, _tb = _bind(tmp_path)
-    P = _palettes(_step_clip(2))
-    a = jiggle_pass.apply_jiggle(P, 60.0, bind, model="solver")
-    assert np.array_equal(a, jiggle_d6.apply_jiggle(P, 60.0, bind, model="solver"))
 
 
 # ---------------------------------------------------------------------------
