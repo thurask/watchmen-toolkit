@@ -198,7 +198,6 @@ def test_extract_summary_counts_models_without_glb(tmp_path, monkeypatch, capsys
 
     monkeypatch.setattr(wx, "carve_texture", lambda *a, **k: True)
     monkeypatch.setattr(wx, "decode_model", decode)
-    monkeypatch.setattr(wx, "HAVE_IMG", True)
     out = tmp_path / "out"
     args = [str(files), "-o", str(out), "--no-files", "--no-text", "--no-audio", "--glb"]
     try:
@@ -218,7 +217,6 @@ def test_extract_summary_counts_models_without_glb(tmp_path, monkeypatch, capsys
 def test_extract_summary_without_glb_option_has_no_glb_line(tmp_path, monkeypatch, capsys):
     files = ps._two_block_tree(tmp_path)
     monkeypatch.setattr(wx, "carve_texture", lambda *a, **k: True)
-    monkeypatch.setattr(wx, "HAVE_IMG", True)
     assert wx.main([str(files), "-o", str(tmp_path / "o"), "--no-files", "--no-text"]) == 0
     log = capsys.readouterr().out
     assert "model GLBs" not in log and "no GLB for" not in log

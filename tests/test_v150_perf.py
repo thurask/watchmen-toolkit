@@ -220,13 +220,6 @@ def test_submesh_materials_equals_the_1_4_0_scan():
     assert n >= 40
 
 
-def test_submesh_materials_without_numpy(monkeypatch):
-    order, h = next(_model_headers())
-    want = old_submesh_materials(h, order)
-    monkeypatch.setattr(we, "HAVE_IMG", False)
-    assert we.submesh_materials(h, order) == want
-
-
 def test_u32_view_of_every_offset():
     rng = random.Random(1)
     for n in range(0, 23):

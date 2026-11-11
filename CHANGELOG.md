@@ -15,6 +15,13 @@
   of 20 cases, relative difference 2e-17, binary buffers identical; `rig_glb` re-encodes
   textures with Pillow, so images are compared as pixels. `GLB_GOLDEN_STRICT=1` demands the
   SHA-256 (it holds on Linux, Python 3.13, numpy 2.1 and 2.5). (2026-11-11)
+- **numpy and Pillow are plain imports of `watchmen_extract`.** `HAVE_IMG` is gone with the
+  no-numpy branches of `_descriptor_candidates`, `_console_color_order_inferred`,
+  `_console_color_white` and `decode_vertex_attributes`; `decode_mesh_vertices` always takes
+  its numpy path, and the per-vertex loop it is held to (`_decode_sub_loop`) lives in
+  `tests/test_v150_mesh_loader.py`. Both are declared dependencies, so nothing changes where
+  they are installed; without them the module no longer imports (before, `extract` skipped
+  textures and models with a note). (2026-11-11)
 
 ## 1.7.0 — 2026-11-11
 

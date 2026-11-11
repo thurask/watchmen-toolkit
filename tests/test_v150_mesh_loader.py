@@ -25,6 +25,7 @@ the numpy vertex decoder.
 Synthetic fixtures only (the builders of test_p3_part1_model,
 test_v120_regressions and test_p2_console_chars)."""
 
+import math
 import struct
 
 import numpy as np
@@ -461,6 +462,71 @@ def _same(a, b):
     )
 
 
+def decode_sub_loop(stream, vbo, nv, stride, be=False, restored=None, notes=None):
+    """decode_mesh_vertices as a per-vertex struct loop (with the non-finite rule):
+    the reference the numpy version is held to."""
+    fmt = ">3f" if be else "<3f"
+    hfmt = ">H" if be else "<H"
+    verts = [struct.unpack_from(fmt, stream, vbo + i * stride) for i in range(nv)]
+    norms = None
+    if stride >= 20:
+        try:
+            norms, bad = [], 0
+            for i in range(nv):
+                if be:
+                    h = we._dec1110(struct.unpack_from(">I", stream, vbo + i * stride + 12)[0])
+                else:
+                    b = vbo + i * stride + 12
+                    h = [
+                        we.half_to_float(struct.unpack_from(hfmt, stream, b + 2 * k)[0])
+                        for k in range(3)
+                    ]
+                if not all(math.isfinite(c) for c in h):
+                    bad += 1
+                    continue
+                m = (h[0] * h[0] + h[1] * h[1] + h[2] * h[2]) ** 0.5
+                norms.append((h[0] / m, h[1] / m, h[2] / m) if m > 1e-9 else (0.0, 0.0, 0.0))
+            if bad:
+                norms = None
+                if notes is not None:
+                    notes.append(
+                        "%d of %d normals hold an infinite or NaN half float: normals not written"
+                        % (bad, nv)
+                    )
+        except struct.error:
+            norms = None
+    uvs = None
+    if stride >= 28 or (be and stride >= 24):
+        try:
+            uo = 20 if be else 24
+            uvs = [
+                (
+                    we.half_to_float(struct.unpack_from(hfmt, stream, vbo + i * stride + uo)[0]),
+                    we.half_to_float(
+                        struct.unpack_from(hfmt, stream, vbo + i * stride + uo + 2)[0]
+                    ),
+                )
+                for i in range(nv)
+            ]
+            bad = sum(1 for u, v in uvs if not (math.isfinite(u) and math.isfinite(v)))
+            if bad:
+                uvs = None
+                if notes is not None:
+                    notes.append(
+                        "%d of %d UVs hold an infinite or NaN half float: UVs not written"
+                        % (bad, nv)
+                    )
+        except struct.error:
+            uvs = None
+    if nv == we.LASH_RESTORE["vertex_count"] and uvs and we.synth_enabled():
+        fixed = we.lash_restored_uvs(uvs)
+        if fixed is not None:
+            uvs = fixed
+            if restored is not None:
+                restored.append("eyelash_uvs")
+    return verts, norms, uvs
+
+
 @pytest.mark.parametrize(
     "be, stride",
     [
@@ -482,7 +548,7 @@ def test_decode_sub_equals_the_per_vertex_loop(be, stride):
             for vbo in (0, 3):
                 n1, n2 = [], []
                 a = we.decode_mesh_vertices(s, vbo, nv, stride, be, None, n1)
-                b = we._decode_sub_loop(s, vbo, nv, stride, be, None, n2)
+                b = decode_sub_loop(s, vbo, nv, stride, be, None, n2)
                 assert all(_same(x, y) for x, y in zip(a, b)), (nv, finite, vbo)
                 assert n1 == n2
 
@@ -503,7 +569,7 @@ def _vertex(normal=(0, 0, 1), uv=(0.5, 0.5)):
 _H1, _H05, _INF, _NAN = 0x3C00, 0x3800, 0x7C00, 0x7E00
 
 
-@pytest.mark.parametrize("decode", [we.decode_mesh_vertices, we._decode_sub_loop])
+@pytest.mark.parametrize("decode", [we.decode_mesh_vertices, decode_sub_loop])
 def test_a_non_finite_normal_or_uv_drops_that_attribute_with_a_note(decode):
     s = _vertex((0, 0, _H1), (_H05, _H05)) + _vertex((_NAN, 0, _H1), (_H05, _INF))
     notes = []

@@ -296,7 +296,6 @@ def writers(monkeypatch):
 
     monkeypatch.setattr(wx, "carve_texture", carve)
     monkeypatch.setattr(wx, "decode_model", decode)
-    monkeypatch.setattr(wx, "HAVE_IMG", True)
     return seen
 
 

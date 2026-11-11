@@ -256,7 +256,6 @@ def test_extract_passes_the_block_path_console_to_every_model(tmp_path, monkeypa
 
     monkeypatch.setattr(we, "carve_texture", lambda *a, **k: True)
     monkeypatch.setattr(we, "decode_model", decode)
-    monkeypatch.setattr(we, "HAVE_IMG", True)
     args = [str(files), "-o", str(tmp_path / "o"), "--no-files", "--no-text", "--no-audio"]
     assert we.main(args) == 0
     capsys.readouterr()

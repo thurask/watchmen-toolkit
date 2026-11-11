@@ -44,7 +44,7 @@ Usage:
         [--limit N]       stop after N block assets (debug)
         [--quiet]
 
-Requires numpy + Pillow for textures/models (audio is pure-stdlib). Python 3.13+.
+Requires numpy and Pillow. Python 3.13+.
 """
 
 import argparse
@@ -52,7 +52,6 @@ import functools
 import hashlib
 import io
 import itertools
-import math
 import os
 import re
 import struct
@@ -61,6 +60,9 @@ import zlib
 import array
 import wave
 from pathlib import Path
+
+import numpy as np
+from PIL import Image
 
 # the flat wlib modules import each other by name (`import kapow_props`); one path
 # setup for this module, also when it is run as a script or loaded by file path.
@@ -76,14 +78,6 @@ _COEFB = struct.pack("<14h", *_COEF)
 _ADAPT = (230, 230, 230, 230, 307, 409, 512, 614, 768, 614, 512, 409, 307, 230, 230, 230)
 _C1 = (256, 512, 0, 192, 240, 460, 392)
 _C2 = (0, -256, 0, 64, 0, -208, -232)
-
-try:
-    import numpy as np
-    from PIL import Image
-
-    HAVE_IMG = True
-except ImportError:
-    HAVE_IMG = False
 
 
 # ===========================================================================
@@ -3673,70 +3667,6 @@ def _rows3(A):
     return list(zip(*A.T.tolist(), strict=True)) if len(A) else []
 
 
-def _decode_sub_loop(stream, vbo, nv, stride, be=False, restored=None, notes=None):
-    """decode_mesh_vertices as a per-vertex struct loop (with the non-finite rule):
-    used when numpy is missing, and the reference the tests hold the numpy
-    version to."""
-    fmt = ">3f" if be else "<3f"
-    hfmt = ">H" if be else "<H"
-    verts = [struct.unpack_from(fmt, stream, vbo + i * stride) for i in range(nv)]
-    norms = None
-    if stride >= 20:
-        try:
-            norms, bad = [], 0
-            for i in range(nv):
-                if be:
-                    h = _dec1110(struct.unpack_from(">I", stream, vbo + i * stride + 12)[0])
-                else:
-                    b = vbo + i * stride + 12
-                    h = [
-                        half_to_float(struct.unpack_from(hfmt, stream, b + 2 * k)[0])
-                        for k in range(3)
-                    ]
-                if not all(math.isfinite(c) for c in h):
-                    bad += 1
-                    continue
-                m = (h[0] * h[0] + h[1] * h[1] + h[2] * h[2]) ** 0.5
-                norms.append((h[0] / m, h[1] / m, h[2] / m) if m > 1e-9 else (0.0, 0.0, 0.0))
-            if bad:
-                norms = None
-                if notes is not None:
-                    notes.append(
-                        "%d of %d normals hold an infinite or NaN half float: normals not written"
-                        % (bad, nv)
-                    )
-        except struct.error:
-            norms = None
-    uvs = None
-    if stride >= 28 or (be and stride >= 24):
-        try:
-            uo = 20 if be else 24
-            uvs = [
-                (
-                    half_to_float(struct.unpack_from(hfmt, stream, vbo + i * stride + uo)[0]),
-                    half_to_float(struct.unpack_from(hfmt, stream, vbo + i * stride + uo + 2)[0]),
-                )
-                for i in range(nv)
-            ]
-            bad = sum(1 for u, v in uvs if not (math.isfinite(u) and math.isfinite(v)))
-            if bad:
-                uvs = None
-                if notes is not None:
-                    notes.append(
-                        "%d of %d UVs hold an infinite or NaN half float: UVs not written"
-                        % (bad, nv)
-                    )
-        except struct.error:
-            uvs = None
-    if nv == LASH_RESTORE["vertex_count"] and uvs and synth_enabled():
-        fixed = lash_restored_uvs(uvs)
-        if fixed is not None:
-            uvs = fixed
-            if restored is not None:
-                restored.append("eyelash_uvs")
-    return verts, norms, uvs
-
-
 def decode_mesh_vertices(stream, vbo, nv, stride, be=False, restored=None, notes=None):
     """Vertex fields.  PC (44/56): pos f32x3 @0, normal half3 @12, uv half2 @24.
     Console (32/44): pos f32x3 @0 (BE), normal 11:11:10 u32 @12, color @16,
@@ -3753,8 +3683,6 @@ def decode_mesh_vertices(stream, vbo, nv, stride, be=False, restored=None, notes
     with a non-finite value; no shipped model has one (measured).  Read with
     numpy strided views, one row per vertex; the values are the per-vertex
     struct loop's, bit for bit."""
-    if "np" not in globals():  # numpy is a dependency; without it, the per-vertex loop
-        return _decode_sub_loop(stream, vbo, nv, stride, be, restored, notes)
     # a signalling NaN among the floats is quieted as struct.unpack_from quiets it;
     # numpy would also raise a RuntimeWarning for it
     with np.errstate(invalid="ignore"):
@@ -3900,22 +3828,10 @@ def _u32_all(header, order="<"):
 def _descriptor_candidates(header, order="<"):
     """Offsets p (0 <= p < len - 24) that pass the geometry-descriptor test of
     find_descriptors: [fa][nv][G 5|6][fb = fa, 0|8][ib even 6..8e6][1].
-    Vectorised over every byte offset with numpy when it is there."""
+    Vectorised over every byte offset."""
     n = len(header)
     if n - 24 <= 0:
         return []
-    if not HAVE_IMG:  # no numpy: the word-by-word scan
-        return [
-            p_
-            for p_ in range(0, n - 24)
-            if _u32(header, p_ + 8, order) in (5, 6)
-            and _u32(header, p_, order) == _u32(header, p_ + 12, order)
-            and _u32(header, p_, order) in (0, 8)
-            and _u32(header, p_ + 20, order) == 1
-            and 3 <= _u32(header, p_ + 4, order) <= 300000
-            and 6 <= _u32(header, p_ + 16, order) <= 8000000
-            and _u32(header, p_ + 16, order) % 2 == 0
-        ]
     W = _u32_all(header, order)
     m = n - 24
     fa, nv, G, fb, ib, one = (W[k : k + m] for k in (0, 4, 8, 12, 16, 20))
@@ -5553,8 +5469,6 @@ def console_platform_for(path):
 
 def _console_color_order_inferred(stream, buffers):
     """The alpha rule of console_color_order: "argb" / "rgba" / None."""
-    if not HAVE_IMG:
-        return None
     a0 = a3 = True
     n = 0
     for b in buffers:
@@ -5607,7 +5521,7 @@ def _console_color_white(stream, b):
     """True when every colour byte of a located console buffer is 255: opaque
     white whichever way the four bytes are ordered."""
     lay = CONSOLE_VERTEX_FORMATS.get(b["format"], {})
-    if "color" not in lay or not HAVE_IMG:
+    if "color" not in lay:
         return False
     nv, st, c = b["vertex_count"], b["stride"], lay["color"]
     a = np.frombuffer(stream, np.uint8, nv * st, b["vb"]).reshape(nv, st)
@@ -5645,7 +5559,7 @@ def decode_vertex_attributes(stream, buf, order="<", color_order=None):
     is not written."""
     be = order == ">"
     lay = vertex_formats(order).get(buf["format"])
-    if lay is None or not HAVE_IMG:
+    if lay is None:
         return {}
     nv, st = buf["vertex_count"], buf["stride"]
     a = np.frombuffer(stream, np.uint8, nv * st, buf["vb"]).reshape(nv, st)
@@ -8322,11 +8236,9 @@ def _extract_main(argv):
         )
         _RIG["on"] = False
     log = extract_logger(a.quiet)
-    do_tex = not a.no_textures and HAVE_IMG
-    do_mdl = not a.no_models and HAVE_IMG
+    do_tex = not a.no_textures
+    do_mdl = not a.no_models
     do_extract_all = not a.no_extract_all
-    if (not a.no_textures or not a.no_models) and not HAVE_IMG:
-        log("note: numpy/Pillow not available -> skipping textures & models")
 
     entries = list(naz_entries(a.naz, warn=lambda m: log("  ! " + m)))
     log("NAZ %s : %d entries -> %s" % (a.naz, len(entries), a.out))
