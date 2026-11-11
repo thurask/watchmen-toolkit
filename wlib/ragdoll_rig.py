@@ -1079,6 +1079,11 @@ CONVENTIONS_TRUE["quaternions"] = (
 )
 
 
+#: PhysicsSystem ctor 0x50d1e1 gravity (f32 @0xa26418, its only code reference 0x50d214); the
+#: GameEssentials PhysicsWorld replaces it when the root scene loads (sidecar "gravity")
+GRAVITY_CTOR = [0.0, -9.82, 0.0]
+
+
 def conventions(frame=None):
     """The `conventions` block of a sidecar in `frame` (default frame.mode())."""
     return CONVENTIONS_TRUE if _frame.is_true(frame) else CONVENTIONS
@@ -1093,11 +1098,18 @@ def sidecar(
     glb=None,
     frame=None,
     joint_names=None,
+    gravity=None,
 ):
     """The <Variant>.ragdoll.json document.  `rig`: build()'s (engine numbers);
     it is written in `frame` (default frame.mode()), the frame of the GLB.
     joint_names: the GLB's joint node names in palette order (None = the flat
-    rig's 'b<k>'); with them `joint_indices` gives each bone's palette index."""
+    rig's 'b<k>'); with them `joint_indices` gives each bone's palette index.
+    gravity: the PhysicsWorld gravity of the extract (jiggle_d6.load_world_props);
+    None = the shipped value (jiggle_d6.FILE_DEFAULTS)."""
+    if gravity is None:
+        import jiggle_d6
+
+        gravity = jiggle_d6.FILE_DEFAULTS["gravity"]
     slots = bone_slots(rig, bind_names) if bind_names is not None else {}
     true = _frame.is_true(frame)
     if true:
@@ -1119,7 +1131,12 @@ def sidecar(
             "scene": {
                 "fixed_timestep": 1.0 / 60.0,
                 "max_substeps_per_frame": 8,
-                "gravity_default": [0.0, -9.82, 0.0],
+                "gravity": [float(g) for g in gravity],
+                "gravity_default": GRAVITY_CTOR,
+                "gravity_note": "gravity: the GameEssentials PhysicsWorld value; its setter "
+                "(0x517ab4 -> PhysicsSystem 0x4f4faf) passes it to both PhysX scenes when the "
+                "root scene loads, ragdolls included; gravity_default: the PhysicsSystem "
+                "constructor value (0x50d1e1, f32 @0xa26418) before that",
                 "skin_width": SKIN_WIDTH,
             },
             "collision_groups": {

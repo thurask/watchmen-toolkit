@@ -628,3 +628,13 @@ def test_damage_rows_drop_a_missing_database_beside_an_override():
     rows = cm._damage_rows(_DamageData(), "ENEMY", "light", ["UNARMED"])
     assert [(r["combo_database"], r["base"]) for r in rows] == [("DB", 5.0)]
     assert rows[0]["variants"] == [{"modifier": 1.5, "damage": 7.5, "ai_defs": ["AiA"]}]
+
+
+def test_upper_damage_pose_tables_follow_their_two_engine_functions():
+    """Read from code: ProjectAnimationLib.IsUpperDamagePose 0x7f077c counts pose 20 as upper;
+    AnimationStateWM.initialize_external 0x5f0e63 leaves it out when it sets m_tupperattack.
+    The two engine tests differ only there; each toolkit table follows its own."""
+    import fx_meta
+
+    assert set(cm.POSE_UPPER) == set(fx_meta.UPPER_POSES) == asm.UPPER_DAMAGE_POSES | {20}
+    assert 20 not in asm.UPPER_DAMAGE_POSES

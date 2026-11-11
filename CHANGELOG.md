@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **The ragdoll sidecar carries the gravity the game simulates with.** `<Variant>.ragdoll.json`
+  `common.scene.gravity` is the extract's GameEssentials `PhysicsWorld` gravity ((0, -14.82, 0)
+  on every shipped set): its setter `PhysicsWorld::SetGravity` 0x517ab4 passes it through
+  PhysicsSystem 0x4f4faf to both PhysX scenes when the root scene loads (read from code).
+  `gravity_default` stays the PhysicsSystem constructor value (0, -9.82, 0) (0x50d1e1, f32
+  @0xa26418), and `gravity_note` says which is which. `ragdoll_helpers` takes the `world` the
+  `characters` run already reads. PC Part 2: the 26 sidecars gain the two keys, every other
+  file byte-identical (measured). The two upper-damage-pose tables were checked against the
+  exe and both are right (`IsUpperDamagePose` 0x7f077c counts pose 20, `initialize_external`
+  0x5f0e63 does not); a test pins the relation. (2026-11-11)
 - **`characters` walks the model tree once; no jiggle memo for skeletons without jiggle
   bones; `extract` skips identical repeat copies.** `characters_export._model_index` is built
   once per `export` call and shared (it was a recursive glob of `extracted/` per variant,

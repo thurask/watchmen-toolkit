@@ -1623,7 +1623,15 @@ def _export_run(
                     + [n for n, _, _s in outfit_parts],
                 )
                 rag = ragdoll_helpers(
-                    extract_out, key, models, bind, out, ragdoll, why=_rwhy, joint_names=_jnames
+                    extract_out,
+                    key,
+                    models,
+                    bind,
+                    out,
+                    ragdoll,
+                    why=_rwhy,
+                    joint_names=_jnames,
+                    world=world,
                 )
                 # what this GLB does not carry is stated in it and in the log
                 _nd = not_decoded_extras(
@@ -1707,16 +1715,20 @@ def ragdoll_source_model(extract_out, key, models):
     return path if path and os.path.exists(path) else None
 
 
-def ragdoll_helpers(extract_out, key, models, bind, out, enabled=None, why=None, joint_names=None):
+def ragdoll_helpers(
+    extract_out, key, models, bind, out, enabled=None, why=None, joint_names=None, world=None
+):
     """ragdoll_rig.glb_helpers for one variant (None when switched off or the
     model has no rig); writes <out stem>.ragdoll.json as a side effect.  Without a
     rig one line says why, and the reason is appended to the list `why`.  The byte
     order is the one the model header states (console headers are big-endian).
     joint_names: the GLB's joint node names (variant_glb.glb_joint_names; None =
-    the flat rig's 'b<k>')."""
+    the flat rig's 'b<k>'). world: the extract's PhysicsWorld values
+    (jiggle_d6.load_world_props; None = read here); its gravity goes into the sidecar."""
     if not ragdoll_enabled(enabled):
         return None
     import json
+    import jiggle_d6
     import ragdoll_rig
 
     def _none(reason):
@@ -1759,6 +1771,7 @@ def ragdoll_helpers(extract_out, key, models, bind, out, enabled=None, why=None,
         group=ragdoll_rig.group_for(key),
         glb=os.path.basename(out),
         joint_names=joint_names,
+        gravity=(world or jiggle_d6.load_world_props(extract_out))["gravity"],
     )
     side = out[:-4] + ".ragdoll.json"
     with open(side + ".tmp", "w", encoding="utf-8", newline="\n") as f:

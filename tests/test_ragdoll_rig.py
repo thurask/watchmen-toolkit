@@ -398,6 +398,18 @@ def test_joint_frames_child_origin_axes_and_bind_derived_parent_frame():
     assert j["frame_world_bind"]["pos"] == pytest.approx(rig["bodies"][3]["bind_world_pos"])
 
 
+def test_sidecar_gravity_is_the_physicsworld_value_not_the_ctor_default():
+    """The game sets the GameEssentials PhysicsWorld gravity (0, -14.82, 0) on both PhysX
+    scenes when the root scene loads (setter 0x517ab4 -> 0x4f4faf); (0, -9.82, 0) is only
+    the PhysicsSystem constructor value (0x50d1e1, f32 @0xa26418)."""
+    rig = rr.build(build_model())
+    sc = rr.sidecar(rig, BIND_NAMES)["common"]["scene"]
+    assert sc["gravity"] == [0.0, -14.82, 0.0] and sc["gravity_default"] == [0.0, -9.82, 0.0]
+    assert "0x517ab4" in sc["gravity_note"] and "0xa26418" in sc["gravity_note"]
+    sc = rr.sidecar(rig, BIND_NAMES, gravity=(0.0, -20.0, 0.0))["common"]["scene"]
+    assert sc["gravity"] == [0.0, -20.0, 0.0] and sc["gravity_default"] == [0.0, -9.82, 0.0]
+
+
 def test_untuned_rig_is_flagged_not_passed_off_as_usable():
     rig = rr.build(build_model(tuned=False))
     assert rig["tuned"] is False and rig["total_mass"] == 400.0
@@ -679,6 +691,14 @@ def test_export_hook_writes_the_sidecar_and_returns_helpers(rig, tmp_path, monke
     assert doc["source_model"] == "art/characters/common/skeletons/Female_Skeleton.model"
     assert doc["common"]["material"]["sheet"] == "Ragdoll" and doc["glb"] == "Dominatrix_1.glb"
     assert len(doc["bodies"]) == 4 and doc["joint_nodes"]["Pelvis"] == "b0"
+    # no GameEssentials fragment in this extract: the shipped PhysicsWorld gravity
+    assert doc["common"]["scene"]["gravity"] == [0.0, -14.82, 0.0]
+    # the extract's PhysicsWorld values, when given, are what the sidecar carries
+    ce.ragdoll_helpers(
+        str(ex), "female", [], str(rig.bind_npz), out, world={"gravity": (0.0, -11.5, 0.0)}
+    )
+    doc = json.loads((tmp_path / "Dominatrix_1.ragdoll.json").read_text())
+    assert doc["common"]["scene"]["gravity"] == [0.0, -11.5, 0.0]
     # switched off: nothing returned, nothing written
     os.remove(str(tmp_path / "Dominatrix_1.ragdoll.json"))
     monkeypatch.setenv("WATCHMEN_RAGDOLL", "0")

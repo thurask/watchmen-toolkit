@@ -922,6 +922,12 @@ default state. 0x761caa4e is m_estoredtransitstate (+0x78); "Fallback state" pro
 (UI). The +0x54 / +0x40-bit0 tests in TransitionMet and command_get_valid_state are entity
 fields (enabled), not record offsets.
 
+**Two upper-damage-pose tests** [code, compare constants read from the exe bytes]: `initialize_external` 0x5f0e63
+sets the state's `m_tupperattack` for damage poses {1, 2, 3, 7, 8, 9, 13, 14, 15, 19, 21, 23, 25, 27};
+`ProjectAnimationLib.IsUpperDamagePose` 0x7f077c (called by `CharacterEffectDef.command_play_damage_effect`) returns
+true for the same set plus pose 20. Both are right for their own use: `anim_state_machine.UPPER_DAMAGE_POSES` follows
+0x5f0e63, `combat_meta.POSE_UPPER` and `fx_meta.UPPER_POSES` follow 0x7f077c.
+
 The transition's hidden props 0x381c10c0 / 0x1d3171a6 / 0x52340773 / 0x5234171b are
 m_nsupersynclocal / m_nsupersyncremote (the sorted marker lists) and m_nsupersyncmin /
 m_nsupersyncmax, rebuilt at init by UpdateSuperSync 0x5fa582 and therefore never stored;
@@ -1695,9 +1701,15 @@ direct slot read; each hash appears exactly once in the exe (its registration).
 | 10 / 11 / 12 | belly k / d / limit | 0x05da2a7e / 0x92c25d0c / 0xaac6d51e | 1000 / 0.5 / 0.1 | 70 / 0.8 / 0.1 |
 | 13 / 14 / 15 | hair k / d / limit | 0xd0d08f4d / 0xbfbeb999 / 0x87ba318b | 1000 / 0.5 / 0.3 | 100 / 0.8 / 0.3 |
 
-The same node sets gravity = (0, -14.82, 0) (the PhysicsWorld ctor FUN_0050d1e1 initialises
-(0, -9.82, 0), f32 @0xa26418, only code ref 0x50d214), physicsIntegrationRateInHz = 60,
-maxPhysicsIntegrationTimesteps = 3. All file-side.
+The same node sets gravity = (0, -14.82, 0), physicsIntegrationRateInHz = 60,
+maxPhysicsIntegrationTimesteps = 3. All file-side. Gravity [code]: the PhysicsSystem ctor FUN_0050d1e1
+initialises (0, -9.82, 0) at +0x08 (f32 @0xa26418, only code ref 0x50d214); the `gravity` property's setter
+`PhysicsWorld::SetGravity` 0x517ab4 (registered in `PhysicsWorld__RegisterMembers`, refs 0x51c601 / 0x51c614)
+stores node +0x58 and tail-jumps to PhysicsSystem 0x4f4faf, which copies the vector to +0x08 and passes it to
+virtual +0x14 of both scene pointers (+0x30 world / ragdolls / jiggle, +0x34 cloth); that slot being
+`NxScene::setGravity` is inferred.
+`GameEssentials` is the root scope of the scene, so every level simulates with (0, -14.82, 0); the ragdoll
+sidecar carries it as `common.scene.gravity` and the ctor value as `gravity_default`.
 
 ### Addon setup (FUN_006574cd = 0x6574cd) [code]
 
