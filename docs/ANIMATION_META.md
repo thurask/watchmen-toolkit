@@ -717,7 +717,7 @@ stored strings and neither key. See "Asset strings in the JSON files" in the REA
 
 ```
 format       "watchmen-anim-meta/2"
-revision     6                   the layout revision the build writes; a resumed
+revision     7                   the layout revision the build writes; a resumed
                                  `characters` run builds a table of another revision again
 float_values "exact" | "rounded" how the fragment numbers were read ($WATCHMEN_JSON_FLOATS)
 skeleton_rig "hierarchy" | "flat"  the GLB layout `skeletons` describes (--rig)

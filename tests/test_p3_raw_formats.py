@@ -633,6 +633,13 @@ def test_detailmesh_tail_is_the_mesh_flag_and_two_buffer_descriptors(bo):
         "format's is 60"
     ]
     assert kj.export("a.detailmesh", data, order=bo, stream=_detail_stream(bo))[1] == []
+    # a list count under the stream size but past its end, or an index buffer past the
+    # end, is not decoded (no negative stride)
+    long_list = struct.pack(bo + "I", 1) + bytes(4) + struct.pack(bo + "I", 30) + bytes(16)
+    for bad in (long_list, _detail_stream(bo)[:27]):
+        got = ta.detail_stream_layout(m, bad, bo)
+        assert "not_decoded" in got and "vertex_stride" not in got, got
+        assert got["leftover_bytes"] == len(bad)
     # without the stream nothing is derived: no `inferred`, the open fields stay listed
     bare = kj.to_json("a.detailmesh", data, order=bo)
     assert "stream" not in bare and "inferred" not in bare

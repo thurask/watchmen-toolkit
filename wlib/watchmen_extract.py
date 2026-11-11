@@ -8344,8 +8344,10 @@ def _extract_blocks_and_rest(
     do_mdl,
     do_extract_all,
 ):
-    """The block pass and everything after it (`extract`, see _extract_main)."""
+    """The block pass and everything after it (`extract`, see _extract_main).  Returns
+    1 when a block could not be read or parsed (its assets are missing), else 0."""
     n_assets = 0
+    failed_blocks = []  # blocks whose halves did not read or whose parse failed
     tex_repeats = mdl_repeats = 0
     # blocks in a fixed order that does not depend on the letter case an archive
     # stores their paths in (OutputNames: the first copy names the output)
@@ -8360,6 +8362,7 @@ def _extract_blocks_and_rest(
                 header, stream = _half(hs, "h"), _half(hs, "s")
             except Exception as ex:
                 log("  ! %s: %s" % (stem, ex))
+                failed_blocks.append(stem)
                 continue
             # same registry as the block assets; the folder names a differing copy
             name, placed = standalone_output_name(names, stem, header, stream)
@@ -8391,6 +8394,7 @@ def _extract_blocks_and_rest(
             h_data, s_data = _half(hs, "h"), _half(hs, "s")
         except Exception as ex:
             log("  ! %s: %s" % (stem, ex))
+            failed_blocks.append(stem)
             continue
         if text_writer is not None:  # text assets, all six language slots
             try:
@@ -8416,6 +8420,7 @@ def _extract_blocks_and_rest(
             _item = None
         except Exception as ex:
             log("  ! parse failed: %s" % ex)
+            failed_blocks.append(stem)
             continue
         # the assets one at a time (the same parse; its reports were logged above)
         if _kept is not None:
@@ -9012,6 +9017,12 @@ def _extract_blocks_and_rest(
         )
     log("  audio       : %d" % stats["aud"])
     log("  output      : %s" % a.out)
+    if failed_blocks:
+        log(
+            "  ! blocks    : %d not extracted (reason logged above; exit code 1): %s"
+            % (len(failed_blocks), ", ".join(failed_blocks))
+        )
+        return 1
     return 0
 
 

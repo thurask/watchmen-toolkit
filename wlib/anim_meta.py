@@ -71,7 +71,8 @@ FORMAT = "watchmen-anim-meta/2"
 # added or corrected is never reused.  Raise it with every change of content.
 # 6: fragment floats exact by default; the table records `float_values`
 # (f32json.mode()), and a table written in the other mode is rebuilt.
-REVISION = 6
+# 7: combat weapons `hits_to_break` counted in float32, as the engine stores durability.
+REVISION = 7
 
 # Engine rules (criteria evaluation, event triggers, sync markers, start
 # position, fragment splicing, reference resolution) live in anim_state_machine;
@@ -2124,7 +2125,10 @@ def skeleton_extras(names, parents, rig="flat", joint_nodes=None):
     return out
 
 
-_LOWER = {}  # id(meta["clips"]) -> {lowercased clip name: clip name}
+# the clip table last looked up and its {lowercased clip name: clip name} index; the
+# table is held and compared by identity, so a freed table whose id() is reused by the
+# next one never hands that one the old index
+_LOWER = [None, None]
 
 
 def _find_clip(meta, name):
@@ -2132,10 +2136,9 @@ def _find_clip(meta, name):
     k = _clip_key(name)
     if k in clips:
         return k, clips[k]
-    lk = _LOWER.get(id(clips))
-    if lk is None:
-        lk = _LOWER[id(clips)] = {c.lower(): c for c in clips}
-    c = lk.get(k.lower())
+    if _LOWER[0] is not clips:
+        _LOWER[:] = [clips, {c.lower(): c for c in clips}]
+    c = _LOWER[1].get(k.lower())
     return (c, clips[c]) if c else (None, None)
 
 

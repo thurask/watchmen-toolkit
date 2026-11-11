@@ -1332,13 +1332,14 @@ def detail_stream_layout(mesh, stream, order="<"):
     vertex_stride_source, format_stride, stride_matches_format, index_offset,
     decoded_bytes, leftover_bytes} or {not_decoded}.  The stride is DERIVED from the
     stream size (DETAIL_INFERRED), so `leftover_bytes` alone proves little: compare
-    `stride_matches_format`."""
+    `stride_matches_format`.  A list or the index buffer that runs past the stream end
+    gives {not_decoded}."""
     p = 0
     lists = []
     try:
         for _ in range(3):
             (k,) = struct.unpack_from(order + "I", stream, p)
-            if k > len(stream):
+            if p + 4 + 4 * k > len(stream):
                 raise struct.error
             p += 4 + 4 * k
             lists.append(k)
@@ -1349,6 +1350,11 @@ def detail_stream_layout(mesh, stream, order="<"):
     if mesh and mesh.get("has_mesh"):
         vb, ib = mesh["vertex_buffer"], mesh["index_buffer"]
         rest = len(stream) - p - ib["bytes"]
+        if rest < 0:
+            return {
+                "not_decoded": "index buffer past the stream end",
+                "leftover_bytes": len(stream),
+            }
         stride = rest // vb["count"] if vb["count"] else 0
         out["vertex_offset"] = p
         out["vertex_stride"] = stride

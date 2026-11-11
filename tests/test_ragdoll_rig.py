@@ -164,9 +164,9 @@ _S15 = math.sin(math.radians(7.5))  # elbow bent 15 degrees about Y in the bind
 _C15 = math.cos(math.radians(7.5))
 
 
-def build_model(tuned=True, cloth_body=False):
+def build_model(tuned=True, cloth_body=False, joints=None):
     """root, Pelvis, Spine, L UpperArm, L Forearm, R UpperArm (the last without a
-    body): 4 bodies, 3 joints."""
+    body): 4 bodies, 3 joints.  joints: other (parent body, child body) pairs."""
     nodes = [
         _node("", -1, (0, 0, 0)),
         _node("Pelvis", 0, (0, 1.0, 0), vols0=[_capsule(0.26, 0.38)], vols1=[_box(0.3, 0.2, 0.2)]),
@@ -185,7 +185,7 @@ def build_model(tuned=True, cloth_body=False):
     names = ["Pelvis", "Spine", "L UpperArm", "L Forearm"]
     masses = [9.0, 9.0, 2.5, 2.0] if tuned else [100.0] * 4
     blob = b"".join(_body_records(0x1000 + i, n, m) for i, (n, m) in enumerate(zip(names, masses)))
-    joints = [(0, 1), (1, 2), (2, 3)]
+    joints = joints or [(0, 1), (1, 2), (2, 3)]
     lim = [(10.0, 10.0, 5.0), (60.0, 60.0, 15.0), (90.0, 10.0, 20.0)]
     for i, ((pa, ch), (s1, s2, tw)) in enumerate(zip(joints, lim)):
         if not tuned:
@@ -422,6 +422,12 @@ def test_model_without_joints_has_no_rig():
     assert pmn.model_physics(h)["articulated_body"]["bodies"] == [0]
     assert rr.build(h) is None
     assert rr.build(b"junk") is None
+
+
+def test_a_joint_naming_a_body_out_of_range_is_a_bad_body():
+    h = build_model(joints=[(0, 1), (1, 2), (2, -1)])
+    assert rr.build(h) is None
+    assert rr.explain(h) == rr.BAD_BODY
 
 
 def test_blender_mapping_and_damping_conversion():

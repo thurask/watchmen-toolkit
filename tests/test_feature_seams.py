@@ -95,7 +95,7 @@ def test_a_140_table_is_rebuilt(tmp_path, monkeypatch):
     old = dict(_current(), revision=5)
     del old["float_values"]
     marker, builds, on_disk = _resume(tmp_path, monkeypatch, old)
-    assert (marker, builds) == ("new", 1) and on_disk["revision"] == am.REVISION == 6
+    assert (marker, builds) == ("new", 1) and on_disk["revision"] == am.REVISION == 7
 
 
 @pytest.mark.usefixtures("engine_frame")  # only the float marker differs

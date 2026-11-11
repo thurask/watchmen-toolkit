@@ -35,7 +35,7 @@ the area attacks, the sweep and the enemy AI, each cited with its handler in
 | | PartnerDef records also carry the follow distances, the kill-vs-crowd-control weight, the reaction / special probabilities and cooldowns, and `visual_range`; their use is in `combat.rules.partner_ai`. `rules.partner_ai.waypoint_move` holds the constants of `BehaviorWaypointMove` (0x6289b4, 0x629b68, 0x62aef5) and says that an AI partner never uses a trigger from there (inferred from two read facts); `known_defects` states the kill-target defect with its two effects (0x6e6495, 0x6e388e). |
 | | `crowd_control_combos[*].weight`: the engine builds a list with each combo repeated `weight` times, keeps only combos whose every item fits the current weapon animation type (items 1/4 unarmed, 2/5 one-handed, 3/6 two-handed), and draws uniformly (`FindUsableCombo` 0x6f2971, `TryAddComboToList` 0x5eee3a). `m_tdocrowdcontrolcombo` is not read by the partner behaviours. |
 | `combat.special_def` | `CharacterSpecialDef` (rage / electricity / bull-rush numbers) |
-| `combat.weapons` | the weapon database (class, durability loss per hit, hits to break) |
+| `combat.weapons` | the weapon database (class, durability loss per hit, hits to break: counted in float32 as the engine stores durability, 0x8b33e0) |
 | `combat.classes.<Class>` | links and totals per animation class |
 | `combat.totals`, `combat.not_established` | counts; what is not exported and why |
 

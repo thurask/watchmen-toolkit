@@ -77,7 +77,9 @@ def export(extract_out, outdir, budget=None):
     """One <outdir>/<head>.glb per face-rigged head of the extract.  Resumable: a GLB is
     kept when characters_export.glb_is_current finds it recorded (<outdir>/
     _glb_options.json) as written with this run's options (writer_options); files are
-    written atomically.  The folders are made once a head is found."""
+    written atomically.  The folders are made once a head is found.  A GLB with a clip
+    that failed to bake is written without it, names it under asset extras
+    `watchmen.not_baked`, and is not recorded, so the next run writes it again."""
     import bake_v4
     import char_lib
     import variant_glb as vg
@@ -110,6 +112,7 @@ def export(extract_out, outdir, budget=None):
         bake_v4._load_bind(bind)
         fam = head_family(head)
         anims = []
+        failed = []
         for nm in sorted(clips):
             if not nm.startswith(fam + "/"):
                 continue
@@ -126,12 +129,20 @@ def export(extract_out, outdir, budget=None):
                 anims.append((nm, pal, fps))
             except Exception as e:
                 print("  bake fail %s %s: %s" % (head, nm, e))
+                failed.append(nm)
         bv = load_npz(bind)
         bn = [str(x) for x in bv["names"]]
         parts = char_lib.load_parts([mbase], bn)
         tex = char_lib.find_textures(parts, texroots)
         # write_glb writes <out>.tmp and renames it: a killed run leaves no
         # partial GLB behind, and the log names the final file
-        vg.write_glb(parts, anims, out, bind, textures=tex)
+        extra = {"asset_extras": {"not_baked": failed}} if failed else {}
+        vg.write_glb(parts, anims, out, bind, textures=tex, **extra)
+        if failed:
+            print(
+                "  WARNING: %s: %d face clip(s) not baked (%s); the GLB is not recorded as"
+                " current, a rerun writes it again" % (head, len(failed), ", ".join(failed))
+            )
+            continue
         ce.record_glb_options(out, outdir, opts)
     return 0

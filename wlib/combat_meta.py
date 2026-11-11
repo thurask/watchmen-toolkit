@@ -44,6 +44,7 @@ CLI:  python3 combat_meta.py ANIM_META.json      (summary of an existing table)
 import json
 import os
 import re
+import struct
 import sys
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -1950,6 +1951,23 @@ _TOKENS = (
 _AI_DEF_CLASSES = ("EnemyDef", "PartnerDef", "UnderbossDef", "AiDef")
 
 
+def _f32(x):
+    return struct.unpack("<f", struct.pack("<f", x))[0]
+
+
+def hits_to_break(loss, limit=1000):
+    """Landed hits until a weapon breaks.  WeaponBase.command_take_durability_damage
+    0x8b33e0: while durability (float32, starts at 1.0, the registry default) is above 0,
+    a hit stores durability - loss as float32; the weapon breaks when the stored value
+    is <= 0 [code].  Counted in float32: loss 0.1 breaks on hit 10, where doubles give 11."""
+    loss = _f32(float(loss))
+    hits, left = 0, 1.0
+    while left > 0.0 and hits < limit:
+        left = _f32(left - loss)
+        hits += 1
+    return hits
+
+
 class CombatData:
     """The combat definitions of one EXTRACT_OUT: combo databases, the special
     definition, CharacterDefs, AI definitions and weapons, with the references
@@ -2224,13 +2242,7 @@ class CombatData:
             "priority": n.p("m_iprioritymodel"),
         }
         if loss:
-            # durability starts at 1.0 (registry default) and a landed hit takes
-            # loss off (WeaponBase.command_take_durability_damage 0x8b33e0)
-            hits, left = 0, 1.0
-            while left > 0.0 and hits < 1000:
-                left -= float(loss)
-                hits += 1
-            rec["hits_to_break"] = hits
+            rec["hits_to_break"] = hits_to_break(loss)
         return rec
 
     # -------------------------------------------------------------- joins
@@ -2555,7 +2567,7 @@ def _damage_rows(data, class_name, button, weapons):
     rows = []
     for d in data.owners(class_name):
         ais = data.ai_defs_of(d)
-        dbs = sorted({data.database_of(d, a)[0] for a in ais} | {d["combo_database"]} - {None})
+        dbs = sorted(({data.database_of(d, a)[0] for a in ais} | {d["combo_database"]}) - {None})
         for dbn in dbs:
             db = data.combo_databases.get(dbn)
             if db is None:

@@ -486,3 +486,15 @@ def test_write_glb_embeds_clip_metadata_when_given_the_table(rig, tmp_path):
     assert x["loop"] is True and x["written_fps"] == pytest.approx(rig.fps)
     assert x["events"][0]["time_s"] == pytest.approx(1.0)
     assert x["events"][0]["written_time_s"] == pytest.approx(0.5 * (rig.F - 1) / rig.fps)
+
+
+def test_case_insensitive_clip_lookup_follows_the_table_in_hand():
+    """A table freed after a lookup can leave its id() to the next one; the next
+    lookup still searches the new table."""
+    for _ in range(20):
+        first = {"clips": {"Walk_A": {"n": 1}}}
+        assert am._find_clip(first, "walk_a") == ("Walk_A", {"n": 1})
+        del first
+        second = {"clips": {"Run_B": {"n": 2}}}
+        assert am._find_clip(second, "run_b") == ("Run_B", {"n": 2})
+        del second

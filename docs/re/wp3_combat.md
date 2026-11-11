@@ -547,7 +547,7 @@ Throw reactions are separate and probabilistic (2.8): `m_nprobblockthrow`, `m_np
 - Only Rorschach picks weapons up: USE button, nearest unowned weapon with durability > 0 within the pick-up range (1.0 m [data]); if armed he drops the current one first; state GRAB_1H_WEAPON (id 12) plays and its PICK_UP_WEAPON event attaches the weapon. Nite Owl never holds one (no weapon models in his CharacterDef).
 - Enemies receive weapons from their spawner via `command_set_weapon`, cloned from the CharacterDef's weapon model collection.
 - Holding a weapon sets animation enum 5 WEAPON_ANIMATION_TYPE (0 unarmed, 1 BASH_1H, 2 BASH_2H), which selects the Armed groups and the 1H/2H base damage, and makes every non-throw attack unblockable.
-- Durability starts at 1.0 [default] and drops by the weapon's loss-per-hit on every landed hit (not for states flagged `m_tignoreweaponsound`). At <= 0: break effect, then the weapon is detached and dropped, or merely disabled when `m_tdisableatbreak`. A broken or dropped weapon returns the holder to UNARMED.
+- Durability starts at 1.0 [default] and drops by the weapon's loss-per-hit on every landed hit (not for states flagged `m_tignoreweaponsound`); the value is stored as float32 after each hit, so the hits to break are counted in float32 (loss 0.1: 10 hits; loss 0.2: 6, since 1.0 - 5 x 0.2f leaves 2.98e-08) [code: 0x8b33e0]. At <= 0: break effect, then the weapon is detached and dropped, or merely disabled when `m_tdisableatbreak`. A broken or dropped weapon returns the holder to UNARMED.
 - Weapons are lost: on death; on the throw button; on the DROP_WEAPON events; when disarmed by a Disarm counter (event COUNTER_ATTACK_WEAPON_STEAL: the taker takes it, except from Rorschach, whose weapon is dropped; the Underboss keeps his; COMBAT_META.md `rules.weapon_steal`).
 - There is **no per-weapon damage**: damage depends only on the class (1H / 2H).
 
@@ -555,16 +555,16 @@ Throw reactions are separate and probabilistic (2.8): `m_nprobblockthrow`, `m_np
 |---|---|---|---|---|---|---|
 | ThugsWeaponsBIG_1H | 1H | False | 0.5 | 2 | True | 1 |
 | ThugsWeaponsBIG_1H | 1H | False | 0.13 | 8 | False | 2 |
-| ThugsWeaponsBIG_1H | 1H | False | 0.2 | 5 | False | 3 |
+| ThugsWeaponsBIG_1H | 1H | False | 0.2 | 6 | False | 3 |
 | ThugsWeapons_2H | 2H | False | 0.5 | 2 | False | 1 |
 | ThugsWeapons_2H | 2H | False | 0.33 | 4 | False | 2 |
 | ThugsWeapons_2H | 2H | False | 0.25 | 4 | False | 3 |
-| ThugsWeapons_2H | 2H | False | 0.2 | 5 | False | 4 |
+| ThugsWeapons_2H | 2H | False | 0.2 | 6 | False | 4 |
 | ThugsWeapons_2H | 2H | False | 0.16 | 7 | False | 5 |
 | DominitrixWeapons_1H | 1H | True | 0.16 | 7 | False | 1 |
-| DominitrixWeapons_1H | 1H | True | 0.2 | 5 | False | 2 |
+| DominitrixWeapons_1H | 1H | True | 0.2 | 6 | False | 2 |
 | GimpWeapons_1H | 1H | False | 0.16 | 7 | False | 1 |
-| GimpWeapons_1H | 1H | True | 0.2 | 5 | False | 2 |
+| GimpWeapons_1H | 1H | True | 0.2 | 6 | False | 2 |
 | GimpWeapons_1H | 1H | False | 0.25 | 4 | False | 3 |
 | GimpWeapons_2H | 2H | False | 0.1 | 10 | False | 1 |
 | GimpWeapons_2H | 2H | False | 0.25 | 4 | False | 2 |
@@ -572,7 +572,7 @@ Throw reactions are separate and probabilistic (2.8): `m_nprobblockthrow`, `m_np
 | HeaviesWeapons_2H | 2H | False | 0.16 | 7 | False | 1 |
 | HeaviesWeapons_2H | 2H | False | 0.12 | 9 | False | 2 |
 | ThugsWeapons_1H | 1H | False | 0.5 | 2 | True | 1 |
-| ThugsWeapons_1H | 1H | False | 0.2 | 5 | False | 2 |
+| ThugsWeapons_1H | 1H | False | 0.2 | 6 | False | 2 |
 | ThugsWeapons_1H | 1H | False | 0.33 | 4 | False | 3 |
 ## 5. Worked example: the Dominatrix
 

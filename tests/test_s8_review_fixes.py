@@ -280,6 +280,42 @@ def test_faces_keep_a_head_only_with_the_same_options_and_write_atomically(tmp_p
     assert face_export.export(str(ex), str(out)) == 0 and len(written) == 2  # other options
 
 
+def test_a_face_glb_with_a_failed_bake_is_not_recorded_as_current(tmp_path, monkeypatch, capsys):
+    import build_bind_file
+    import char_lib
+    import face_export
+
+    ex, out = tmp_path / "ex", tmp_path / "faces"
+    (ex / "extracted").mkdir(parents=True)
+    written = []
+    monkeypatch.setattr(face_export, "find_heads", lambda e: [str(tmp_path / "Head1")])
+    monkeypatch.setattr(face_export, "face_clips", lambda e: {"EN1/Good": "g", "EN1/Bad": "b"})
+    monkeypatch.setattr(
+        build_bind_file, "build", lambda m, t, p: np.savez(p, names=np.array(["Jaw"]))
+    )
+    monkeypatch.setattr(bake_v4, "_load_bind", lambda p=None: None)
+
+    def bake(nm, *a, **kw):
+        if nm == "EN1/Bad":
+            raise ValueError("no track")
+        return np.zeros((2, 1, 3, 4), np.float32), 0.1
+
+    monkeypatch.setattr(bake_v4, "bake", bake)
+    monkeypatch.setattr(char_lib, "load_parts", lambda models, bn: [])
+    monkeypatch.setattr(char_lib, "find_textures", lambda parts, roots: {})
+
+    def write_glb(parts, anims, path, bind, textures=None, asset_extras=None):
+        written.append(([a[0] for a in anims], asset_extras))
+        Path(path).write_bytes(b"glb")
+
+    monkeypatch.setattr(vg, "write_glb", write_glb)
+    assert face_export.export(str(ex), str(out)) == 0
+    assert written == [(["EN1/Good"], {"not_baked": ["EN1/Bad"]})]
+    assert "Head1.glb" not in ce.read_glb_options(str(out))
+    assert "WARNING: Head1: 1 face clip(s) not baked (EN1/Bad)" in capsys.readouterr().out
+    assert face_export.export(str(ex), str(out)) == 0 and len(written) == 2  # tried again
+
+
 def test_write_glb_renames_its_temp_file_and_logs_the_final_path(tmp_path, rig, capsys):
     out = tmp_path / "c.glb"
     vg.write_glb(rig.parts, rig.manifest, out, str(rig.bind_npz))

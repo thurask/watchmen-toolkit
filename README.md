@@ -366,8 +366,10 @@ options. When an option is given twice the last one counts.
 
 - **Exit codes.** 0 done; 1 an unknown command, or a failure the command
   reports itself (`ragdoll` on a model without joints, `scriptdb` on a file it
-  does not consume exactly, `navmeta` / `particlemeta` when a file fails); 2
-  bad arguments or options, a missing or unreadable input, a missing or
+  does not consume exactly, `navmeta` / `particlemeta` when a file fails,
+  `extract` / `all` when a block cannot be read or parsed: the run goes on, the
+  log ends with a `! blocks` line naming them, and `all` then stops before the
+  binds); 2 bad arguments or options, a missing or unreadable input, a missing or
   unreadable data table, a Python older than 3.13; 3 `fragment` wrote its
   JSON but the parse did not reach the end of the file (`lossless` false;
   the `warn` key says where); 130 interrupted.

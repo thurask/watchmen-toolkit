@@ -311,8 +311,9 @@ Exit codes
 ----------
   0 done; 1 an unknown command, or a failure the command reports itself (`ragdoll`
   on a model without joints, `scriptdb` on a file it does not consume exactly,
-  `navmeta` / `particlemeta` when a file fails); 2 bad arguments or options, a
-  missing / unreadable input or data table, a Python older than 3.13;
+  `navmeta` / `particlemeta` when a file fails, `extract` / `all` when a block cannot
+  be read or parsed); 2 bad arguments or options, a missing / unreadable input or
+  data table, a Python older than 3.13;
   3 `fragment` wrote a JSON that is not lossless; 130 interrupted.
   Set WATCHMEN_DEBUG=1 to see the traceback of an error before its one-line message.
 

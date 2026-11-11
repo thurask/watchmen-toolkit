@@ -574,3 +574,58 @@ def test_a_failing_combat_build_does_not_take_the_table_down(extract, monkeypatc
     m = am.build(str(extract), log=lambda *a: logged.append(" ".join(str(x) for x in a)))
     assert "combat" not in m and "combat_format" not in m and m["format"] == am.FORMAT
     assert any("combat: skipped" in x for x in logged)
+
+
+# --------------------------------------------------------------- weapons and damage rows
+class _WeaponNode:
+    parent = None
+    name = "W"
+
+    def __init__(self, loss):
+        self.vals = {"m_ndurebilitylossperhit": loss, "m_iweapontype": 1}
+
+    def p(self, key):
+        return self.vals.get(key)
+
+
+@pytest.mark.parametrize(
+    "loss, hits",
+    [(0.1, 10), (0.12, 9), (0.13, 8), (0.16, 7), (0.2, 6), (0.25, 4), (0.33, 4), (0.5, 2)],
+)
+def test_hits_to_break_counts_durability_in_float32(loss, hits):
+    # 0x8b33e0 stores durability - loss as float32 and breaks at <= 0: loss 0.1 leaves
+    # 1.0 - 10 x 0.1f at -7.45e-08 (float32), where doubles leave a positive residue
+    assert cm.CombatData._weapon(None, "W.fragment", _WeaponNode(loss))["hits_to_break"] == hits
+
+
+class _DamageData:
+    """Minimal CombatData for _damage_rows: one CharacterDef without a combo database
+    whose AI definitions override it only in part."""
+
+    def __init__(self):
+        self.cdef = {
+            "name": "Def",
+            "combo_database": None,
+            "damage_modifier": 1.0,
+            "weapon_collections": {},
+            "playable": False,
+        }
+        self.ais = [{"name": "AiA", "override_combo_database": "DB"}, {"name": "AiB"}]
+        self.combo_databases = {"DB": {"base_damage": {"light": {"UNARMED": 5.0}}}}
+
+    def owners(self, class_name):
+        return [self.cdef]
+
+    def ai_defs_of(self, d):
+        return self.ais
+
+    database_of = cm.CombatData.database_of
+
+    def modifier(self, ai, cdef):
+        return 1.5
+
+
+def test_damage_rows_drop_a_missing_database_beside_an_override():
+    rows = cm._damage_rows(_DamageData(), "ENEMY", "light", ["UNARMED"])
+    assert [(r["combo_database"], r["base"]) for r in rows] == [("DB", 5.0)]
+    assert rows[0]["variants"] == [{"modifier": 1.5, "damage": 7.5, "ai_defs": ["AiA"]}]

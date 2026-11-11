@@ -479,7 +479,7 @@ def _build(mb, order=None, cloth_only=False):
     for (pa, ch), ob in zip(ab["joints"], jobj):
         o = ob["props"]
         if not (0 <= pa < nb and 0 <= ch < nb):
-            return None
+            return None, BAD_BODY
         pn, cn = ab["bodies"][pa], ab["bodies"][ch]
         qcs, pcs = o["childSpaceOrient"], o["childSpacePos"]
         # parent frame = the child frame at bind pose seen from the parent body

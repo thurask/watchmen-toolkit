@@ -370,7 +370,7 @@ def test_a_bomb_in_a_block_is_named_and_the_run_goes_on(tmp_path, monkeypatch, c
     monkeypatch.setenv("WATCHMEN_MAX_INFLATE", str(1 << 20))
     out = tmp_path / "out"
     args = [str(naz), "-o", str(out), "--no-textures", "--no-models", "--no-text", "--no-nav"]
-    assert we.main(args + ["--no-files", "--quiet"]) == 0
+    assert we.main(args + ["--no-files", "--quiet"]) == 1  # the failed block: exit code 1
     err = capsys.readouterr().err
     assert "! parse failed: zlib blob inflates past 1048576 bytes" in err
     assert (out / "extracted" / "art" / "Fence_01.model.stream").read_bytes() == b"fence-mesh"
@@ -387,3 +387,30 @@ def test_skeleton_collect_reads_header_halves_one_at_a_time(tmp_path, monkeypatc
     monkeypatch.setattr(we, "naz_read", lambda p, e: reads.append(e.name) or real(p, e))
     assert es.collect(str(naz)) == {}  # the synthetic skeleton has too few bones
     assert reads == ["Levels/Prison/Prison.block_h_z", "Levels/Yard/Yard.block_h_z"]
+
+
+def test_extract_exits_1_and_names_the_blocks_that_failed(tmp_path, capsys):
+    """A block whose parse fails: the other blocks are written, the summary names the
+    failed one, and the exit code is 1 (a batch keys `_extract_done.txt` on 0)."""
+    h, a, room = tpp._prison()
+    ents = [
+        ("Levels/A/A.block_h_z", b"not a block header", 0),
+        ("Levels/A/A.block_s_z", b"", 0),
+        ("Levels/Prison/Prison.block_h_z", h, 0),
+        ("Levels/Prison/Prison.block_s_z", a, 0),
+        ("Levels/Prison/Art/PrisonYard.block_s_z", room, 0),
+    ]
+    naz = tp1._naz(tmp_path, ents)
+    out = tmp_path / "out"
+    args = [str(naz), "-o", str(out), "--no-textures", "--no-models", "--no-text", "--no-nav"]
+    assert we.main(args + ["--no-files"]) == 1
+    log = capsys.readouterr().out
+    assert (
+        "! blocks    : 1 not extracted (reason logged above; exit code 1): Levels/A/A.block" in log
+    )
+    assert (out / "extracted" / "art" / "Fence_01.model.stream").read_bytes() == b"fence-mesh"
+    # the same archive without the damaged block: exit code 0, no summary line
+    (tmp_path / "ok").mkdir()
+    naz2 = tp1._naz(tmp_path / "ok", ents[2:])
+    assert we.main([str(naz2), "-o", str(tmp_path / "out2")] + args[3:] + ["--no-files"]) == 0
+    assert "! blocks" not in capsys.readouterr().out

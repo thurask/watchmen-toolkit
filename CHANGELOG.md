@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+- **`extract` exits 1 when a block cannot be read or parsed.** The run goes on with the other
+  blocks and the log ends with `! blocks : N not extracted ...` naming them; it exited 0
+  before, so a batch keyed on the exit code marked such a run done. `all` stops after such an
+  extract as after any other failure. (2026-11-11)
+- **Weapon `hits_to_break` counted in float32.** `WeaponBase.command_take_durability_damage`
+  0x8b33e0 stores durability as float32 after each hit and breaks at <= 0; loss 0.1 now gives
+  10 hits (11 in doubles), the other loss values are unchanged. `anim_meta.REVISION` is 7, so
+  a resumed `characters` run rebuilds a cached table. (2026-11-11)
+- **`faces` writes a head again when a clip failed to bake.** The GLB names the missing clips
+  under `asset.extras.watchmen.not_baked`, a `WARNING:` line names them, and the GLB is not
+  recorded as current. (2026-11-11)
+- **Smaller fixes, each with a test:** `ragdoll_rig` returns its "does not match" reason for a
+  joint that names a body out of range (a `TypeError` before); `combat_meta._damage_rows` no
+  longer drops the combat block of a CharacterDef without a combo database whose AI
+  definitions override it in part; `terrain_asset.detail_stream_layout` reports `not_decoded`
+  for a list or an index buffer that runs past the stream end (a negative stride before);
+  `anim_meta`'s case-insensitive clip lookup no longer hands a later table the index of a
+  freed one. (2026-11-11)
+
 ## 1.6.1 — 2026-10-27
 
 **Xbox 360 textures decode as on PC where the data allows it.** `ArrowMore` (16×24 DXT1, both
