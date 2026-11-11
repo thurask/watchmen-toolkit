@@ -1278,9 +1278,13 @@ def _groups_accept(node, chartype):
 BUILD_FAILED_KEY = "build_failed"
 
 
+#: start of the log line _build writes when the face step fails
+FACE_SKIPPED_PREFIX = "  WARNING: face: skipped ("
+
+
 def _block_failed(failed, block, fmt, said, prefix):
     """Record in `failed` why `block` is missing: the reason is what the step logged
-    ("  combat: skipped (KeyError: 'x')").  A step that returned nothing WITHOUT
+    ("  WARNING: combat: skipped (KeyError: 'x')").  A step that returned nothing WITHOUT
     reporting a failure (a hook switched off) leaves no entry."""
     line = next((x for x in reversed(said) if x.startswith(prefix)), None)
     if line is not None:
@@ -1574,8 +1578,8 @@ def _build(extract_out, binds, log, frame):
                 _rec.pop("inflicts", None)
         for _p in pairs:
             _p.pop("face", None)
-        _log("  face: skipped (%s: %s)" % (type(ex).__name__, ex))
-        _block_failed(failed, "face", face_rule.FACE_FORMAT, said, "  face: skipped (")
+        _log("%s%s: %s)" % (FACE_SKIPPED_PREFIX, type(ex).__name__, ex))
+        _block_failed(failed, "face", face_rule.FACE_FORMAT, said, FACE_SKIPPED_PREFIX)
     import f32json
 
     out = {
@@ -1616,7 +1620,7 @@ def _build(extract_out, binds, log, frame):
         out["combat_format"] = combat_meta.COMBAT_FORMAT
         out["combat"] = combat
     else:
-        _block_failed(failed, "combat", combat_meta.COMBAT_FORMAT, said, "  combat: skipped (")
+        _block_failed(failed, "combat", combat_meta.COMBAT_FORMAT, said, combat_meta.SKIPPED_PREFIX)
     # the weapon class each clip is played with (criteria and weapon blends)
     import parts_rule
 
@@ -1628,7 +1632,7 @@ def _build(extract_out, binds, log, frame):
 
     fx_meta.attach(out, extract_out, classes, states, pairs, sys.modules[__name__], _log)
     if out.get("fx_format") != fx_meta.FORMAT:
-        _block_failed(failed, "fx", fx_meta.FORMAT, said, "  fx_meta: skipped (")
+        _block_failed(failed, "fx", fx_meta.FORMAT, said, fx_meta.SKIPPED_PREFIX)
     if failed:
         out[BUILD_FAILED_KEY] = failed
     return _asset_names(apply_frame(out, frame), extract_out)

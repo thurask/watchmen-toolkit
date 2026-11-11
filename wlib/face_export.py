@@ -16,6 +16,7 @@ locals differ slightly so bakes are per-head).
 """
 
 import os
+import struct
 import sys
 import glob
 from wutil import load_npz
@@ -32,7 +33,8 @@ def find_heads(extract_out):
     """Every Jaw-rigged model in the archive.  Full art/characters tree scan
     (a common/models/head glob misses NiteOwl_Mask2/NiteOwl_MaskDry2 --
     NiteOwl's 'head' is his cowl, mouth-only rig, no eye/brow bones -- and
-    GimpHead1-3 and Heavies_Head_1)."""
+    GimpHead1-3 and Heavies_Head_1).  A model that does not parse is left
+    out with a WARNING line."""
     ex = os.path.join(extract_out, "extracted")
     from parse_model_nodes import parse
 
@@ -43,7 +45,11 @@ def find_heads(extract_out):
     for m in sorted(cands):
         try:
             names, _, _, _ = parse(_read_bytes(m))
-        except Exception:
+        except (OSError, ValueError, struct.error, IndexError) as err:
+            print(
+                "WARNING: faces: %s not parsed, not considered as a head (%s: %s)"
+                % (os.path.relpath(m, ex), type(err).__name__, err)
+            )
             continue
         if "Jaw" in names and "LowerLip" in names:
             heads.append(m.removesuffix(".model"))

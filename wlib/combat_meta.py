@@ -3165,13 +3165,19 @@ def _attack_groups(blocks):
     return dict(sorted(out.items()))
 
 
+#: start of the log line build_or_none writes when the combat block fails
+#: (anim_meta records the rest of the line as the reason under build_failed)
+SKIPPED_PREFIX = "  WARNING: combat: skipped ("
+
+
 def build_or_none(extract_out, classes, states, pairs, am, log=None):
     """build(), or None when the extract's combat data cannot be read: the
-    combat block is decoration and must not take the animation table down."""
+    combat block is decoration and must not take the animation table down.
+    The failure is one WARNING line (SKIPPED_PREFIX)."""
     try:
         return build(extract_out, classes, states, pairs, am, log)
-    except Exception as ex:  # a fragment this module does not understand
-        (log or (lambda *a: None))("  combat: skipped (%s: %s)" % (type(ex).__name__, ex))
+    except Exception as ex:  # any failure: the table ships without its combat block
+        (log or (lambda *a: None))("%s%s: %s)" % (SKIPPED_PREFIX, type(ex).__name__, ex))
         return None
 
 

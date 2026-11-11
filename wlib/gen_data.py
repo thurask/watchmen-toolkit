@@ -213,16 +213,28 @@ def load_registered_names(path=None):
     """registered_names.json -> {"names": {hash: {spelling: [classes]}}, "keep":
     {hash: name}, "generic": {hash: name}, "class_overrides": {class: {hash: name}}}
     with integer hashes.  A spelling whose hash is not its key is dropped, so a
-    damaged table cannot inject names.  {} tables when the file is missing."""
+    damaged table cannot inject names.  {} tables when the file is missing;
+    {} tables and a WARNING line when it cannot be read, and a WARNING line
+    with the count when spellings were dropped."""
     out = {"names": {}, "keep": {}, "generic": {}, "class_overrides": {}}
+    src = path or _REG_NAMES_PATH
     try:
-        with open(path or _REG_NAMES_PATH, encoding="utf-8") as fh:
+        with open(src, encoding="utf-8") as fh:
             raw = json.load(fh)
-    except (OSError, ValueError):
+    except FileNotFoundError:
         return out
+    except (OSError, ValueError) as ex:  # ValueError: not JSON, not UTF-8
+        print(
+            "WARNING: %s not read, no registered spellings applied (%s: %s)"
+            % (src, type(ex).__name__, ex),
+            file=sys.stderr,
+        )
+        return out
+    dropped = 0
     for k, sp in raw.get("names", {}).items():
         h = int(k, 16)
         good = {s: list(c) for s, c in sp.items() if name_hash(s) == h}
+        dropped += len(sp) - len(good)
         if good:
             out["names"][h] = good
     for s in raw.get("keep", []):
@@ -230,10 +242,18 @@ def load_registered_names(path=None):
     for k, s in raw.get("generic", {}).items():
         if name_hash(s) == int(k, 16):
             out["generic"][int(k, 16)] = s
+        else:
+            dropped += 1
     for cls, tab in raw.get("class_overrides", {}).items():
         good = {int(k, 16): s for k, s in tab.items() if name_hash(s) == int(k, 16)}
+        dropped += len(tab) - len(good)
         if good:
             out["class_overrides"][cls] = good
+    if dropped:
+        print(
+            "WARNING: %s: %d spelling(s) whose hash is not their key dropped" % (src, dropped),
+            file=sys.stderr,
+        )
     return out
 
 

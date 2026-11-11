@@ -49,6 +49,7 @@ Requires numpy + Pillow for textures/models (audio is pure-stdlib). Python 3.13+
 
 import argparse
 import functools
+import hashlib
 import io
 import itertools
 import math
@@ -81,7 +82,7 @@ try:
     from PIL import Image
 
     HAVE_IMG = True
-except Exception:
+except ImportError:
     HAVE_IMG = False
 
 
@@ -1344,7 +1345,7 @@ def sheet_layer_dirs(tex_index, sheet, warn=None):
     return out
 
 
-def texture_alpha_flag(header, order="<"):
+def texture_alpha_flag(header, order="<", name=None):
     """The alpha byte of a Texture header's layer 0 (`u8 hasAlpha` of the image
     descriptor, docs/KAPOW_NAZ_FORMAT.md section 4.2) -> bool, or None when the
     header has no image record.  The engine copies it to bit 0 of the texture
@@ -1352,7 +1353,8 @@ def texture_alpha_flag(header, order="<"):
     that bit of the layer-0 texture (0x571d5d): the pixels are not inspected.
     PC: parse_texture_frames; otherwise the byte at +25 of the 30-byte window
     parse_texture_header uses (the same on X360: equal to the PC byte on all 908
-    textures the two Part 2 builds share)."""
+    textures the two Part 2 builds share).  A header the readers refuse gives
+    None and a WARNING line naming `name`."""
     try:
         if order == "<":
             ex = parse_texture_frames(header)
@@ -1362,7 +1364,11 @@ def texture_alpha_flag(header, order="<"):
         if not info or not info["images"]:
             return None
         return bool(header[info["images"][0]["rec_off"] + 25] & 1)
-    except Exception:
+    except (struct.error, ValueError, IndexError, KeyError) as e:
+        _run_warning(
+            "      WARNING: texture %s: alpha flag not read, textureHasAlpha left out (%s: %s)"
+            % (name or "?", type(e).__name__, e)
+        )
         return None
 
 
@@ -1377,7 +1383,7 @@ def _write_sheet_json(header, out_dir, order="<"):
             import json as _json
 
             full = texture_sheets(header, order)
-            flag = texture_alpha_flag(header, order)
+            flag = texture_alpha_flag(header, order, getattr(out_dir, "name", out_dir))
             if flag is not None:  # not a sheet property: the header's alpha byte of layer 0
                 sh = dict(sh, textureHasAlpha=flag)
             ex = parse_texture_frames(header, order)
@@ -1407,28 +1413,34 @@ def _write_sheet_json(header, out_dir, order="<"):
 _RUN_LOG = []
 
 
-def _sheet_warning(out_dir, what, e):
-    """One WARNING line for a sheet.json that could not be written or updated:
-    through the running extract's log (to stderr under --quiet), else stdout."""
-    line = "      WARNING: texture %s: %s (%s: %s)" % (
-        getattr(out_dir, "name", out_dir),
-        what,
-        type(e).__name__,
-        e,
-    )
+def _run_warning(line):
+    """One WARNING line from a helper that takes no log argument: through the
+    running extract's log (to stderr under --quiet), else stdout."""
     (_RUN_LOG[-1] if _RUN_LOG else print)(line)
 
 
-def read_sheet_json(tex_dir):
-    """sheet.json of an extracted texture directory -> dict ({} if absent)."""
-    try:
-        import json as _json
+def _sheet_warning(out_dir, what, e):
+    """One WARNING line for a sheet.json that could not be written or updated."""
+    _run_warning(
+        "      WARNING: texture %s: %s (%s: %s)"
+        % (getattr(out_dir, "name", out_dir), what, type(e).__name__, e)
+    )
 
+
+def read_sheet_json(tex_dir):
+    """sheet.json of an extracted texture directory -> dict ({} if absent; {} and
+    a WARNING line when it is there but cannot be read)."""
+    import json as _json
+
+    try:
         with open(os.path.join(str(tex_dir), "sheet.json"), encoding="utf-8") as _f:
             d = _json.load(_f)
-        return d if isinstance(d, dict) else {}
-    except Exception:
+    except FileNotFoundError:
         return {}
+    except (OSError, ValueError) as e:  # ValueError: not JSON, not UTF-8
+        _sheet_warning(Path(str(tex_dir)), "sheet.json not readable, read as empty", e)
+        return {}
+    return d if isinstance(d, dict) else {}
 
 
 def extract_specular(header, order="<"):
@@ -2165,7 +2177,7 @@ def decode_dxt_base(data, w, h, fmt):
         im = Image.open(io.BytesIO(make_dds(w, h, 1, fmt) + data[:base]))
         im.load()
         return np.array(im.convert("RGBA"))
-    except Exception:
+    except (OSError, ValueError, EOFError):  # Pillow refuses the data
         return None
 
 
@@ -2946,8 +2958,8 @@ def _write_spec_txt(header, out_dir):
         if ex is not None or it is not None:
             with open(out_dir / "spec.txt", "w", encoding="utf-8", newline="\n") as _f:
                 _f.write("%s %s" % ("" if ex is None else repr(ex), "" if it is None else repr(it)))
-    except Exception:
-        pass
+    except (OSError, struct.error, ValueError, IndexError) as e:
+        _sheet_warning(out_dir, "spec.txt not written", e)
     _write_sheet_json(header, out_dir, ">")
 
 
@@ -3963,8 +3975,11 @@ class TextureIndex(dict):
                 if has_dif or (named and not require_diffuse):
                     rel = os.path.relpath(dp, str(self.root)).replace(os.sep, "/")
                     found.append((texture_key(rel), rel, Path(dp)))
-        except Exception:
-            pass
+        except (OSError, ValueError) as e:  # ValueError: relpath across drives
+            _run_warning(
+                "      WARNING: texture index of %s incomplete (%s: %s)"
+                % (self.root, type(e).__name__, e)
+            )
         for key, _rel, d in sorted(found, key=lambda t: (t[0], t[1])):
             self.by_path.setdefault(key, d)
             name = d.name.rsplit(".", 1)[0].strip().lower()
@@ -4049,9 +4064,10 @@ def unique_material_names(mats):
 def _find_layer(texdir, label):
     try:
         g = sorted(texdir.glob("*_%s_*.png" % label))
-        return g[0] if g else None
-    except Exception:
+    except OSError as e:
+        _sheet_warning(texdir, "%s layer not looked up" % label, e)
         return None
+    return g[0] if g else None
 
 
 def _make_roughness(texdir, specsize_png, exponent):
@@ -4089,7 +4105,8 @@ def _make_roughness(texdir, specsize_png, exponent):
             r = int(round(min(1.0, max(0.0, rv)) * 255.0))
             Image.fromarray(np.full((4, 4), r, dtype="uint8")).save(out)
         return out
-    except Exception:
+    except (OSError, ValueError) as e:  # Pillow cannot read the layer or write the map
+        _sheet_warning(texdir, "%s not written, no map_Ns" % out.name, e)
         return None
 
 
@@ -4124,7 +4141,8 @@ def _mtl_no_highlight(texdir, inten, specmap_png):
         if not sheet or sb:
             return False  # the GLB writer builds no engine material for these either
         return _mt.no_highlight(sheet, inten, black)
-    except Exception:
+    except (OSError, ValueError) as e:  # Pillow cannot read the specMap layer
+        _sheet_warning(texdir, "specMap not read, highlight kept", e)
         return False
 
 
@@ -4217,7 +4235,8 @@ def _make_roughness_engine(texdir, specsize_png, exponent):
             r = int(round(float(_mt.roughness(_mt.exponent(exponent))) * 255.0))
             Image.fromarray(np.full((4, 4), r, dtype="uint8")).save(out)
         return out
-    except Exception:
+    except (OSError, ValueError) as e:  # Pillow cannot read the layer or write the map
+        _sheet_warning(texdir, "%s not written, no map_Ns" % out.name, e)
         return None
 
 
@@ -4408,12 +4427,13 @@ def _rig_load():
         import rig_glb
 
         _RIG["mod"] = rig_glb
-    except Exception:
+    except ImportError as e:
         _RIG["mod"] = None
+        _RIG["error"] = "%s: %s" % (type(e).__name__, e)
     return _RIG["mod"] is not None
 
 
-def _model_palette(header):
+def _model_palette(header, name=None):
     """Joint table for the --glb skin rig, decoded from the MODEL's own header
     (palette order = header node order: on the 92 body models of PC and Xbox 360
     Part 2 every weighted joint index names the bone the character export's
@@ -4422,14 +4442,18 @@ def _model_palette(header):
         import extract_skeletons as _es
 
         sk = _es.skeleton_from_header(header, "palette")
-        if sk and sk.get("bone_count"):
-            return sk
-    except Exception:
-        pass
+    except (struct.error, ValueError, IndexError, KeyError) as e:
+        _run_warning(
+            "      WARNING: model %s: joint table not read from the header, joints named "
+            "bone_<n> (%s: %s)" % (name or "?", type(e).__name__, e)
+        )
+        return None
+    if sk and sk.get("bone_count"):
+        return sk
     return None
 
 
-def _model_is_body(header):
+def _model_is_body(header, name=None):
     """True if the model embeds a full biped body skeleton (has leg bones). Head /
     accessory models embed their own small palette (face bones, no legs) -- those must
     NOT be rigged with the shared body skeleton (their joint indices reference their own
@@ -4441,7 +4465,11 @@ def _model_is_body(header):
         if len(names) <= 1:
             return True  # nothing decoded -> assume body, never silently unrig
         return any(("Calf" in n) or ("Thigh" in n) for n in names)
-    except Exception:
+    except (struct.error, ValueError, IndexError, KeyError) as e:
+        _run_warning(
+            "      WARNING: model %s: node list not read from the header, rigged as a body "
+            "(%s: %s)" % (name or "?", type(e).__name__, e)
+        )
         return True  # default: treat as body (prior behaviour)
 
 
@@ -6185,8 +6213,9 @@ def _decode_model(header, stream, out_path, tex_index, log, order, lod, status, 
             if skinned:
                 SI = _np.concatenate(SKIN_I)
                 SW = _np.concatenate(SKIN_W)
-                _is_body = _model_is_body(header)  # head/accessory -> own palette, static
-                pal = _model_palette(header)
+                # head/accessory -> own palette, static
+                _is_body = _model_is_body(header, out_path.name)
+                pal = _model_palette(header, out_path.name)
                 need = int(SI.max()) + 1 if SI.size else 0
                 names = [b["name"] for b in pal["bones"]] if pal else []
                 if len(names) < need:
@@ -6579,7 +6608,11 @@ def _ogg_from_packets(pk, exact, end=None):
             for n in range(1, len(bss)):
                 g += (bss[n - 1] + bss[n]) // 4
                 gr.append(g)
-        except Exception:
+        except (struct.error, ValueError, IndexError) as e:  # setup header not walked
+            _run_warning(
+                "      WARNING: Ogg granule positions estimated at 1024 samples per packet, "
+                "playback may stutter (%s: %s)" % (type(e).__name__, e)
+            )
             gr = None
     if gr is None:
         gr = [(i + 1) * 1024 for i in range(len(audio))]
@@ -7482,7 +7515,10 @@ def _prop_walk(H, order="<"):
     Part 2 (WM07) records are 20 bytes ([salt][hashLo][hashHi][tag][val],
     +4 when tag==2); Part 1 (WM06) records are 16 bytes ([salt][hash][tag]
     [val], +4 when tag==2). The stride is auto-detected by which one yields
-    more consecutive salt hits. Returns (end_offset, base_record_size)."""
+    more consecutive salt hits. Returns (end_offset, base_record_size).  The
+    walk stops after _PROP_WALK_CAP records; a bag that goes on past that gets
+    a WARNING line (once per distinct header), since the end offset then lies
+    inside the bag."""
     tlen = struct.unpack_from(order + "I", H, 0)[0]
     p = 4 + tlen + 4
     if p + 4 > len(H):
@@ -7492,7 +7528,11 @@ def _prop_walk(H, order="<"):
     def walk(rs, tagoff):
         q = p
         n = 0
-        while q + rs <= len(H) and struct.unpack_from(order + "I", H, q)[0] == salt and n < 64:
+        while (
+            q + rs <= len(H)
+            and struct.unpack_from(order + "I", H, q)[0] == salt
+            and n < _PROP_WALK_CAP
+        ):
             tag = struct.unpack_from(order + "I", H, q + tagoff)[0]
             q += rs + 4 if tag == 2 else rs
             n += 1
@@ -7500,7 +7540,30 @@ def _prop_walk(H, order="<"):
 
     n1, q1 = walk(16, 8)
     n2, q2 = walk(20, 12)
-    return (q1, 16) if n1 > n2 else (q2, 20)
+    q, rs = (q1, 16) if n1 > n2 else (q2, 20)
+    if (
+        max(n1, n2) == _PROP_WALK_CAP
+        and q + rs <= len(H)
+        and struct.unpack_from(order + "I", H, q)[0] == salt
+    ):
+        key = hashlib.sha1(bytes(H[:q])).digest()
+        if key not in _PROP_WALK_WARNED:
+            _PROP_WALK_WARNED.add(key)
+            _run_warning(
+                "      WARNING: %s header: property bag has more than %d records; the walk "
+                "stopped inside it, offsets read after the bag are not reliable"
+                % (
+                    bytes(H[4 : 4 + tlen]).split(b"\0")[0].decode("ascii", "replace"),
+                    _PROP_WALK_CAP,
+                )
+            )
+    return q, rs
+
+
+#: _prop_walk: most property records walked
+_PROP_WALK_CAP = 64
+#: _prop_walk: headers already reported as running past the cap
+_PROP_WALK_WARNED = set()
 
 
 def _propbag_end(H, order="<"):
@@ -7891,13 +7954,18 @@ def _names_mod():
     return _cnm
 
 
+#: why kapow_json did not import (the asset loop names it on each asset it leaves raw)
+_KAPOW_JSON_ERROR = []
+
+
 @functools.cache
 def _kapow_json():
     """Lazy import of kapow_json (fragment/pb/sequence/particle/... -> JSON); None
-    (kept) when it does not import."""
+    (kept) when it does not import, the reason in _KAPOW_JSON_ERROR."""
     try:
         import kapow_json as _kj
-    except Exception:
+    except ImportError as e:
+        _KAPOW_JSON_ERROR[:] = ["%s: %s" % (type(e).__name__, e)]
         return None
     return _kj
 
@@ -8132,7 +8200,8 @@ def _extract_main(argv):
         a.no_models = False
     if _RIG["on"] and not _rig_load():
         print(
-            "warning: --glb requested but rig_glb.py (or numpy) not importable; skipping rig export",
+            "WARNING: --glb requested but rig_glb.py (or numpy) not importable (%s); "
+            "skipping rig export" % _RIG.get("error"),
             file=sys.stderr,
         )
         _RIG["on"] = False
@@ -8452,8 +8521,11 @@ def _extract_blocks_and_rest(
                     md = media_desc_from_header(header, BLOCK_ORDER)
                     if md:
                         media_desc[md["stream"].lower().lstrip("/")] = (name, md)
-                except Exception:
-                    pass
+                except (struct.error, ValueError, IndexError, KeyError) as ex:
+                    log(
+                        "      WARNING: music %s: stream description not read, channels and "
+                        "rate left to the stream (%s: %s)" % (name, type(ex).__name__, ex)
+                    )
             if not a.no_audio and low.endswith(".fragment") and b"MusicStreamSlot" in header:
                 music_frags.append((name, header, BLOCK_ORDER))
             # dump EVERY asset raw (header + optional stream) to extracted/ for offline analysis
@@ -8530,6 +8602,10 @@ def _extract_blocks_and_rest(
                                     _f.write(_f32j.dumps(d, indent=1))
                         else:
                             _cnt[1] += _one
+                            log(
+                                "      WARNING: %s %s: not decoded: kapow_json not importable (%s)"
+                                % (_kind[1:], name, "; ".join(_KAPOW_JSON_ERROR))
+                            )
                     except Exception as ex:
                         _cnt[1] += _one
                         log("      WARNING: %s %s: not decoded: %s" % (_kind[1:], name, ex))

@@ -967,7 +967,7 @@ def write_outputs(doc, base, glb=True):
         return written
     try:
         from PIL import Image
-    except Exception:
+    except ImportError:
         Image = None
     np = _np()
     hf = height_field(doc, lay)
@@ -1016,7 +1016,8 @@ def write_outputs(doc, base, glb=True):
     if glb:
         try:
             g = build_glb(doc, lay)
-        except Exception as ex:  # frame.FrameError etc.: say so, keep the JSON
+        except (ValueError, KeyError, IndexError, struct.error) as ex:  # FrameError, TerrainError
+            # are ValueErrors: say so in the JSON, keep it
             doc["glb_not_written"] = str(ex)
             g = None
         if g:

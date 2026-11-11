@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Failures that change the output are `WARNING:` lines.** `extract`: `kapow_json` not
+  importable (one line per asset left raw), a property bag longer than the 64 records the walk
+  reads, a text blob that does not inflate, a text asset a later block stores with other bytes,
+  a `sheet.json` that cannot be read, the texture alpha flag, `spec.txt`, a roughness map, the
+  joint table or node list of a skinned model, estimated Ogg granule positions, a music stream
+  description; `faces`: a model it cannot parse; `gendata` and the name tables: an unreadable
+  `registered_names.json` or spellings dropped from it; `fx_meta`: particle facts and character
+  attachments; `anim_meta`: the combat, face and fx steps (`build_failed` records them as
+  before). The handlers catch the data and I/O errors they are meant for, so a code error is
+  no longer read as "no data". No output change. (2026-11-11)
 - **`extract` exits 1 when a block cannot be read or parsed.** The run goes on with the other
   blocks and the log ends with `! blocks : N not extracted ...` naming them; it exited 0
   before, so a batch keyed on the exit code marked such a run done. `all` stops after such an

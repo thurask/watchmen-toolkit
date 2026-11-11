@@ -201,7 +201,7 @@ def parse(data, order=None):
     try:
         wx = _tex_fmt()
         tex["fmt"] = wx.TEX_FMT[en][0]
-    except Exception:
+    except KeyError:  # an image enum the texture reader does not name: no "fmt"
         pass
     tex["data_offset"] = off
     tex["data_bytes"] = n
@@ -342,7 +342,7 @@ def write_atlas(data, doc, png_path):
     """Write the atlas PNG; returns True when written (needs numpy + Pillow)."""
     try:
         from PIL import Image
-    except Exception:
+    except ImportError:
         return False
     img = atlas_image(data, doc)
     if img is None:

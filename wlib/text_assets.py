@@ -695,11 +695,14 @@ def subtitle_index(lines, t):
 
 
 # -------------------------------------------------------------- extraction
-def block_text_assets(h_data):
+def block_text_assets(h_data, warn=None):
     """[(asset name, localized, byte order, [payload per language slot])] of
     the textRes assets of one block header file (`*.block_h_z`).  A slot whose
-    blob is missing or does not inflate is None."""
+    blob is missing or inflates past the ceiling is None; a blob that does not
+    inflate is kept as stored.  Both give a WARNING line through `warn`."""
     import watchmen_extract as wx
+
+    warn = warn or (lambda *a: None)
 
     out, order = {}, None
     for lang in range(wx.BLOCK_LANGUAGES):
@@ -713,9 +716,22 @@ def block_text_assets(h_data):
             size = e.data_size
             if e.type_name == TEXT_CLASS:
                 rec = out.setdefault(e.name, [e.localized, [None] * wx.BLOCK_LANGUAGES])
+
+                def _report(msg, name=e.name, lang=lang):
+                    warn(
+                        "      WARNING: text %s (language slot %d): does not inflate, kept as "
+                        "stored (%s)" % (name, lang, msg)
+                    )
+
                 try:
-                    rec[1][lang] = wx._maybe_inflate(h_data[cur : cur + size], e.type_name)
-                except Exception:
+                    rec[1][lang] = wx._maybe_inflate(
+                        h_data[cur : cur + size], e.type_name, report=_report
+                    )
+                except ValueError as ex:  # past the inflate ceiling
+                    warn(
+                        "      WARNING: text %s (language slot %d): not read (%s)"
+                        % (e.name, lang, ex)
+                    )
                     rec[1][lang] = None
             cur += size
     return [(name, loc, order, blobs) for name, (loc, blobs) in out.items()]
@@ -786,11 +802,18 @@ class TextWriter:
 
     def add_block(self, h_data, block_name=None):
         """Collect the text assets of one block header file; returns how many."""
-        found = block_text_assets(h_data)
+        found = block_text_assets(h_data, self.log)
         if block_name:
             # archive spelling: a loose `files` tree names its entries with a leading '/'
             block_name = block_name.replace("\\", "/").lstrip("/")
         for name, loc, order, blobs in found:
+            old = self.assets.get(name)
+            if old is not None and (old["blobs"], old["order"]) != (blobs, order):
+                # the later block's copy is the one written
+                self.log(
+                    "      WARNING: text %s: block %s stores other bytes than block %s; "
+                    "the copy of %s is written" % (name, block_name, old["block"], block_name)
+                )
             self.assets[name] = {
                 "localized": bool(loc),
                 "order": order,
@@ -1212,6 +1235,11 @@ def build(extract_out, log=None):
 
     # sound -> subtitle lines
     sounds, speech = {}, {}
+    if len(sub_assets) > 1:
+        log(
+            "  WARNING: text: %d sound subtitle tables; only %s is matched to sounds, not %s"
+            % (len(sub_assets), sub_assets[0], ", ".join(sub_assets[1:]))
+        )
     if sub_assets:
         name = sub_assets[0]
         dur = assets[name]["default_duration_s"]

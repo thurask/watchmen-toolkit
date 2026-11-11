@@ -24,6 +24,7 @@ the extract, summarises and resolves references.
 
 import json
 import os
+import struct
 import sys
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -208,7 +209,7 @@ def file_row(rel, data, tree, stored=None, spell=None):
     caps = [t["max_particles"] for t in types if _num(t["max_particles"]) is not None]
     try:
         exact = particle_asset.build(tree) == data
-    except Exception:  # a tree that cannot be written back is simply not exact
+    except (ValueError, struct.error):  # ParticleError is a ValueError: not exact
         exact = False
     row = {
         "file": rel,

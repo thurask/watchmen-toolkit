@@ -50,6 +50,7 @@ CLI:  python3 fx_meta.py EXTRACT_OUT OUT.json [ANIM_META.json]
 import json
 import math
 import os
+import struct
 import sys
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -945,22 +946,22 @@ def particle_facts(path):
     """What a .particle file says about how long it shows: the system's
     `duration` (emit window, seconds) and `loop`, and the longest
     `particleLife` of its types.  Property names as registered by
-    ParticleSystemAsset 0x55da60 / ParticleType 0x55c1d2.  None when the file
-    cannot be read."""
-    try:
-        import kapow_props
+    ParticleSystemAsset 0x55da60 / ParticleType 0x55c1d2.  None, with a
+    WARNING line, when the file cannot be read."""
+    import kapow_props
+    import particle_asset
 
+    try:
         with open(path, "rb") as fh:
             data = fh.read()
-    except Exception:  # an unreadable asset must not take the table down
+    except OSError as ex:  # an unreadable asset must not take the table down
+        print("  WARNING: fx_meta: particle %s not read (%s: %s)" % (path, type(ex).__name__, ex))
         return None
     out = {"emit_duration_s": None, "loop": None, "types": 0, "particle_life_s_max": None}
     lives = []
     try:  # the engine's grammar: both byte orders and the Part 1 PC / X360 record layout
-        import particle_asset
-
         tree = particle_asset.parse(data)
-    except Exception:
+    except (ValueError, struct.error, IndexError, KeyError):  # ParticleError is a ValueError
         tree = None
     if tree is not None:
         v = particle_asset.values(tree["system"])
@@ -978,7 +979,11 @@ def particle_facts(path):
         return out
     try:  # not a complete tree: the generic property-bag walk
         doc = kapow_props.parse(data)
-    except Exception:
+    except (ValueError, struct.error, IndexError, KeyError) as ex:
+        print(
+            "  WARNING: fx_meta: particle %s not decoded, no particle facts (%s: %s)"
+            % (path, type(ex).__name__, ex)
+        )
         return None
     for b in doc.get("blocks", []):
         props = {}
@@ -1279,7 +1284,10 @@ class FxDB:
         try:
             class_ids, visuals = self.sm._body_classes(self.db)
         except Exception as ex:  # no class fragments in this extract
-            self.log("  fx_meta: body classes: %s" % ex)
+            self.log(
+                "  WARNING: fx_meta: body classes not read, no character attachments (%s: %s)"
+                % (type(ex).__name__, ex)
+            )
             class_ids, visuals = {}, {}
         out = {}
         for rel in self.fragments(["CharacterDef"]):
@@ -2283,6 +2291,11 @@ def counts(meta):
     }
 
 
+#: start of the log line attach writes when the fx step fails (anim_meta
+#: records the rest of the line as the reason under build_failed)
+SKIPPED_PREFIX = "  WARNING: fx_meta: skipped ("
+
+
 def attach(meta, extract_out, classes, states, pairs, am, log=None):
     """The anim_meta hook: decorate every state's events, add state `fx`,
     pair camera cuts and the top-level `fx` block.  Only ADDS keys.
@@ -2294,7 +2307,7 @@ def attach(meta, extract_out, classes, states, pairs, am, log=None):
     try:
         return _attach(meta, extract_out, classes, states, pairs, am, log)
     except Exception as ex:  # optional decoration: never take the animation table down
-        log("  fx_meta: skipped (%s: %s)" % (type(ex).__name__, ex))
+        log("%s%s: %s)" % (SKIPPED_PREFIX, type(ex).__name__, ex))
         return meta
 
 
@@ -2303,7 +2316,7 @@ def _attach(meta, extract_out, classes, states, pairs, am, log):
         fdb = FxDB(extract_out, log)
         fx = tables(extract_out, log, fdb)
     except Exception as ex:  # no effect fragments: per-state data still goes in
-        log("  fx_meta: tables: %s" % ex)
+        log("  WARNING: fx_meta: tables: %s: %s" % (type(ex).__name__, ex))
         fdb, fx = None, {"format": FORMAT, "error": str(ex)}
     root = fdb.db.root if fdb else None
     index, args = {}, {}
@@ -2389,7 +2402,11 @@ def character_attachments(extract_out, cname, bone_names=None, meta=None):
             fdb = FxDB(extract_out)
             chars = fdb.characters({})
             parts = dict(fdb._particles)
-        except Exception:
+        except Exception as ex:  # the attachment table is optional: never fail an export
+            print(
+                "  WARNING: fx_meta: attachment table of %s not built, GLBs carry no "
+                "fx_attachments (%s: %s)" % (extract_out, type(ex).__name__, ex)
+            )
             chars, parts = {}, {}
         _ATT_CACHE[key] = (chars, parts)
     chars, parts = _ATT_CACHE[key]
@@ -2441,7 +2458,8 @@ def with_attachments(extras, extract_out, cname, bone_names=None, meta=None):
     are empty.  For characters_export's asset_extras argument."""
     try:
         att = character_attachments(extract_out, cname, bone_names, meta)
-    except Exception:  # the attachment table is optional: never fail an export
+    except Exception as ex:  # the attachment table is optional: never fail an export
+        print("  WARNING: fx_meta: %s: no fx_attachments (%s: %s)" % (cname, type(ex).__name__, ex))
         att = {}
     if not att:
         return extras
