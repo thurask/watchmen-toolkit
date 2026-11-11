@@ -31,6 +31,7 @@ HOMES = {
     "texture_header",
     "texture_sheet",
     "texture_decode",
+    "texture_carve",
 }
 
 
@@ -140,8 +141,8 @@ def test_a_name_neither_here_nor_forwarded_is_an_attribute_error():
 
 
 def test_a_name_defined_here_is_set_here(monkeypatch):
-    monkeypatch.setattr(we, "carve_texture", "patched")
-    assert vars(we)["carve_texture"] == "patched"
+    monkeypatch.setattr(we, "main", "patched")
+    assert vars(we)["main"] == "patched"
 
 
 def test_the_script_entry_point_runs():
