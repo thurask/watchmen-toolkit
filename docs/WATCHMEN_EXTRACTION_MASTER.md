@@ -175,7 +175,7 @@ header).
   material is the one the descriptor index selects; a buffer the header lists
   without a descriptor (a strip: the descriptor's last word is the primitive
   type, `find_descriptors` wants 1) is decoded from the header. The descriptor
-  search (`_vb_ok` / `_ib_ok` from the end of the previous piece, then
+  search (`vb_ok` / `ib_ok` from the end of the previous piece, then
   `char_lib.flat_buffer`) runs only when the header path does not apply, and
   logs `note: <model> sub<i>: header path not applicable (<why>); scanned`.
   Measured on the six sets: every pipeline load (body parts of every variant
@@ -188,18 +188,18 @@ header).
 - CVarList = 24-bit count + 8-bit flags (the `& 0xFFFFFF` seen everywhere).
   Stream primitive: `ReadU32 = 0x435459`.
 
-**The descriptor scan (fallback).** `find_descriptors` / `_vb_ok` /
+**The descriptor scan (fallback).** `find_descriptors` / `vb_ok` /
 `decode_model` take `order=`; model jobs carry their block's order. The scan's
 vertex class is the format id `G` read from the descriptor (not an element
 count; the console declarations are not in the PC executable). Rules it uses:
 the byte order is the one with **more** descriptors (a BE model can throw a
-stray false-positive LE descriptor: X360 GimpBody LE=1 vs BE=2); `_ib_ok()`
+stray false-positive LE descriptor: X360 GimpBody LE=1 vs BE=2); `ib_ok()`
 requires the found VB to have a mostly-non-degenerate IB (<40 % repeated
 index), because on X360 a false vbo ~4 bytes before the real one passes
-`_vb_ok` (positions look sane) with an index buffer ~50 % repeated-index —
+`vb_ok` (positions look sane) with an index buffer ~50 % repeated-index —
 that false offset hit the Rorschach ink-blot decals (`rorschachspots01` /
 `RorschachSpots02`, 132 verts / 224 tris each; the spots sit on the mask) and
-the Twilight Lady hair submesh of `BS2_WithoutWeapon`; with `_ib_ok` both
+the Twilight Lady hair submesh of `BS2_WithoutWeapon`; with `ib_ok` both
 decode bit-identical to PC (vdiff 0.0000, skin 100 %, 11/11 Rorschach parts).
 Measured with the scan: bordello block 194/194 models on PC, X360 and PS3;
 positions / uvs / faces byte-identical PC↔console (incl. a skinned model
@@ -307,7 +307,7 @@ decode no shipped texture; they run only when the exact header does not read. Th
 tiered — EXACT frame multiples are accepted before the dropped-layer recovery,
 LOOSE multiples only after it; the recovery can return a repaired set as an
 exact frame multiple (Caustics01_001 = 32 × [16×16 + drifted 128×128]).
-`_rescue_texture_plan` (carve-time, fail path only): full-offset record scan →
+`rescue_texture_plan` (carve-time, fail path only): full-offset record scan →
 record-subsequence + mip brute force to EXACT stream tiling → coherence-scored
 pick (Floor_Sidewalk_Curb_01's 4-layer drift). Results of that planner: Part 1
 1971 textures → 1734 single / 201 cube / 35 anim (all ≤×32) / 1 drift-rescued;
@@ -469,13 +469,13 @@ the type-hash word and one flag byte fewer per submesh record
 stride-walk fallback the same difference is the record size: Part 2 / WM07
 records are 20 bytes (`[salt][hashLo][hashHi][tag][val]`, +4 when tag==2),
 Part 1 / WM06 records 16 bytes (`[salt][hash32][tag][val]`, +4 when tag==2);
-`_prop_walk()` auto-detects the stride by which one yields more consecutive
+`prop_walk()` auto-detects the stride by which one yields more consecutive
 salt hits — no version flag. The texture descriptor (29 bytes plus one
 presence byte per optional slot) is the same on both engines; only the start of
 the descriptor area shifts. The `sound` field layout after the propbag is
 byte-identical to Part 2. Measured: 1970/1971 Part 1 textures plan
 deterministically in the fallback planner (1713 single / 201 cube / 56 anim;
-sole fail = Floor_Sidewalk_Curb_01, rescued by `_rescue_texture_plan`); a
+sole fail = Floor_Sidewalk_Curb_01, rescued by `rescue_texture_plan`); a
 sample of 60 Part 1 SFX decode 60/60 (`_propbag_end` must walk the right
 record size, or `decode_sfx` bails and no SFX/dialog is written; music is a
 separate loose-file path). Part 2: bordello 273/273 texture plans, mainmenu
@@ -643,16 +643,16 @@ X360 & PS3: nightowlbelt 20/0.58, dominatrix 43/1.17).
   data size = u32be @ hdr+8; DXT pixel data is byte-identical to PC (a layer may
   carry more mips than PC, e.g. ATI2 stored with its full chain). PS3 normal
   layers are **DXT5nm** (X→alpha, Y→green, R/B filler);
-  `_decode_one_layer(normal=True)` rebuilds (X, Y, Z) → a normal matching PC
+  `decode_one_layer(normal=True)` rebuilds (X, Y, Z) → a normal matching PC
   within a bit (126,126,252 vs 127,126,252). RSX stores UNCOMPRESSED layers
-  (L8 specSize) in **Morton/Z-order**; DXT layers are linear. `_rsx_unswizzle`
+  (L8 specSize) in **Morton/Z-order**; DXT layers are linear. `rsx_unswizzle`
   (x from even bits, y from odd, non-square pow2 = leftover high bits ride
   linearly on the wider dim) makes all 65 PS3 specSize maps BYTE-IDENTICAL to
   PC's linear L8. A linear decode gives scrambled maps (histogram right, pixels
   wrong, corr≈0.03 vs PC).
 - **X360**: the whole stream is 16-bit byte-swapped (GPU 8-in-16) and every mip
-  is tiled (`XGAddress2DTiledOffset`) — `XGAddress2DTiledOffset` reimplemented (`_xg2d`/`_xg_untile`;
-  `_xg2d` is the exact canonical Xenia `XGAddress2DTiledOffset`, bit-for-bit),
+  is tiled (`XGAddress2DTiledOffset`) — `XGAddress2DTiledOffset` reimplemented (`xg2d_offset`/`_xg_untile`;
+  `xg2d_offset` is the exact canonical Xenia `XGAddress2DTiledOffset`, bit-for-bit),
   verified BYTE-EXACT vs PC after swap + untile. Per-layer size rule
   (`_x360_layer_bytes`): mips stored individually while min(w,h) ≥ 32 texels,
   each padded to 32×32 blocks; all smaller mips share one packed 32×32-block
@@ -690,7 +690,7 @@ X360 & PS3: nightowlbelt 20/0.58, dominatrix 43/1.17).
   PC.
 - **Uncompressed 32bpp** (`_texel32_to_pc()`): PS3/RSX stores big-endian
   `A,R,G,B`; X360 stores PLAIN BE `A,R,G,B` (NOT GPU 8-in-16 swapped, so an
-  unconditional `_bswap16` scrambles it to `R,A,B,G`). Both are reordered to
+  unconditional `bswap16` scrambles it to `R,A,B,G`). Both are reordered to
   the PC layout (`B,G,R,A`) before the shared decoder. The 6
   lensflare/lightprojector/lockpick maps per console: PS3 6/6 byte-identical
   to PC; X360's alpha byte holds 0 where PC stores 255 (X8-style padding; RGB
@@ -761,7 +761,7 @@ X360 & PS3: nightowlbelt 20/0.58, dominatrix 43/1.17).
   is what a transposed map shows [inferred]. With the Y-first decoder the
   remaining differences are the PS3 DXT5 re-encodes above. (b) "X360 cube
   faces 1-5 use Xenos cube/array addressing, not expressible as
-  `_xg2d(X0+x, Y0+y, W)` for any W≤512, origin or flip" (6 `*_cubemap.bmp`,
+  `xg2d_offset(X0+x, Y0+y, W)` for any W≤512, origin or flip" (6 `*_cubemap.bmp`,
   e.g. `01_TWM_Atrium_01_a`, 64×64 DXT1, 6 faces × 24576 B; face 0 exact,
   face 1's swizzle shaped like face 0's but shifted): the faces are level-major
   with 32×32-block padding, and all faces decode. (c) "Extra X360-only UI
@@ -796,7 +796,7 @@ max-diff 0.0); X360 Rorschach character parts 11/11 with matching materials,
 vertex positions ≤0.0005, skin 100 % match; a full rigged X360 GLB builds (64
 joints, 11 prims, 9 embedded textures, 1 MB). Gimp2: 8/8 parts.
 
-Animation clips: `bake_v4.walk`/`bake` are order-aware (`_detect_clip_order`;
+Animation clips: `bake_v4.walk`/`bake` are order-aware (`detect_clip_order`;
 f4/i2 dtypes + struct reads flipped for BE). Console `.animation` clips decode
 to tracks BIT-IDENTICAL to PC (max quat diff 0.0 on BS2_COM_MOV_idle_taunt_A,
 47/47 tracks). The X360 character library GLB builds end-to-end: `build_lib` →

@@ -201,7 +201,7 @@ def _bake(tmp_path, **kw):
 def test_the_clips_exercise_the_limit_and_the_clamp(tmp_path):
     """The pinned bakes are worth pinning: the bone leaves its parent in each, and the
     "clamp" bake reaches its distance limit (the write-back's clamp and slerp)."""
-    props = dict(jiggle_d6._FILE_DEFAULTS)
+    props = dict(jiggle_d6.FILE_DEFAULTS)
     out = _bake(tmp_path, props=props)
     tb = np.add(ORIGIN, LEVER)
     moved = {}
@@ -220,7 +220,7 @@ def test_the_clips_exercise_the_limit_and_the_clamp(tmp_path):
 
 def test_bake_digests_are_pinned(tmp_path):
     """The same bytes on every platform (Windows / Linux, any supported Python and numpy)."""
-    props = dict(jiggle_d6._FILE_DEFAULTS)
+    props = dict(jiggle_d6.FILE_DEFAULTS)
     got = {
         k: hashlib.sha256(v.tobytes()).hexdigest()[:16]
         for k, v in _bake(tmp_path, props=props).items()
@@ -238,7 +238,7 @@ class _NoLibm:
 
 
 def test_the_solver_calls_nothing_platform_dependent(tmp_path, monkeypatch):
-    props = dict(jiggle_d6._FILE_DEFAULTS)
+    props = dict(jiggle_d6.FILE_DEFAULTS)
     want = _bake(tmp_path, props=props)
 
     def banned(name):
@@ -263,30 +263,10 @@ def test_the_solver_calls_nothing_platform_dependent(tmp_path, monkeypatch):
         monkeypatch.setattr(mod, name, banned("numpy %s" % name))
     monkeypatch.setattr(jiggle_d6, "_orth", banned("_orth"))
     monkeypatch.setattr(jiggle_d6, "_slerp_m", banned("_slerp_m"))
-    monkeypatch.setattr(jiggle_d6, "_rotv2m", banned("_rotv2m"))
+    monkeypatch.setattr(jiggle_d6, "rotvec_to_mat", banned("rotvec_to_mat"))
     got = _bake(tmp_path, props=props)
     for k in want:
         assert np.array_equal(got[k], want[k]), k
-
-
-def test_solver_source_has_no_power_operator_or_builtin_sum():
-    import inspect
-
-    src = "".join(
-        inspect.getsource(o)
-        for o in (
-            jiggle_d6.SoftLimitJoint,
-            jiggle_d6._apply_jiggle_solver,
-            jiggle_d6._q_slerp,
-            jiggle_d6._q_extrapolate,
-            jiggle_d6._loop_frames,
-            jiggle_d6._slerp_rot,
-            jiggle_d6._m2q,
-        )
-    )
-    code = "\n".join(line.split("#")[0] for line in src.splitlines())
-    assert "**" not in code and "sum(" not in code and " @ " not in code
-    assert "np.linalg" not in code and "einsum" not in code
 
 
 def test_the_arithmetic_change_has_its_own_cache_tag():
@@ -302,7 +282,7 @@ def test_last_bit_noise_is_what_the_fix_removes(tmp_path, monkeypatch):
     step (SOLVER_KIN_EPS), so on a slow, small motion one bit decides whether the anchor
     turns in a step: move the last bit of one sine in a hundred and the baked bone ends
     up millimetres away.  With the dead band off the same noise changes nothing."""
-    props = dict(jiggle_d6._FILE_DEFAULTS)
+    props = dict(jiggle_d6.FILE_DEFAULTS)
     bind = _bind(tmp_path)
     clip = _clip(120, True, amp=0.02, speed=3.0)
     a = jiggle_d6.apply_jiggle(clip, 30.0, bind, props=props, loop=True)

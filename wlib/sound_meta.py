@@ -211,6 +211,23 @@ def _stats(ds):
     }
 
 
+def nearest_first(cands, home):
+    """Fragment paths `cands` ordered by the folder path they share with the fragment
+    `home`, longest first; equal ones keep their order.  Folders are compared whole
+    (os.path.commonpath): "Enemy01/" and "Enemy02/" share only their parent folder.
+    Every shared path is a leading part of `home`, so its length orders them."""
+    if not home:
+        return list(cands)
+
+    def shared(rel):
+        try:
+            return len(os.path.commonpath([rel, home]))
+        except ValueError:  # one path absolute, the other not
+            return 0
+
+    return sorted(cands, key=lambda r: -shared(r))
+
+
 class SoundDB:
     """The fragments and wave headers of one EXTRACT_OUT, with reference
     resolution across fragments."""
@@ -351,7 +368,7 @@ class SoundDB:
                 cands = self._stems.get(a, [])
                 if len(cands) > 1:  # several files of one name: the one that has the node
                     cands = [r for r in cands if x[-1] in self.nodes(r)] or cands
-                    cands.sort(key=lambda r: -len(os.path.commonprefix([r, home or ""])))
+                    cands = nearest_first(cands, home)
                 nxt = cands[0] if cands else None
             if nxt is None:
                 self.unresolved[a] = self.unresolved.get(a, 0) + 1

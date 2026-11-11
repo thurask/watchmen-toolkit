@@ -14,15 +14,10 @@ import json
 import math
 import os
 import struct
-import sys
 
 import numpy as np
 import pytest
 
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wlib"))
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools"))
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import anim_meta as am
 import bake_v4
 import characters_export as ce
@@ -186,11 +181,24 @@ def test_camera_states_say_what_selects_them():
         "WALK",
         "IDLE",
     }
-    import inspect
-
-    src = inspect.getsource(fx.FxDB.camera_rig)
-    assert 'it["use"] = CAMERA_CHARACTER_DB_USE[cid]' in src and "_RIG_PROPERTY_USE" in src
     assert "CameraPlayerVsPlayer._nsmoothing" in fx._RIG_PROPERTY_USE
+
+
+def test_the_camera_rig_names_what_selects_each_state(tmp_path):
+    from test_fx_meta import Frag
+
+    rig = Frag("TNT/Fragments/GameEssentials/PlayerCtrl/RorschachSingle.fragment")
+    ctrl = rig.add("CameraCtrl", "Camera")
+    rig.add("CharacterCamera", "CharacterCamera", ctrl)
+    man = rig.add("CharacterCameraStateManager", "States", ctrl)
+    rig.add("CharacterCameraDBItem", "Behind", man, m_icharactercamid=16)
+    rig.add("CharacterCameraDBItem", "Combat", man, m_icharactercamid=2)
+    rig.write(tmp_path)
+    (r,) = fx.FxDB(str(tmp_path)).camera_rig().values()
+    by = {st["name"]: st for st in r["states"]}
+    assert by["Behind"]["use"] == fx.CAMERA_CHARACTER_DB_USE[16] == "button 0x22: centre behind"
+    assert 2 not in fx.CAMERA_CHARACTER_DB_USE and "use" not in by["Combat"]
+    assert r["property_use"] == fx._RIG_PROPERTY_USE
 
 
 def test_property_store_flags_table():
@@ -213,13 +221,6 @@ def test_property_store_flags_table():
 
 # ----------------------------------------------------------------- level export
 def test_level_cameras_name_the_pvp_focus_point_and_auto_sequences_are_listed():
-    import inspect
-
-    src = inspect.getsource(level_meta._section_cameras)
-    assert 'n.cls == "PlayerVsPlayerFocusPoint"' in src and '"pvp_focus": focus' in src
-    src = inspect.getsource(level_meta._section_auto_sequences)
-    assert 'n.p("autoStart")' in src and '"PropertySequenceNode"' in src
-
     class N:
         def __init__(self, cls, name, **p):
             self.cls, self.name, self.props, self.type = cls, name, p, cls
@@ -420,7 +421,7 @@ def test_a_big_endian_clip_header_gives_the_same_length(tmp_path, monkeypatch):
     # a console clip: big-endian header, then the track count and one name
     be = struct.pack(">ffIII", 29 / 2.0, 2.0, 0, 30, 1) + struct.pack(">I", 1)
     be += struct.pack(">I", 4) + b"Bip\0"
-    assert bake_v4._detect_clip_order(be) == ">"
+    assert bake_v4.detect_clip_order(be) == ">"
     seen = {}
     monkeypatch.setattr(vg, "load_parts", lambda meshes, pal, naz=None: [])
     monkeypatch.setattr(

@@ -857,7 +857,7 @@ def asset_compressed(type_name):
     return asset_base_class(type_name).lower() != "mediastream"
 
 
-def _maybe_inflate(blob, type_name=None, report=None):
+def maybe_inflate(blob, type_name=None, report=None):
     """A block blob as the engine reads it.  With a known asset `type_name` the
     type decides (asset_compressed): raw for `mediastream`, zlib for every other
     type, and a blob that then does not inflate is reported through `report`
@@ -873,6 +873,9 @@ def _maybe_inflate(blob, type_name=None, report=None):
             if comp and report is not None:
                 report(str(ex))
     return blob
+
+
+_maybe_inflate = maybe_inflate  # the private spelling, kept for existing callers
 
 
 def asset_class(header, order=None):
@@ -944,9 +947,12 @@ SHEET_RENDER_TYPES = {
 
 
 @functools.cache
-def _sheet_hashes():
+def sheet_hashes():
     """{name: name hash} of TEXTURE_SHEET_PROPS and their three types (read-only)."""
     return {nm: _name_hash(nm) for nm in list(TEXTURE_SHEET_PROPS) + ["integer", "truth", "number"]}
+
+
+_sheet_hashes = sheet_hashes  # the private spelling, kept for existing callers
 
 
 def texture_sheet(header, order="<"):
@@ -959,7 +965,7 @@ def texture_sheet(header, order="<"):
     sheet+0xA4); renderType 1 is "Standard with blending"; alphaThreshold is the
     alpha-test reference (0..255) of the standard type; normalMapPower scales the
     normal map's x and y ($effectFactors.x)."""
-    H = _sheet_hashes()
+    H = sheet_hashes()
     n = len(header)
     salt = None
     rt = H["renderType"]
@@ -1065,13 +1071,16 @@ _T_UNIQUE_ID = 0xEDEF427C  # type hash of the uniqueID record
 
 
 @functools.cache
-def _sheet_keys():
+def sheet_keys():
     """{name hash: SHEET_PROPERTIES name, ("type", type hash): type} (read-only)."""
     keys = {_name_hash(nm): nm for nm in SHEET_PROPERTIES}
     for t in ("number", "integer", "truth", "string", "vector", "color"):
         keys[("type", _name_hash(t))] = t
     keys[("type", _T_UNIQUE_ID)] = "id"
     return keys
+
+
+_sheet_keys = sheet_keys  # the private spelling, kept for existing callers
 
 
 def _untyped_sheets(header, order="<", raw=False):
@@ -1084,7 +1093,7 @@ def _untyped_sheets(header, order="<", raw=False):
     `raw`, a property is kept under its name whatever it is; otherwise only
     SHEET_PROPERTIES, as texture_sheets() returns them."""
     kp = _kprops()
-    K = _sheet_keys()
+    K = sheet_keys()
     ut = kp.untyped_types()
     names = kp.namedict() if raw else {}
     out = []
@@ -1120,7 +1129,7 @@ def texture_sheets(header, order="<"):
 
     Records are [salt u32][name hash u32][type hash u32][payload dwords u32]
     [payload]; all records of one sheet share the salt."""
-    K = _sheet_keys()
+    K = sheet_keys()
     n = len(header)
     sheets, by_salt = [], {}
     o = 0
@@ -1372,7 +1381,7 @@ def texture_alpha_flag(header, order="<", name=None):
         return None
 
 
-def _write_sheet_json(header, out_dir, order="<"):
+def write_sheet_json(header, out_dir, order="<"):
     """sheet.json next to the layer PNGs.  Top level: the FIRST sheet's material
     switches for the GLB writers (two-sided, blend, alpha threshold, normal-map
     power) and its layer `overrides`; "sheets": every sheet of the texture with
@@ -1406,6 +1415,9 @@ def _write_sheet_json(header, out_dir, order="<"):
                 _f.write(_json.dumps(sh, sort_keys=True))
     except Exception as e:  # the texture is still written; its materials lose the sheet
         _sheet_warning(out_dir, "sheet.json not written", e)
+
+
+_write_sheet_json = write_sheet_json  # the private spelling, kept for existing callers
 
 
 #: the `log` of the extract run in progress (set by _extract_main), for the few
@@ -1610,7 +1622,7 @@ def texture_frame_ms(anim_tail, frames):
 _TEX_DESC = 29  # FUN_00429e77: u32 w, h, format, usage, type; u8 alpha; u32 mips, size
 
 
-def _chain_bytes_exact(en, w, h, mip):
+def chain_bytes_exact(en, w, h, mip):
     """Stored bytes of one mip chain.  Block formats as usual; LINEAR formats keep
     every row padded to 4 bytes (the locked D3D pitch), which only shows on the
     1- and 2-texel-wide L8 mips (validated: 936/936 Part 2 PC streams exact)."""
@@ -1623,6 +1635,9 @@ def _chain_bytes_exact(en, w, h, mip):
         else:
             total += ((ww * unit + 3) & ~3) * hh
     return total
+
+
+_chain_bytes_exact = chain_bytes_exact  # the private spelling, kept for existing callers
 
 
 def parse_texture_frames(hdr, order="<"):
@@ -1684,7 +1699,7 @@ def parse_texture_frames(hdr, order="<"):
                         # slot 7 is the record the stride walk reaches through
                         # a 4-byte "drift" (four absent-slot bytes): the specSize map
                         "drift": k == 7,
-                        "chain": _chain_bytes_exact(en, w, h, mip),
+                        "chain": chain_bytes_exact(en, w, h, mip),
                         "size": size,
                     }
                 )
@@ -1746,7 +1761,7 @@ def parse_texture_header(hdr, order="<"):
     p = 4 + tlen + 4  # skip typeName + classId(0x2D)
     if p + 36 > len(hdr):
         return None
-    p, prs = _prop_walk(hdr, order)
+    p, prs = prop_walk(hdr, order)
     rs = 30  # image records are 30 bytes on BOTH engines
     # (only the PROPERTY records differ: 16 vs 20)
     images = []
@@ -1845,7 +1860,7 @@ def texture_layer_label(images, idx, order="<"):
 # cube (6x) / animation (Nx) multiples and (b) recover a dropped trailing layer
 # by scanning the header for the missing descriptor record.
 # ---------------------------------------------------------------------------
-def _chain_bytes(en, w, h, mip):
+def chain_bytes(en, w, h, mip):
     """Sum of `mip` mip-level byte sizes from authored base dims, per format."""
     _, kind = TEX_FMT[en]
     k, unit = kind
@@ -1860,6 +1875,9 @@ def _chain_bytes(en, w, h, mip):
         w = max(1, w >> 1)
         h = max(1, h >> 1)
     return total
+
+
+_chain_bytes = chain_bytes  # the private spelling, kept for existing callers
 
 
 def _tex_path_off(hdr):
@@ -1935,7 +1953,7 @@ def plan_texture_layers(hdr, stream_len):
         return {"kind": "fail", "layers": [], "count": 0}
 
     def total(layers):
-        return sum(_chain_bytes(x["enum"], x["aw"], x["ah"], x["mip"]) for x in layers)
+        return sum(chain_bytes(x["enum"], x["aw"], x["ah"], x["mip"]) for x in layers)
 
     S = total(L)
     if S <= 0:
@@ -1960,7 +1978,7 @@ def plan_texture_layers(hdr, stream_len):
         while pos + 30 <= end and add < need - 64:
             v = _valid_rec(hdr, pos, powtwo=True)
             if v:
-                c = _chain_bytes(v["enum"], v["aw"], v["ah"], v["mip"])
+                c = chain_bytes(v["enum"], v["aw"], v["ah"], v["mip"])
                 if add + c <= need + 64:
                     acc.append(v)
                     add += c
@@ -1979,7 +1997,7 @@ def plan_texture_layers(hdr, stream_len):
     if 2 <= n <= 64 and abs(S * n - stream_len) <= max(256, n * 8):
         return {"kind": "anim", "layers": L, "count": n}  # each frame = full set L (loose)
     en0 = L[0]
-    S1 = _chain_bytes(en0["enum"], en0["aw"], en0["ah"], en0["mip"])
+    S1 = chain_bytes(en0["enum"], en0["aw"], en0["ah"], en0["mip"])
     n1 = round(stream_len / S1)
     if 2 <= n1 <= 64 and S1 >= 256 and abs(S1 * n1 - stream_len) <= max(256, n1 * 8):
         return {"kind": "anim", "layers": [en0], "count": n1}
@@ -2041,12 +2059,12 @@ def extract_block(h_data, s_data, language=0, report=None, stream_files=None):
             return _f
 
         try:
-            header = _maybe_inflate(h_data[cur : cur + dsz], e.type_name, failed("header"))
+            header = maybe_inflate(h_data[cur : cur + dsz], e.type_name, failed("header"))
             stream = None
             if e.has_stream and s_data is not None and e.best_stream:
                 off, sz = e.best_stream
                 if 0 <= off and off + sz <= len(s_data):
-                    stream = _maybe_inflate(s_data[off : off + sz], e.type_name, failed("stream"))
+                    stream = maybe_inflate(s_data[off : off + sz], e.type_name, failed("stream"))
             if stream is None and not e.has_stream:
                 for sfile, pairs in set_entries.get((e.type_hash, e.name.lower()), ()):
                     off, sz = pairs[language] if pairs[language][1] > 0 else pairs[0]
@@ -2061,7 +2079,7 @@ def extract_block(h_data, s_data, language=0, report=None, stream_files=None):
                             len(blob),
                         )
                     else:
-                        stream = _maybe_inflate(blob[off : off + sz], e.type_name, failed("stream"))
+                        stream = maybe_inflate(blob[off : off + sz], e.type_name, failed("stream"))
                         e.stream_file, e.stream_note = sfile, None
                         break
                 if e.stream_note and report is not None:
@@ -2126,7 +2144,7 @@ def inflate_standalone(raw):
                 return inflate(raw[start:])
             except zlib.error:
                 pass
-    return _maybe_inflate(raw)
+    return maybe_inflate(raw)
 
 
 # ===========================================================================
@@ -2291,7 +2309,7 @@ def _unpad_linear(buf, en, w, h):
     return b"".join(buf[y * pitch : y * pitch + row] for y in range(h))
 
 
-def _decode_one_layer(buf, en, w, h, normal=False):
+def decode_one_layer(buf, en, w, h, normal=False):
     """Decode a single layer's TOP mip to an RGB array (or grayscale for L8).
     normal=True: layer is a normal map -- reconstruct a proper tangent-space
     RGB normal. For PS3's DXT5-packed normals the vector is stored X->alpha,
@@ -2341,6 +2359,9 @@ def _decode_one_layer(buf, en, w, h, normal=False):
     return None
 
 
+_decode_one_layer = decode_one_layer  # the private spelling, kept for existing callers
+
+
 def _decode_dxt3a(buf, w, h):
     """X360 DXT3A (the explicit-alpha half of a DXT3 block on its own): 8 bytes per
     4x4 block, one 4-bit value per texel, low nibble first, rows top to bottom.
@@ -2366,7 +2387,7 @@ def _decode_dxt3a(buf, w, h):
 #         stored individually while min(w,h) >= 32 texels, each padded to
 #         32x32 BLOCKS; all smaller mips share one packed 32x32-block tail.
 # ---------------------------------------------------------------------------
-def _bswap16(b):
+def bswap16(b):
     import array as _arr
 
     a = _arr.array("H")
@@ -2375,7 +2396,10 @@ def _bswap16(b):
     return a.tobytes() + b[len(b) & ~1 :]
 
 
-def _xg2d(x, y, w, tp):
+_bswap16 = bswap16  # the private spelling, kept for existing callers
+
+
+def xg2d_offset(x, y, w, tp):
     """XGAddress2DTiledOffset (Xenos): element offset of (x,y) in a tiled
     surface of width w elements, tp = bytes per element."""
     alw = (w + 31) & ~31
@@ -2392,6 +2416,9 @@ def _xg2d(x, y, w, tp):
     ) >> lb
 
 
+_xg2d = xg2d_offset  # the private spelling, kept for existing callers
+
+
 def _xg_untile(data, we, he, bpe, alw=None, yoff=0):
     """Linearize a tiled X360 surface: we x he elements of bpe bytes
     (alw = aligned surface width used for tiling, min 32).
@@ -2403,9 +2430,9 @@ def _xg_untile(data, we, he, bpe, alw=None, yoff=0):
         return b""
     import numpy as np
 
-    # every element at once: _xg2d is integer arithmetic that works on numpy arrays
+    # every element at once: xg2d_offset is integer arithmetic that works on numpy arrays
     y, x = np.mgrid[0:he, 0:we].astype(np.int64)
-    s = _xg2d(x.ravel(), y.ravel() + yoff, alw, bpe) * bpe
+    s = xg2d_offset(x.ravel(), y.ravel() + yoff, alw, bpe) * bpe
     src = np.frombuffer(data, np.uint8)
     out = np.zeros((we * he, bpe), np.uint8)
     ok = s + bpe <= len(src)  # elements past the end of the data stay 0
@@ -2534,7 +2561,7 @@ def _console_recover_layers(header, stream, L, last, end, rs):
             pick = None
             for k in range(ci, len(cands)):
                 v = cands[k]
-                if abs(_chain_bytes(v["enum"], v["aw"], v["ah"], v["mip"]) - want) <= 64:
+                if abs(chain_bytes(v["enum"], v["aw"], v["ah"], v["mip"]) - want) <= 64:
                     pick = v
                     ci = k + 1
                     break
@@ -2556,7 +2583,7 @@ def _console_recover_layers(header, stream, L, last, end, rs):
     return L  # no exact fill -> stay conservative
 
 
-def _rsx_unswizzle(buf, w, h, unit=1):
+def rsx_unswizzle(buf, w, h, unit=1):
     """PS3/RSX Morton (Z-order) unswizzle for UNCOMPRESSED layers (L8 etc.).
     DXT layers are stored linearly on RSX; L8 is swizzled — verified byte-exact
     vs the PC linear L8 across all Part-2 specSize maps.  For
@@ -2600,13 +2627,16 @@ def _rsx_unswizzle(buf, w, h, unit=1):
     return out.tobytes()
 
 
+_rsx_unswizzle = rsx_unswizzle  # the private spelling, kept for existing callers
+
+
 def _texel32_to_pc(data, src):
     """Reorder console 32bpp (A8R8G8B8/X8R8G8B8) texel bytes to the PC little-
     endian D3D layout (B,G,R,A) the shared decoder expects (P1 console audit:
     6 lightprojector/lensflare maps per console).
       src='ps3'  : RSX stores big-endian A,R,G,B      -> reverse each texel.
       src='x360' : stream holds PLAIN BE A,R,G,B (NOT GPU 8-in-16 swapped);
-                   the unconditional _bswap16 turns it into R,A,B,G -> [2,3,0,1].
+                   the unconditional bswap16 turns it into R,A,B,G -> [2,3,0,1].
     """
     import numpy as np
 
@@ -2626,7 +2656,7 @@ def _x360_level0_bytes(en, w, h):
     return ((we + 31) & ~31) * ((he + 31) & ~31) * unit
 
 
-def _x360_base_level(raw, en, w, h):
+def x360_base_level(raw, en, w, h):
     """Top mip of one X360 layer (or cube face) as an image array, or None.  `raw`
     starts at the layer's level 0: 16-bit swap, untile, crop out of the packed
     tail when the layer is smaller than 32 texels."""
@@ -2634,11 +2664,11 @@ def _x360_base_level(raw, en, w, h):
     blk = 4 if kind == "blk" else 1
     we = max(1, (w + blk - 1) // blk)
     he = max(1, (h + blk - 1) // blk)
-    # width aligned UP to 32 like every consumer (_xg2d/_x360_layer_bytes);
+    # width aligned UP to 32 like every consumer (xg2d_offset/_x360_layer_bytes);
     # max(we,32) would under-size the tile buffer for non-pow2 widths > 32
     # blocks and zero-fill the tail of the untiled layer.
     need = ((we + 31) & ~31) * ((he + 31) & ~31) * unit
-    buf = _bswap16(raw[:need])
+    buf = bswap16(raw[:need])
     xo, yo, start = _x360_packed_offset(kind, unit, w, h, we, he)
     if start is not None:
         lin = _xg_untile(buf[start * unit :], we, he, unit, alw=32)
@@ -2654,7 +2684,10 @@ def _x360_base_level(raw, en, w, h):
         lin = _xg_untile(buf, we, he, unit, alw=we, yoff=_thin_mip_yoff(kind, we, he))
     if kind == "lin" and unit == 4:  # 32bpp: undo bswap16-scramble -> PC BGRA
         lin = _texel32_to_pc(lin, "x360")
-    return _decode_one_layer(lin, en, w, h)
+    return decode_one_layer(lin, en, w, h)
+
+
+_x360_base_level = x360_base_level  # the private spelling, kept for existing callers
 
 
 #: sheet.json key that lists what a texture carve could not decode (absent when
@@ -2678,7 +2711,7 @@ def _mark_texture_decode(out_dir, notes):
         _sheet_warning(out_dir, "decode notes not recorded in sheet.json", e)
 
 
-def _mark_stored_name(out_dir, stored):
+def mark_stored_name(out_dir, stored):
     """Record the archive's spelling of a texture that was written under its
     canonical name (--names canonical) as "stored_name" in the texture
     directory's sheet.json.  A texture without a sheet.json gets none (the
@@ -2695,6 +2728,9 @@ def _mark_stored_name(out_dir, stored):
             _f.write(_json.dumps(js, sort_keys=True))
     except Exception as e:
         _sheet_warning(out_dir, "stored_name not recorded in sheet.json", e)
+
+
+_mark_stored_name = mark_stored_name  # the private spelling, kept for existing callers
 
 
 def _console_prefix(frames, frame, faces, face):
@@ -2754,7 +2790,7 @@ def _carve_x360_exact(stream, ex, out_dir, warn):
             lbl = texture_layer_label(L, j, ">")
             for k in range(faces_out):
                 lo = off + k * step
-                img = _x360_base_level(stream[lo : off + d["size"]], en, w, h)
+                img = x360_base_level(stream[lo : off + d["size"]], en, w, h)
                 if img is None:
                     warn(
                         "layer %d (%s %dx%d) not decoded" % (j, TEX_FMT[en][0], w, h)
@@ -2773,15 +2809,18 @@ def _carve_x360_exact(stream, ex, out_dir, warn):
     return wrote, len(sets[0]), len(sets)
 
 
-def _ps3_layer_image(data, lay, normal):
+def ps3_layer_image(data, lay, normal):
     """One PS3 layer (or cube face) -> image array.  DXT data is linear;
     uncompressed layers are RSX-swizzled, 32-bit ones big-endian ARGB."""
     kind, unit = TEX_FMT[lay["enum"]][1]
     if kind != "blk":  # uncompressed (L8...) -> RSX swizzled
-        data = _rsx_unswizzle(data, lay["aw"], lay["ah"], unit)
+        data = rsx_unswizzle(data, lay["aw"], lay["ah"], unit)
         if unit == 4:  # 32bpp: BE ARGB -> PC BGRA
             data = _texel32_to_pc(data, "ps3")
-    return _decode_one_layer(data, lay["enum"], lay["aw"], lay["ah"], normal=normal)
+    return decode_one_layer(data, lay["enum"], lay["aw"], lay["ah"], normal=normal)
+
+
+_ps3_layer_image = ps3_layer_image  # the private spelling, kept for existing callers
 
 
 def _carve_ps3_exact(stream, ex, segs, out_dir, warn):
@@ -2806,7 +2845,7 @@ def _carve_ps3_exact(stream, ex, segs, out_dir, warn):
         faces = 6 if d["type"] == 2 else 1
         starts = [0]
         if faces > 1:
-            chain = _chain_bytes(en, w, h, stream[off - 36 + 13])
+            chain = chain_bytes(en, w, h, stream[off - 36 + 13])
             pad = (chain + 127) & ~127
             if TEX_FMT[en][1][0] == "blk" and 5 * pad + chain == sz:
                 starts = [k * pad for k in range(6)]
@@ -2818,7 +2857,7 @@ def _carve_ps3_exact(stream, ex, segs, out_dir, warn):
         normal = _is_normal_layer(L, j, ">")
         lbl = texture_layer_label(L, j, ">")
         for k, st in enumerate(starts):
-            img = _ps3_layer_image(stream[off + st : off + sz], d, normal)
+            img = ps3_layer_image(stream[off + st : off + sz], d, normal)
             if img is None:
                 warn(
                     "layer %d (%s %dx%d) not decoded" % (j, TEX_FMT[en][0], w, h)
@@ -2898,7 +2937,7 @@ def carve_texture_console(stream, header, out_dir, log=None):
             lay = L[j % len(L)]
             pre = "" if len(segs) == len(L) else "seg%d_" % (j // len(L))
             is_norm = _is_normal_layer(L, j % len(L), ">")
-            img = _ps3_layer_image(stream[off : off + sz], lay, is_norm)
+            img = ps3_layer_image(stream[off : off + sz], lay, is_norm)
             if img is None:
                 warn("segment %d not decoded" % j)
                 continue
@@ -2922,7 +2961,7 @@ def carve_texture_console(stream, header, out_dir, log=None):
         for j, lay in enumerate(L):
             if off + 256 > len(stream):
                 break
-            img = _x360_base_level(stream[off:], lay["enum"], lay["aw"], lay["ah"])
+            img = x360_base_level(stream[off:], lay["enum"], lay["aw"], lay["ah"])
             if img is not None:
                 pre = "" if reps == 1 else "seg%d_" % r
                 _save_layer_png(img, out_dir, pre, j, texture_layer_label(L, j, ">"), lay)
@@ -2960,10 +2999,10 @@ def _write_spec_txt(header, out_dir):
                 _f.write("%s %s" % ("" if ex is None else repr(ex), "" if it is None else repr(it)))
     except (OSError, struct.error, ValueError, IndexError) as e:
         _sheet_warning(out_dir, "spec.txt not written", e)
-    _write_sheet_json(header, out_dir, ">")
+    write_sheet_json(header, out_dir, ">")
 
 
-#: _rescue_texture_plan: most candidate layer plans it decodes and scores before
+#: rescue_texture_plan: most candidate layer plans it decodes and scores before
 #: it gives up (a crafted or corrupt header can have many exact-size plans)
 RESCUE_MAX_PLANS = 600
 
@@ -2974,7 +3013,7 @@ def _exact_mip_sums(recs, total):
     13 chain sizes per layer, the sums of the first half of the layers looked up
     against those of the second (at most 2 x 13^2 sums for 4 layers, where the
     product walked 13^4 = 28,561)."""
-    sizes = [[_chain_bytes(e, w, h, m) for m in range(1, 14)] for e, w, h in recs]
+    sizes = [[chain_bytes(e, w, h, m) for m in range(1, 14)] for e, w, h in recs]
     half = len(recs) // 2
     left = {}
     for ms in itertools.product(range(13), repeat=half):
@@ -2988,7 +3027,7 @@ def _exact_mip_sums(recs, total):
     return out
 
 
-def _rescue_texture_plan(hdr, stream, order="<", log=None, max_plans=None):
+def rescue_texture_plan(hdr, stream, order="<", log=None, max_plans=None):
     """Last-resort planner for headers with serializer DRIFT (a record slips a
     byte, corrupting its mip/dim fields; no texture of the PC sets reaches this
     function, 0 of 3,469, measured).
@@ -3043,15 +3082,18 @@ def _rescue_texture_plan(hdr, stream, order="<", log=None, max_plans=None):
             off = 0
             tot = 0.0
             for (e, w, h), m in zip(recs, mips, strict=True):
-                img = _decode_one_layer(stream[off:], e, w, h)
+                img = decode_one_layer(stream[off:], e, w, h)
                 if img is None:
                     tot = 1e9
                     break
                 tot += _coherence(img)
-                off += _chain_bytes(e, w, h, m)
+                off += chain_bytes(e, w, h, m)
             if tot < 1e9 and (best is None or tot < best[0]):
                 best = (tot, [(e, w, h, m) for (e, w, h), m in zip(recs, mips, strict=True)])
     return best[1] if best else None
+
+
+_rescue_texture_plan = rescue_texture_plan  # the private spelling, kept for existing callers
 
 
 #: PC cube maps: True = mip LEVELS one after another, six faces per level; False =
@@ -3105,14 +3147,14 @@ def _carve_texture(stream, header, out_dir, log):
         return _carve_texture_legacy(stream, header, out_dir, log)
     plan = plan_texture_layers(header, S)
     if plan["kind"] == "fail":
-        rl = _rescue_texture_plan(header, stream, log=log)
+        rl = rescue_texture_plan(header, stream, log=log)
         if rl:
             out_dir.mkdir(parents=True, exist_ok=True)
             wrote = 0
             off = 0
             for j, (en, w, h, mip) in enumerate(rl):
-                img = _decode_one_layer(stream[off:], en, w, h)
-                off += _chain_bytes(en, w, h, mip)
+                img = decode_one_layer(stream[off:], en, w, h)
+                off += chain_bytes(en, w, h, mip)
                 if img is None:
                     continue
                 lbl = texture_layer_label([{"enum": e} for e, _, _, _ in rl], j)
@@ -3129,7 +3171,7 @@ def _carve_texture(stream, header, out_dir, log):
         return _carve_texture_legacy(stream, header, out_dir, log)
     out_dir.mkdir(parents=True, exist_ok=True)
     layers, kind, count = plan["layers"], plan["kind"], plan["count"]
-    cb = lambda x: x.get("chain") or _chain_bytes(x["enum"], x["aw"], x["ah"], x["mip"])
+    cb = lambda x: x.get("chain") or chain_bytes(x["enum"], x["aw"], x["ah"], x["mip"])
     set_bytes = sum(cb(x) for x in layers)
     wrote = 0
 
@@ -3142,7 +3184,7 @@ def _carve_texture(stream, header, out_dir, log):
             lb = buf[off : off + c]
             if lay.get("chain"):  # exact plan: linear rows carry the 4-byte pitch
                 lb = _unpad_linear(lb, en, w, h)
-            img = _decode_one_layer(lb, en, w, h)
+            img = decode_one_layer(lb, en, w, h)
             off += c
             if img is None:
                 continue
@@ -3159,7 +3201,7 @@ def _carve_texture(stream, header, out_dir, log):
             face = S // 6
             if PC_CUBE_LEVEL_MAJOR and plan.get("exact"):
                 lay = layers[0]  # the exact plan admits one-layer cubes only
-                lvl0 = _chain_bytes_exact(lay["enum"], lay["aw"], lay["ah"], 1)
+                lvl0 = chain_bytes_exact(lay["enum"], lay["aw"], lay["ah"], 1)
                 for f in range(6):
                     dump_set(stream[f * lvl0 : f * lvl0 + set_bytes], "face%d_" % f)
             else:
@@ -3176,7 +3218,7 @@ def _carve_texture(stream, header, out_dir, log):
                 _f.write("%s %s" % ("" if ex is None else repr(ex), "" if it is None else repr(it)))
     except Exception:
         pass
-    _write_sheet_json(header, out_dir, "<")
+    write_sheet_json(header, out_dir, "<")
     log(
         "      %s: %s x%d (set=%dB) layers=%d -> %s/ (%d png)"
         % (info["name"] or out_dir.name, kind, count, set_bytes, len(layers), out_dir.name, wrote)
@@ -3208,7 +3250,7 @@ def _carve_texture_legacy(stream, header, out_dir, log):
             if c < 60 and (best_coh is None or c < best_coh):
                 best_coh, chosen = c, (w, h, dfmt, dsize)
     # File names follow the standard <j>_<label>_<WxH>_<FMT>.png scheme:
-    # build_texture_index's *_diffuse_*.png rglob and _find_layer's
+    # build_texture_index's *_diffuse_*.png rglob and find_layer's
     # *_<label>_*.png globs link legacy-carved textures from OBJ/MTL too.
     out_dir.mkdir(parents=True, exist_ok=True)
     if chosen is None:
@@ -3242,7 +3284,7 @@ def _carve_texture_legacy(stream, header, out_dir, log):
             if best is None or c < best[0]:
                 best = (c, sw, sh, sb)
     if best and best[0] < 45:
-        # colour spec layer -> the specMap slot _find_layer/_write_obj_mtl look up
+        # colour spec layer -> the specMap slot find_layer/write_obj_mtl look up
         Image.fromarray(best[3]).save(out_dir / ("2_specMap_%dx%d_DXT1.png" % (best[1], best[2])))
         spec_dims = "%dx%d" % (best[1], best[2])
     log(
@@ -3255,10 +3297,13 @@ def _carve_texture_legacy(stream, header, out_dir, log):
 # ===========================================================================
 # (4) Model decoding  (vertex/index buffers -> OBJ)
 # ===========================================================================
-def _sane(v):
+def is_finite_float(v):
     if v != v or abs(v) == float("inf"):
         return False
     return v == 0.0 or (1e-9 < abs(v) < 1e4)
+
+
+_sane = is_finite_float  # the private spelling, kept for existing callers
 
 
 def _vb_run(buf, off, stride, be):
@@ -3266,7 +3311,7 @@ def _vb_run(buf, off, stride, be):
     n = 0
     while off + (n + 1) * stride + 12 <= len(buf):
         x, y, z = struct.unpack_from(fmt, buf, off + n * stride)
-        if not (_sane(x) and _sane(y) and _sane(z)):
+        if not (is_finite_float(x) and is_finite_float(y) and is_finite_float(z)):
             break
         n += 1
     return n
@@ -3363,10 +3408,10 @@ def find_descriptors(header, order="<"):
     return out
 
 
-def _ib_ok(stream, vbo, nv, stride, ib, order="<", maxdeg=0.4):
+def ib_ok(stream, vbo, nv, stride, ib, order="<", maxdeg=0.4):
     """True if the index buffer at vbo forms mostly NON-degenerate triangles
     (< maxdeg repeated-index). A false-positive VB offset (positions look sane so
-    it passes _vb_ok) typically lands ~4 bytes before the real one and yields a
+    it passes vb_ok) typically lands ~4 bytes before the real one and yields a
     ~50% repeated-index IB, while every real submesh is ~0%. Used to make the VB
     search prefer the real offset (the X360 TwilightLadyHair and the
     rorschachspots decals need it)."""
@@ -3382,7 +3427,10 @@ def _ib_ok(stream, vbo, nv, stride, ib, order="<", maxdeg=0.4):
     return deg <= maxdeg * nt
 
 
-def _vb_ok(stream, vbo, nv, stride, ib, order="<"):
+_ib_ok = ib_ok  # the private spelling, kept for existing callers
+
+
+def vb_ok(stream, vbo, nv, stride, ib, order="<"):
     """STRICT carve validation: every index in range AND positions finite/bounded/
     non-degenerate (all 3 axis spans > eps). Rejects false offsets that squish a
     submesh flat (a check without the span test accepts those)."""
@@ -3397,7 +3445,7 @@ def _vb_ok(stream, vbo, nv, stride, ib, order="<"):
     mxx = mxy = mxz = -1e30
     for j in range(nv):
         x, y, z = struct.unpack_from(order + "3f", stream, vbo + j * stride)
-        if not (_sane(x) and _sane(y) and _sane(z)):
+        if not (is_finite_float(x) and is_finite_float(y) and is_finite_float(z)):
             return False
         if x < mnx:
             mnx = x
@@ -3414,9 +3462,12 @@ def _vb_ok(stream, vbo, nv, stride, ib, order="<"):
     return min(mxx - mnx, mxy - mny, mxz - mnz) > 1e-4
 
 
-def _vb_ok_flat(stream, vbo, nv, stride, ib, order="<"):
+_vb_ok = vb_ok  # the private spelling, kept for existing callers
+
+
+def vb_ok_flat(stream, vbo, nv, stride, ib, order="<"):
     """FALLBACK for planar decals (signs/graffiti: legit meshes with one flat
-    axis; 56 models in the batch sweep).  Same checks as _vb_ok but only
+    axis; 56 models in the batch sweep).  Same checks as vb_ok but only
     requires TWO non-degenerate axes.  Only use when the strict scan found
     nothing -- relaxing the primary gate shifts 174 offsets on good models
     (validated; the strictness is load-bearing)."""
@@ -3431,7 +3482,7 @@ def _vb_ok_flat(stream, vbo, nv, stride, ib, order="<"):
     mxx = mxy = mxz = -1e30
     for j in range(nv):
         x, y, z = struct.unpack_from(order + "3f", stream, vbo + j * stride)
-        if not (_sane(x) and _sane(y) and _sane(z)):
+        if not (is_finite_float(x) and is_finite_float(y) and is_finite_float(z)):
             return False
         if x < mnx:
             mnx = x
@@ -3447,6 +3498,9 @@ def _vb_ok_flat(stream, vbo, nv, stride, ib, order="<"):
             mxz = z
     spans = sorted((mxx - mnx, mxy - mny, mxz - mnz))
     return spans[1] > 1e-4
+
+
+_vb_ok_flat = vb_ok_flat  # the private spelling, kept for existing callers
 
 
 def _dec1110(u):
@@ -3620,7 +3674,7 @@ def _rows3(A):
 
 
 def _decode_sub_loop(stream, vbo, nv, stride, be=False, restored=None, notes=None):
-    """_decode_sub as a per-vertex struct loop (with the non-finite rule):
+    """decode_mesh_vertices as a per-vertex struct loop (with the non-finite rule):
     used when numpy is missing, and the reference the tests hold the numpy
     version to."""
     fmt = ">3f" if be else "<3f"
@@ -3635,7 +3689,10 @@ def _decode_sub_loop(stream, vbo, nv, stride, be=False, restored=None, notes=Non
                     h = _dec1110(struct.unpack_from(">I", stream, vbo + i * stride + 12)[0])
                 else:
                     b = vbo + i * stride + 12
-                    h = [_half(struct.unpack_from(hfmt, stream, b + 2 * k)[0]) for k in range(3)]
+                    h = [
+                        half_to_float(struct.unpack_from(hfmt, stream, b + 2 * k)[0])
+                        for k in range(3)
+                    ]
                 if not all(math.isfinite(c) for c in h):
                     bad += 1
                     continue
@@ -3656,8 +3713,8 @@ def _decode_sub_loop(stream, vbo, nv, stride, be=False, restored=None, notes=Non
             uo = 20 if be else 24
             uvs = [
                 (
-                    _half(struct.unpack_from(hfmt, stream, vbo + i * stride + uo)[0]),
-                    _half(struct.unpack_from(hfmt, stream, vbo + i * stride + uo + 2)[0]),
+                    half_to_float(struct.unpack_from(hfmt, stream, vbo + i * stride + uo)[0]),
+                    half_to_float(struct.unpack_from(hfmt, stream, vbo + i * stride + uo + 2)[0]),
                 )
                 for i in range(nv)
             ]
@@ -3680,7 +3737,7 @@ def _decode_sub_loop(stream, vbo, nv, stride, be=False, restored=None, notes=Non
     return verts, norms, uvs
 
 
-def _decode_sub(stream, vbo, nv, stride, be=False, restored=None, notes=None):
+def decode_mesh_vertices(stream, vbo, nv, stride, be=False, restored=None, notes=None):
     """Vertex fields.  PC (44/56): pos f32x3 @0, normal half3 @12, uv half2 @24.
     Console (32/44): pos f32x3 @0 (BE), normal 11:11:10 u32 @12, color @16,
     uv BE half2 @20 (then packed tangents; skinned: idx u8x4 @32, weight half4 @36).
@@ -3704,8 +3761,11 @@ def _decode_sub(stream, vbo, nv, stride, be=False, restored=None, notes=None):
         return _decode_sub_np(stream, vbo, nv, stride, be, restored, notes)
 
 
+_decode_sub = decode_mesh_vertices  # the private spelling, kept for existing callers
+
+
 def _decode_sub_np(stream, vbo, nv, stride, be, restored, notes):
-    """_decode_sub's numpy body."""
+    """decode_mesh_vertices's numpy body."""
     pdt = ">f4" if be else "<f4"
     verts = _rows3(_strided(stream, vbo, nv, stride, 3, pdt).astype(np.float64))
     norms = None
@@ -4061,13 +4121,16 @@ def unique_material_names(mats):
     return out
 
 
-def _find_layer(texdir, label):
+def find_layer(texdir, label):
     try:
         g = sorted(texdir.glob("*_%s_*.png" % label))
     except OSError as e:
         _sheet_warning(texdir, "%s layer not looked up" % label, e)
         return None
     return g[0] if g else None
+
+
+_find_layer = find_layer  # the private spelling, kept for existing callers
 
 
 def _make_roughness(texdir, specsize_png, exponent):
@@ -4116,7 +4179,7 @@ def _materials_mode():
     return _mt.mode()
 
 
-def _mtl_no_highlight(texdir, inten, specmap_png):
+def mtl_no_highlight(texdir, inten, specmap_png):
     """materials.no_highlight for a texture of the MTL writer: `inten` is the
     spec.txt intensity (= the first sheet's specularPower, which is used when
     there is no spec.txt), the cube reflection comes from sheet.json, and a
@@ -4146,11 +4209,14 @@ def _mtl_no_highlight(texdir, inten, specmap_png):
         return False
 
 
+_mtl_no_highlight = mtl_no_highlight  # the private spelling, kept for existing callers
+
+
 def first_sheet(texdir):
     """The texture's first sheet with all its properties, from sheet.json ({} when
     the texture has none): the top-level switches overlaid on "sheets"[0] (srcBlend /
     dstBlend / blendOp of a manual blend are only in "sheets").  The one reader of
-    the MTL writer, _mtl_no_highlight and rig_glb."""
+    the MTL writer, mtl_no_highlight and rig_glb."""
     sheet = read_sheet_json(texdir)
     full = sheet.get("sheets")
     if isinstance(full, list) and full and isinstance(full[0], dict):
@@ -4195,7 +4261,7 @@ def _mtl_emission(sheet):
     return True, ke
 
 
-def _mtl_const_roughness(exponent):
+def mtl_const_roughness(exponent):
     """glTF roughness of a material without a specSize layer: the sheet's exponent
     alone (materials.roughness)."""
     import materials as _mt
@@ -4203,12 +4269,18 @@ def _mtl_const_roughness(exponent):
     return float(_mt.roughness(_mt.exponent(exponent)))
 
 
-def _mtl_ns_of_roughness(r):
+_mtl_const_roughness = mtl_const_roughness  # the private spelling, kept for existing callers
+
+
+def mtl_ns_of_roughness(r):
     """The MTL `Ns` that Blender's OBJ importer turns back into roughness r: it
     reads roughness = 1 - sqrt(Ns / 1000), so Ns = 1000 (1 - r)^2 (Ns 0 =
     roughness 1)."""
     r = min(1.0, max(0.0, float(r)))
     return 1000.0 * (1.0 - r) ** 2
+
+
+_mtl_ns_of_roughness = mtl_ns_of_roughness  # the private spelling, kept for existing callers
 
 
 def _make_roughness_engine(texdir, specsize_png, exponent):
@@ -4217,7 +4289,7 @@ def _make_roughness_engine(texdir, specsize_png, exponent):
     a specSize layer (DeferredMain2PS; materials.roughness).  The MTL writer calls
     it only for a texture with a specSize layer; without one (specsize_png None)
     it writes a flat 4x4 image of the one value, which the MTL writer puts as a
-    plain `Ns` (_mtl_ns_of_roughness) instead.  The legacy roughnessGen.png (1 - sqrt(2/(n+2)),
+    plain `Ns` (mtl_ns_of_roughness) instead.  The legacy roughnessGen.png (1 - sqrt(2/(n+2)),
     sheet exponent ignored) is left alone."""
     out = texdir / "roughnessEngine.png"
     if out.exists():
@@ -4240,7 +4312,7 @@ def _make_roughness_engine(texdir, specsize_png, exponent):
         return None
 
 
-def _write_obj_mtl(path, name, v, n, uv, tris, subs, mats, tex_index, log):
+def write_obj_mtl(path, name, v, n, uv, tris, subs, mats, tex_index, log):
     path.parent.mkdir(parents=True, exist_ok=True)
 
     def _san(x):
@@ -4327,11 +4399,11 @@ def _write_obj_mtl(path, name, v, n, uv, tris, subs, mats, tex_index, log):
                     read_sheet_json(texdir),
                     log if callable(log) else None,
                 )
-                dif = _find_layer(over.get("diffuse", texdir), "diffuse")
-                nrm = _find_layer(over.get("normal", texdir), "normal")
-                spm = _find_layer(over.get("specMap", texdir), "specMap")
-                sps = _find_layer(over.get("specSize", texdir), "specSize")
-                glw = _find_layer(over.get("glow", texdir), "glow")
+                dif = find_layer(over.get("diffuse", texdir), "diffuse")
+                nrm = find_layer(over.get("normal", texdir), "normal")
+                spm = find_layer(over.get("specMap", texdir), "specMap")
+                sps = find_layer(over.get("specSize", texdir), "specSize")
+                glw = find_layer(over.get("glow", texdir), "glow")
                 sheet0 = first_sheet(texdir) if _materials_mode() == "engine" else {}
                 if dif:
                     mf.write("map_Kd %s\n" % _rel(dif))
@@ -4355,7 +4427,7 @@ def _write_obj_mtl(path, name, v, n, uv, tris, subs, mats, tex_index, log):
                 # Roughness from the real exponent (c2.x): baked with the specSize curve
                 # where the texture has that layer, else one value as a plain Ns.
                 if _materials_mode() == "engine":
-                    if _mtl_no_highlight(texdir, inten, spm):
+                    if mtl_no_highlight(texdir, inten, spm):
                         # the game draws no highlight: fully rough, and no bake
                         # (roughnessEngine.png would hold the sheet's narrow lobe)
                         rough = None
@@ -4365,8 +4437,8 @@ def _write_obj_mtl(path, name, v, n, uv, tris, subs, mats, tex_index, log):
                     else:
                         # a constant roughness is a plain Ns, not a one-value map
                         rough = None
-                        r = _mtl_const_roughness(exp)
-                        mf.write("Ns %.6f\n" % _mtl_ns_of_roughness(r))
+                        r = mtl_const_roughness(exp)
+                        mf.write("Ns %.6f\n" % mtl_ns_of_roughness(r))
                 else:
                     rough = _make_roughness(texdir, sps, exp)
                 if rough:
@@ -4389,6 +4461,9 @@ def _write_obj_mtl(path, name, v, n, uv, tris, subs, mats, tex_index, log):
                             % (len(others), _rel(glw))
                         )
             mf.write("\n")
+
+
+_write_obj_mtl = write_obj_mtl  # the private spelling, kept for existing callers
 
 
 # ---- rigged/textured .glb export (optional; --glb). FILE-DERIVED:
@@ -4557,7 +4632,7 @@ def vertex_formats(order="<"):
     return CONSOLE_VERTEX_FORMATS if order == ">" else VERTEX_FORMATS
 
 
-class _Rd:
+class ByteReader:
     """Bounds-checked sequential reader (raises ValueError past the end)."""
 
     def __init__(s, b, order="<"):
@@ -4611,7 +4686,10 @@ class _Rd:
         return v.split(b"\0", 1)[0].decode("latin1")
 
 
-def _mr_meshbuffer(r):
+_Rd = ByteReader  # the private spelling, kept for existing callers
+
+
+def read_meshbuffer(r):
     """MeshBuffer header, FUN_004336ec."""
     # two corners of the buffer's box (minimum, then maximum), not centre / half extent
     m = {"bbox_min": r.floats(3), "bbox_max": r.floats(3)}
@@ -4628,6 +4706,9 @@ def _mr_meshbuffer(r):
     if m["format"] >= len(VERTEX_STRIDES) or m["index_bytes"] % 2:
         raise ValueError("vertex format %d" % m["format"])
     return m
+
+
+_mr_meshbuffer = read_meshbuffer  # the private spelling, kept for existing callers
 
 
 #: MeshBuffer primitive type -> name in <model>.model.json (engine table 0xc7f398 maps
@@ -4675,7 +4756,7 @@ def _mr_part(r, pi, buffers, layout="part2"):
             sm["has_cloth_mesh"] = sm["no_defer"]
             if inline:  # FUN_00433ef4 inline bulk: never seen in shipped data
                 raise ValueError("inline mesh buffer")
-            mb = _mr_meshbuffer(r)
+            mb = read_meshbuffer(r)
             r.skip(r.count())  # cooked physics blob
             sm.update(mb, kind="render", part=pi, lod=li)
             lod.append(sm)
@@ -4685,7 +4766,7 @@ def _mr_part(r, pi, buffers, layout="part2"):
     for _ in range(r.count(4)):
         for _ in range(r.count(30)):
             fc, cs = r.boolean(), r.u32()
-            mb = _mr_meshbuffer(r)
+            mb = read_meshbuffer(r)
             mb.update(kind="shadow", part=pi, lod=None, name="", tex_index=[])
             # 0x544ae4: (0, -1) merged hull; (1, i) hull of cloth submesh i
             mb["from_cloth"] = bool(fc)
@@ -4696,7 +4777,7 @@ def _mr_part(r, pi, buffers, layout="part2"):
     if r.boolean():
         # the part's OCCLUDER mesh for the engine's occlusion culling (0x545927 ->
         # FUN_0053f9a5 "... not supported for occluder"); "proxy" is an alias key
-        mb = _mr_meshbuffer(r)
+        mb = read_meshbuffer(r)
         mb.update(kind="occluder", part=pi, lod=None, name="", tex_index=[])
         P["occluder"] = P["proxy"] = mb
         buffers.append(mb)
@@ -4752,7 +4833,7 @@ def model_header_layout_hint(header, order="<"):
 
 def _parse_model_header_as(header, order, layout):
     try:
-        r = _Rd(header, order)
+        r = ByteReader(header, order)
         M = {"type": r.string()}
         r.skip(r.count(4) * 4)  # property bag: dword count (FUN_00511f96)
         r.u32()
@@ -4863,13 +4944,16 @@ def check_lod(lod):
     return lod
 
 
-def _model_lod_arg(v):
+def model_lod_arg(v):
     import argparse
 
     try:
         return check_lod(v if v == "all" else int(v))
     except ValueError:
         raise argparse.ArgumentTypeError("expected a whole number >= 0 or 'all', got %r" % v)  # noqa: B904
+
+
+_model_lod_arg = model_lod_arg  # the private spelling, kept for existing callers
 
 
 def language_slot(v):
@@ -4887,7 +4971,7 @@ def language_slot(v):
     return n if 0 <= n < BLOCK_LANGUAGES else None
 
 
-def _language_arg(v):
+def language_arg(v):
     import argparse
 
     n = language_slot(v)
@@ -4901,6 +4985,9 @@ def _language_arg(v):
             )
         )
     return n
+
+
+_language_arg = language_arg  # the private spelling, kept for existing callers
 
 
 #: buffer kinds of a model: "render" (drawn), "shadow" (stencil shadow-volume hull,
@@ -5638,7 +5725,7 @@ def decode_model_mesh(header, stream, lod=0, kinds=("render",), order=None, part
       + "restored": ["eyelash_uvs"] on a submesh whose UVs are restored content
         (LASH_RESTORE; not with WATCHMEN_NO_SYNTH)
       + "not_finite": [line] on a submesh whose normals or UVs hold an infinite
-        or NaN half float (that attribute is None: _decode_sub)} ]}.
+        or NaN half float (that attribute is None: decode_mesh_vertices)} ]}.
     A console model with vertex colours that cannot be read
     (console_color_undecoded) has no "color" on those submeshes, the has_color /
     has_alpha flags of ALL its buffers are cleared (the stored ones stay under
@@ -5665,7 +5752,9 @@ def decode_model_mesh(header, stream, lod=0, kinds=("render",), order=None, part
     for b in select_model_buffers(M, lod, kinds):
         nv, st = b["vertex_count"], b["stride"]
         _restored, _notes = [], []
-        verts, norms, uvs = _decode_sub(stream, b["vb"], nv, st, order == ">", _restored, _notes)
+        verts, norms, uvs = decode_mesh_vertices(
+            stream, b["vb"], nv, st, order == ">", _restored, _notes
+        )
         # a skinned buffer is placed by its bone palette: left as stored
         xf = None if "joints" in formats.get(b["format"], {}) else xfs[b["part"]]
         verts = apply_part_transform(xf, verts)
@@ -5944,7 +6033,7 @@ def _decode_model(header, stream, out_path, tex_index, log, order, lod, status, 
     have_skin = True
     rig = _RIG["on"] and _rig_load()
     didx = []  # descriptor index per emitted sub (for submesh_materials pairing)
-    restored = []  # restored content in this model (_decode_sub)
+    restored = []  # restored content in this model (decode_mesh_vertices)
     if descs:
         off = 0
         for di, (nv, stride, ib) in enumerate(descs):
@@ -5953,9 +6042,9 @@ def _decode_model(header, stream, out_path, tex_index, log, order, lod, status, 
             vbo = hplan[1][di]["vb"] if hplan else None
             while vbo is None and cand <= min(off + 65536, hi):
                 if (
-                    _sane(struct.unpack_from(order + "f", stream, cand)[0])
-                    and _vb_ok(stream, cand, nv, stride, ib, order)
-                    and _ib_ok(stream, cand, nv, stride, ib, order)
+                    is_finite_float(struct.unpack_from(order + "f", stream, cand)[0])
+                    and vb_ok(stream, cand, nv, stride, ib, order)
+                    and ib_ok(stream, cand, nv, stride, ib, order)
                 ):
                     vbo = cand
                     break
@@ -5964,9 +6053,9 @@ def _decode_model(header, stream, out_path, tex_index, log, order, lod, status, 
                 # planar-decal fallback (strict scan exhausted)
                 cand = off
                 while cand <= min(off + 65536, hi):
-                    if _sane(struct.unpack_from(order + "f", stream, cand)[0]) and _vb_ok_flat(
-                        stream, cand, nv, stride, ib, order
-                    ):
+                    if is_finite_float(
+                        struct.unpack_from(order + "f", stream, cand)[0]
+                    ) and vb_ok_flat(stream, cand, nv, stride, ib, order):
                         vbo = cand
                         break
                     cand += 1
@@ -5974,7 +6063,7 @@ def _decode_model(header, stream, out_path, tex_index, log, order, lod, status, 
                 continue
             base = len(V)
             _notes = []
-            verts, norms, uvs = _decode_sub(stream, vbo, nv, stride, be, restored, _notes)
+            verts, norms, uvs = decode_mesh_vertices(stream, vbo, nv, stride, be, restored, _notes)
             for _n in _notes:
                 log("      note: model %s submesh %d: %s" % (out_path.name, di, _n))
             if part_xf is not None:  # part-local -> model space (not skinned buffers)
@@ -6033,7 +6122,7 @@ def _decode_model(header, stream, out_path, tex_index, log, order, lod, status, 
         if nv < 8:
             return _model_skipped(log, out_path, "the buffer scan found only %d vertices" % nv)
         _notes = []
-        verts, norms, uvs = _decode_sub(stream, off, nv, stride, be, None, _notes)
+        verts, norms, uvs = decode_mesh_vertices(stream, off, nv, stride, be, None, _notes)
         for _n in _notes:
             log("      note: model %s: %s" % (out_path.name, _n))
         ntri = len(idx) // 3
@@ -6110,7 +6199,7 @@ def _decode_model(header, stream, out_path, tex_index, log, order, lod, status, 
                         len(subs),
                     )
                 )
-    _write_obj_mtl(
+    write_obj_mtl(
         out_path,
         out_path.stem,
         V,
@@ -6308,7 +6397,7 @@ def _decode_model(header, stream, out_path, tex_index, log, order, lod, status, 
     return True
 
 
-def _half(u):
+def half_to_float(u):
     """IEEE half float (u16 code) -> Python float, as numpy's float16 reads it:
     exponent 31 is +-infinity (mantissa 0) or NaN."""
     s = (u >> 15) & 1
@@ -6321,6 +6410,9 @@ def _half(u):
     else:
         val = (1 + f / 1024) * 2 ** (e - 15)
     return -val if s else val
+
+
+_half = half_to_float  # the private spelling, kept for existing callers
 
 
 # ===========================================================================
@@ -6380,7 +6472,7 @@ def _lacing(L):
     return [255] * (L // 255) + ([0] if L % 255 == 0 else [L % 255])
 
 
-#: target body size of an Ogg page written by _ogg_from_packets (libvorbis
+#: target body size of an Ogg page written by ogg_from_packets (libvorbis
 #: aims at about 4 KB too); a page also ends at 255 lacing values
 OGG_PAGE_BYTES = 4096
 
@@ -6475,7 +6567,7 @@ def _lk1(entries, dim):
     return v
 
 
-def _vorbis_blockflags(setup, channels):
+def vorbis_blockflags(setup, channels):
     """The block flag (0 short, 1 long) of every mode of a Vorbis setup header
     (packet type 5), read by walking the codebooks, time-domain transforms,
     floors, residues and mappings in the Vorbis I order.  ValueError for a
@@ -6578,7 +6670,10 @@ def _vorbis_blockflags(setup, channels):
     return flags
 
 
-def _ogg_from_packets(pk, exact, end=None):
+_vorbis_blockflags = vorbis_blockflags  # the private spelling, kept for existing callers
+
+
+def ogg_from_packets(pk, exact, end=None):
     """One Ogg Vorbis file from a Vorbis packet list (3 header packets + audio).
     end: the stream's own end sample position (stamped on the last page so a
     decoder trims the final block, as Vorbis intends); None = computed position.
@@ -6599,7 +6694,7 @@ def _ogg_from_packets(pk, exact, end=None):
         try:
             bsb = headers[0][28]
             bs0, bs1 = 1 << (bsb & 0xF), 1 << (bsb >> 4)
-            fl = _vorbis_blockflags(headers[2], ch)
+            fl = vorbis_blockflags(headers[2], ch)
             mb = _ilog(len(fl) - 1)
             bss = [
                 (bs1 if fl[((p[0] >> 1) & ((1 << mb) - 1)) if mb else 0] else bs0) for p in audio
@@ -6636,13 +6731,16 @@ def _ogg_from_packets(pk, exact, end=None):
     return bytes(w.out), ch, rate, len(audio), gr[-1]
 
 
+_ogg_from_packets = ogg_from_packets  # the private spelling, kept for existing callers
+
+
 def decode_audio(raw, out_path, exact, log=None):
     """The single-file output (--flat-music): every packet of the stream in file order.
     Correct for a one-track stream; a multi-track stream comes out as its tracks'
     chunks appended in turn (use decode_audio_tracks)."""
     if not callable(log):
         log = lambda *a, **k: None
-    r = _ogg_from_packets(_audio_packets(raw), exact)
+    r = ogg_from_packets(_audio_packets(raw), exact)
     if r is None:
         return False
     out, ch, rate, npk, last = r
@@ -6758,7 +6856,7 @@ def decode_audio_tracks(raw, out_dir, name, exact=True, log=None, labels=None):
     for k, trk in enumerate(tracks):
         lab = labels[k] if labels and k < len(labels) else None
         tname = (name if len(tracks) == 1 else media_track_name(name, k, lab)) + ".ogg"
-        r = _ogg_from_packets(trk["packets"], exact, trk["end_sample"])
+        r = ogg_from_packets(trk["packets"], exact, trk["end_sample"])
         if r is None:
             return None
         data, ch, rate, npk, last = r
@@ -7510,7 +7608,7 @@ def _clamp16(x):
     return -32768 if x < -32768 else (32767 if x > 32767 else x)
 
 
-def _prop_walk(H, order="<"):
+def prop_walk(H, order="<"):
     """Walk the salt-prefixed property records after [typeName][classId].
     Part 2 (WM07) records are 20 bytes ([salt][hashLo][hashHi][tag][val],
     +4 when tag==2); Part 1 (WM06) records are 16 bytes ([salt][hash][tag]
@@ -7560,21 +7658,25 @@ def _prop_walk(H, order="<"):
     return q, rs
 
 
-#: _prop_walk: most property records walked
+_prop_walk = prop_walk  # the private spelling, kept for existing callers
+
+
+#: prop_walk: most property records walked
 _PROP_WALK_CAP = 64
-#: _prop_walk: headers already reported as running past the cap
+#: prop_walk: headers already reported as running past the cap
 _PROP_WALK_WARNED = set()
 
 
 def _propbag_end(H, order="<"):
-    return _prop_walk(H, order)[0]
+    return prop_walk(H, order)[0]
 
 
 #: the standard MS-ADPCM coefficient pairs (c1, c2), predictor index 0..6
-_COEF_PAIRS = tuple(zip(_C1, _C2, strict=True))
+ADPCM_COEF_PAIRS = tuple(zip(_C1, _C2, strict=True))
+_COEF_PAIRS = ADPCM_COEF_PAIRS  # the private spelling, kept for existing callers
 
 
-def _adpcm_predict(s1, s2, c1, c2):
+def adpcm_predict(s1, s2, c1, c2):
     """(s1*c1 + s2*c2) / 256 truncated toward zero, as the Microsoft reference
     decoder, the Windows ACM codec and ffmpeg compute it (C integer division);
     a plain `>> 8` floors (differs by 1 on negative odd sums)."""
@@ -7582,12 +7684,15 @@ def _adpcm_predict(s1, s2, c1, c2):
     return t >> 8 if t >= 0 else -((-t) >> 8)
 
 
-def _adpcm_mono(d, ba, coefs=None):
+_adpcm_predict = adpcm_predict  # the private spelling, kept for existing callers
+
+
+def adpcm_mono(d, ba, coefs=None):
     """Mono MS-ADPCM blocks of `ba` bytes -> int16 samples.  `coefs`: the
     (c1, c2) pairs the predictor byte indexes (the header's table; default the
     standard seven).  A final partial block (7 header bytes and up) is decoded
     as far as it goes; a predictor index past the table ends the data."""
-    C = coefs or _COEF_PAIRS
+    C = coefs or ADPCM_COEF_PAIRS
     out = array.array("h")
     o = 0
     N = len(d)
@@ -7618,10 +7723,13 @@ def _adpcm_mono(d, ba, coefs=None):
     return out
 
 
+_adpcm_mono = adpcm_mono  # the private spelling, kept for existing callers
+
+
 def _adpcm_stereo(d, ba, coefs=None):
-    """Stereo MS-ADPCM blocks (interleaved L/R output); see _adpcm_mono.  A
+    """Stereo MS-ADPCM blocks (interleaved L/R output); see adpcm_mono.  A
     final partial block needs its 14 header bytes."""
-    C = coefs or _COEF_PAIRS
+    C = coefs or ADPCM_COEF_PAIRS
     out = array.array("h")
     o = 0
     N = len(d)
@@ -7898,7 +8006,7 @@ def decode_sfx(header):
             # data_bytes after it (not the cue list behind them), trimmed to the
             # sample count (the last block is usually partly padding)
             nsamp, ba, coefs, adata = lay
-            pcm = _adpcm_stereo(adata, ba, coefs) if ch == 2 else _adpcm_mono(adata, ba, coefs)
+            pcm = _adpcm_stereo(adata, ba, coefs) if ch == 2 else adpcm_mono(adata, ba, coefs)
             if nsamp and len(pcm) > nsamp * ch:
                 del pcm[nsamp * ch :]
         else:  # not that layout: find the standard table and read to the end
@@ -7909,7 +8017,7 @@ def decode_sfx(header):
             if not (16 <= ba <= 4096):
                 return None
             adata = header[j + 32 :]
-            pcm = _adpcm_stereo(adata, ba) if ch == 2 else _adpcm_mono(adata, ba)
+            pcm = _adpcm_stereo(adata, ba) if ch == 2 else adpcm_mono(adata, ba)
         return (pcm.tobytes(), ch, rate) if len(pcm) >= 16 else None
     return None
 
@@ -8151,14 +8259,14 @@ def _extract_main(argv):
     )
     ap.add_argument(
         "--model-lod",
-        type=_model_lod_arg,
+        type=model_lod_arg,
         default=0,
         metavar="N|all",
         help="which level of detail of each model to write: 0 (default) = full detail, N = that LOD (clamped per part), 'all' = every LOD in one file",
     )
     ap.add_argument(
         "--language",
-        type=_language_arg,
+        type=language_arg,
         default=0,
         metavar="0..5|NAME",
         help="language slot used for localized block assets (per-language header blobs and streams); default 0. A number 0..5 or a name / code: english|uk|en, french|fr, italian|it, german|de, spanish|es, danish|dk|da (the Danish slot of the shipped games is a copy of English)",
@@ -8441,7 +8549,7 @@ def _extract_blocks_and_rest(
                 try:
                     if carve_texture(stream, header, safe(a.out / "textures", name), log):
                         stats["tex"] += 1
-                        _mark_stored_name(safe(a.out / "textures", name), name_run.stored_of(name))
+                        mark_stored_name(safe(a.out / "textures", name), name_run.stored_of(name))
                 except Exception as ex:
                     log("      ! texture %s: %s" % (name, ex))
             elif do_mdl and ".modelres" in low:
@@ -8689,7 +8797,7 @@ def _extract_blocks_and_rest(
                 try:
                     if carve_texture(stream, header, safe(a.out / "textures", name), log):
                         stats["tex"] += 1
-                        _mark_stored_name(safe(a.out / "textures", name), name_run.stored_of(name))
+                        mark_stored_name(safe(a.out / "textures", name), name_run.stored_of(name))
                 except Exception as ex:
                     log("      ! texture %s: %s" % (name, ex))
             elif do_mdl and (cls in ("Model", "ModelRes") or ".modelres" in low):

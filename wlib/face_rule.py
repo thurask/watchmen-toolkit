@@ -1023,9 +1023,9 @@ def build(extract_out, classes, states, pairs, am, log=None):
             ins = [dict(i) for i in own[id(rec)][0]]
             if role == "partner":  # its play position is the master's (0x5b5756)
                 for i in ins:
-                    i["t_s"] = _shared(i, sp0, pps, True)
+                    i["t_s"] = shared_time(i, sp0, pps, True)
             for x in own[id(other)][1]:
-                t = _shared(x, sp0, pps, role == "master")
+                t = shared_time(x, sp0, pps, role == "master")
                 who = "master" if role == "partner" else "partner"
                 src = "%s event %s" % (who, x["event"])
                 hit = {
@@ -1240,7 +1240,7 @@ def _find(index, cls, path, name):
     return None
 
 
-def _shared(x, sp0, pps, slaved):
+def shared_time(x, sp0, pps, slaved):
     """Time on the pair's clock of an event given on its state's own timeline.
     slaved: the state's play position is the pair's (a partner's own PLAY_POS
     events, or events of the partner state seen from the master)."""
@@ -1254,6 +1254,9 @@ def _shared(x, sp0, pps, slaved):
         case "PLAY_POS" if slaved:
             return round(max(0.0, (x["raw"] - sp0) / pps), 4) if pps else None
     return x.get("t_s")
+
+
+_shared = shared_time  # the private spelling, kept for existing callers
 
 
 # ------------------------------------------------------------- GLB baking
@@ -1649,7 +1652,8 @@ HEAD_MODEL_TYPES = {
     25: "HEAD_DOMINATRIX_5",
     26: "HEAD_GIMP_3",
 }
-_HEADS = {}
+HEADS = {}
+_HEADS = HEADS  # the private spelling, kept for existing callers
 
 
 def head_tables(extract_out):
@@ -1666,8 +1670,8 @@ def head_tables(extract_out):
     The type is ANIMATION_HEAD_MODEL (m_iheadmodeltype); CharacterHeadCtrl.
     command_activate 0x669496 asks the head collection for the model of the
     character's type (command_get_model_by_id 0x8ffd39d)."""
-    if extract_out in _HEADS:
-        return _HEADS[extract_out]
+    if extract_out in HEADS:
+        return HEADS[extract_out]
     body, heads, sheets = {}, {}, {}
     hits = set()
     for ext in (".fragment", ".fragment.json"):
@@ -1696,7 +1700,7 @@ def head_tables(extract_out):
             elif models and typ not in heads:
                 heads[typ] = models[0]
                 sheets[typ] = sheet_records(n.p("textureSheetsDescription"))
-    _HEADS[extract_out] = (body, heads, sheets)
+    HEADS[extract_out] = (body, heads, sheets)
     return body, heads, sheets
 
 

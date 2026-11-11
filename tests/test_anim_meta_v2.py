@@ -186,7 +186,7 @@ def test_event_records_carry_trigger_kind_and_time_unit():
         event(19, 2, 0.0),
         event(85, 3, 8.04),  # later than one pass of the clip
     )
-    ev = {e["name"]: e for e in am._events(st, duration=4.0, basis="clip duration")}
+    ev = {e["name"]: e for e in am.state_event_records(st, duration=4.0, basis="clip duration")}
     g = ev["ABSOLUTE_GOTO_TARGET_POS"]
     assert (g["trigger"], g["time_unit"], g["time_s"], g["raw"]) == (
         "TOTAL_PLAY_TIME",
@@ -211,9 +211,9 @@ def test_event_records_carry_trigger_kind_and_time_unit():
     # review B1: past the end of the clip there is no position on it, only a time
     assert d["play_time_s"] == 8.04 and d["playpos"] is None and d["time_s"] is None
     # order: on enter, then by time, state-leave last
-    assert [x["trigger_id"] for x in am._events(st, duration=4.0)] == [1, 3, 0, 3, 2]
+    assert [x["trigger_id"] for x in am.state_event_records(st, duration=4.0)] == [1, 3, 0, 3, 2]
     # without a duration the stored unit is still told apart
-    n = {e["name"]: e for e in am._events(st)}
+    n = {e["name"]: e for e in am.state_event_records(st)}
     assert n["ABSOLUTE_GOTO_TARGET_POS"]["playpos"] is None
     assert n["ABSOLUTE_GOTO_TARGET_POS"]["time_s"] == 0.2
     assert n["IMPACT_EFFECTS"]["time_s"] is None and n["IMPACT_EFFECTS"]["playpos"] == 0.25
@@ -225,7 +225,7 @@ def test_event_names_are_the_exes_and_caption_conflicts_are_kept():
     c = event(6, 0, 0.6, "{event LEFT_FOOT_DOWN at pos 0.6}")
     d = event(42, 0, 0.3)
     st = adopt(state(), a, b, c, d)
-    ev = am._events(st)
+    ev = am.state_event_records(st)
     assert [e["name"] for e in ev] == [
         "LEFT_FOOT_DOWN",
         "NO_LONGER_IMMUNE_TO_ATTACK",

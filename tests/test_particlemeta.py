@@ -301,9 +301,9 @@ def test_texture_lookup_never_leaves_the_tree(tmp_path):
     (tmp_path / "secret.bmp").mkdir()
     tree = tmp_path / "textures"
     tree.mkdir()
-    assert pm._lookup(str(tree), "/../secret.bmp") is None
-    assert pm._lookup(str(tree), "") is None and pm._lookup(str(tree), None) is None
-    assert pm._lookup(None, "/a.bmp") is None
+    assert pm.find_asset(str(tree), "/../secret.bmp") is None
+    assert pm.find_asset(str(tree), "") is None and pm.find_asset(str(tree), None) is None
+    assert pm.find_asset(None, "/a.bmp") is None
 
 
 def test_untyped_part1_layout_is_indexed(tmp_path):

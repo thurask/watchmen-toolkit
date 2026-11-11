@@ -9,15 +9,10 @@ integrator on top of work package F).
 
 Synthetic fixtures only (those of the feature tests are reused)."""
 
-import inspect
 import json
-import os
-import sys
 
 import pytest
 
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wlib"))
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import anim_meta as am
 import characters_export as ce
 import combat_meta as cm
@@ -90,7 +85,33 @@ def test_a_failure_recorded_for_another_block_format_is_retried(tmp_path, monkey
     assert ce.anim_meta_is_current(dict(table, build_failed="junk"), "x") is False
 
 
-def test_the_jiggle_memo_is_looked_up_with_the_loop_flag():
-    src = inspect.getsource(ce.export)
-    assert src.count("cache_file(nm, jiggle_model, clip_loops(meta, nm))") == 2  # read and write
-    assert 'os.path.join(jdir, nm + ".npz")' not in src
+def test_the_jiggle_memo_is_looked_up_with_the_loop_flag(export_env, monkeypatch):
+    """A solver bake of a looping clip and of the same clip played once are two memos:
+    each is written under its own name and read back under it."""
+    import jiggle_d6
+
+    ex, out, calls = export_env
+    glb = out / "Heavy" / "Heavy.glb"
+    loop = {"on": True}
+    monkeypatch.setattr(ce, "clip_loops", lambda meta, nm: loop["on"])
+
+    def run():
+        ce.export(str(ex), str(out), naz="none.naz", only="Heavy", jiggle_model="solver")
+        glb.unlink()
+
+    def memos():
+        (jdir,) = (out / "_bake").glob("large_j_*")
+        return sorted(p.name for p in jdir.glob("*.npz"))
+
+    run()
+    assert memos() == [jiggle_d6.cache_file("clip_test", "solver", True)] == ["clip_test.loop.npz"]
+    run()
+    assert len(calls["jiggle_kw"]) == 1  # read back under the loop name
+    loop["on"] = False
+    run()
+    assert [k["loop"] for k in calls["jiggle_kw"]] == [True, False]  # not served the loop memo
+    assert memos() == ["clip_test.loop.npz", "clip_test.npz"]
+    run()
+    loop["on"] = True
+    run()
+    assert len(calls["jiggle_kw"]) == 2  # each read back under its own name

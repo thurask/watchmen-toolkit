@@ -918,9 +918,9 @@ def cut_placement(frame=None, base=None):
     frame.mode()): only the `coordinates` sentence depends on it."""
     import frame as _frame
 
-    out = dict(base if base is not None else _CUT_PLACEMENT)
+    out = dict(base if base is not None else CUT_PLACEMENT)
     out["coordinates"] = (
-        _CUT_COORDINATES_TRUE if _frame.is_true(frame) else _CUT_PLACEMENT["coordinates"]
+        _CUT_COORDINATES_TRUE if _frame.is_true(frame) else CUT_PLACEMENT["coordinates"]
     )
     return out
 
@@ -1440,7 +1440,7 @@ _EV = {
     "state.fx / pair.camera_cuts": "data (the event nodes) + the times anim_meta computes",
 }
 
-_CUT_PLACEMENT = {
+CUT_PLACEMENT = {
     "evidence": "read",
     "coordinates": "engine coordinates, Y up; the export writes them verbatim (see "
     "conventions.handedness), so the same numbers place the camera in GLB space",
@@ -1531,6 +1531,7 @@ _CUT_PLACEMENT = {
     },
     "helper": "fx_meta.cut_camera(cut, actor, target, look_at_point, previous, camera)",
 }
+_CUT_PLACEMENT = CUT_PLACEMENT  # the private spelling, kept for existing callers
 
 _MODIFIERS = {
     "damage_shake": {
@@ -1753,7 +1754,7 @@ def tables(extract_out, log=None, db=None):
         },
         "characters": chars,
         "camera": {
-            "cut_placement": _CUT_PLACEMENT,
+            "cut_placement": CUT_PLACEMENT,
             "bone_types": {str(k): v for k, v in CHARACTER_BONE_TYPE.items()},
             "bone_joints": {str(k): v for k, v in BONE_JOINTS.items()},
             "modifiers": dict(_MODIFIERS, evidence=_EV["camera.modifiers"]),

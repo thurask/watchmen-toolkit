@@ -20,6 +20,7 @@ import char_lib
 import characters_export as ce
 import rig_glb
 import variant_glb as vg
+import kapow_props
 import watchmen_extract as we
 from conftest import parse_glb
 
@@ -30,7 +31,10 @@ WHITE, BLACK_ID, RED_ID = 111 << 32 | 5, 222 << 32 | 6, 333 << 32 | 7
 
 def _rec(salt, name, typ, payload):
     cnt = len(payload) // 4
-    return struct.pack("<IIII", salt, we._name_hash(name), we._name_hash(typ), cnt) + payload
+    return (
+        struct.pack("<IIII", salt, kapow_props.name_hash(name), kapow_props.name_hash(typ), cnt)
+        + payload
+    )
 
 
 def _str(text):
@@ -41,7 +45,7 @@ def _str(text):
 
 def _sheet(salt, name, uid, **props):
     b = _rec(salt, "name", "string", _str(name))
-    b += struct.pack("<IIII", salt, we._name_hash("uniqueID"), we._T_UNIQUE_ID, 2)
+    b += struct.pack("<IIII", salt, kapow_props.name_hash("uniqueID"), we._T_UNIQUE_ID, 2)
     b += struct.pack("<II", uid >> 32, uid & 0xFFFFFFFF)
     base = dict(renderType=0, alphaThreshold=95, twoSided=False, blendType=0, specularSize=15.0)
     base.update(props)
@@ -101,7 +105,7 @@ def _texture(root, path, rgb, header=None, normal=None, sheet_json=None, alpha=N
         h.mkdir(parents=True, exist_ok=True)
         (h / path.split("/")[-1]).write_bytes(header)
         if sheet_json is None:
-            we._write_sheet_json(header, d)
+            we.write_sheet_json(header, d)
     if sheet_json:
         (d / "sheet.json").write_text(json.dumps(sheet_json))
     return d
@@ -111,13 +115,7 @@ def _rgb(png):
     return Image.open(io.BytesIO(png)).convert("RGB").getpixel((0, 0))
 
 
-@pytest.fixture(autouse=True)
-def _fresh():
-    for c in (char_lib._TEXIDX, char_lib._LAYERCACHE, ce._FRAG_NODES, ce._TEX_SHEETS):
-        c.clear()
-    yield
-    for c in (char_lib._TEXIDX, char_lib._LAYERCACHE, ce._FRAG_NODES, ce._TEX_SHEETS):
-        c.clear()
+pytestmark = pytest.mark.usefixtures("character_caches")
 
 
 # ---------------------------------------------------------------------------
@@ -150,7 +148,7 @@ def test_select_sheet_by_id_by_name_and_the_engines_fallback():
 
 
 def test_sheet_json_lists_every_sheet_and_keeps_the_first_at_top_level(tmp_path):
-    we._write_sheet_json(SKIN_HDR, tmp_path)
+    we.write_sheet_json(SKIN_HDR, tmp_path)
     d = we.read_sheet_json(tmp_path)
     assert d["alphaThreshold"] == 95 and d["twoSided"] is False  # as before: sheet 0
     assert [s["name"] for s in d["sheets"]] == ["default", "Black", "Red"]
@@ -158,7 +156,7 @@ def test_sheet_json_lists_every_sheet_and_keeps_the_first_at_top_level(tmp_path)
     assert d["sheets"][1]["overrides"] == {"diffuse": SKIN_BLACK}
     assert "overrides" not in d  # sheet 0 takes nothing from elsewhere
     hdr = _header(_sheet(0x9, "default", 77, diffuseMapOverride="/art/x/Beige.bmp"))
-    we._write_sheet_json(hdr, tmp_path)
+    we.write_sheet_json(hdr, tmp_path)
     assert we.read_sheet_json(tmp_path)["overrides"] == {"diffuse": "/art/x/Beige.bmp"}
 
 
@@ -316,7 +314,7 @@ def test_model_exports_use_the_layers_the_first_sheet_takes_from_elsewhere(tmp_p
     # OBJ/MTL: the same diffuse file
     out = tmp_path / "models" / "m.obj"
     v = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)]
-    we._write_obj_mtl(out, "m", v, None, None, [(0, 1, 2)], [(0, 3, 0, 1, 44)], [shirt], idx, None)
+    we.write_obj_mtl(out, "m", v, None, None, [(0, 1, 2)], [(0, 3, 0, 1, 44)], [shirt], idx, None)
     mtl = out.with_suffix(".mtl").read_text()
     assert "map_Kd ../textures/art/k/TShirtBeige.bmp/0_diffuse" in mtl
     assert "map_Bump -bm 1.000000 ../textures/art/k/TShirt.bmp/1_normal" in mtl
@@ -342,8 +340,8 @@ def test_a_selected_sheet_brings_its_layers_and_switches(tmp_path, with_table, m
     monkeypatch.setenv("WATCHMEN_MATERIALS", "legacy")
     roots = _skin_tree(tmp_path, with_table)
     skin = we.texture_ref(SKIN)
-    plain = char_lib._find_layers(skin, roots)
-    black = char_lib._find_layers(char_lib.sheet_ref(skin, "Black"), roots)
+    plain = char_lib.find_layers(skin, roots)
+    black = char_lib.find_layers(char_lib.sheet_ref(skin, "Black"), roots)
     assert _rgb(plain["diffuse"]) == (240, 200, 180) and _rgb(black["diffuse"]) == (60, 40, 30)
     assert black["normal"] == plain["normal"]  # only the diffuse is overridden
     assert plain["sheet"]["alphaThreshold"] == 95 and black["sheet"]["alphaThreshold"] == 160
@@ -353,7 +351,7 @@ def test_a_selected_sheet_brings_its_layers_and_switches(tmp_path, with_table, m
     assert rough(plain) == 200
     assert rough(black) == int(round((1 - (2.0 / 42.0) ** 0.5) * 255))
     # an unknown sheet name is the first sheet, as an unknown id is in the game
-    odd = char_lib._find_layers(char_lib.sheet_ref(skin, "Nope"), roots)
+    odd = char_lib.find_layers(char_lib.sheet_ref(skin, "Nope"), roots)
     assert _rgb(odd["diffuse"]) == (240, 200, 180) and "sheet_name" not in odd
 
 

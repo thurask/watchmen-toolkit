@@ -724,7 +724,7 @@ def write_glb(
         return _blendmat[mi]
 
     def _sheet_material(mat, layers):
-        """Engine values from the texture's sheet.json (char_lib._find_layers):
+        """Engine values from the texture's sheet.json (char_lib.find_layers):
         the alpha-test reference, the normal-map power and the subtractive blend."""
         if layers.get("blend_info"):
             # the texture is ink / light with its coverage in alpha (char_lib._blend_layer)
@@ -754,7 +754,7 @@ def write_glb(
 
     def _engine_material(mat, layers):
         """materials.py: roughness / specular / emission / alpha mode / culling from
-        the sheet (layers["materials"] == "engine", set by char_lib._find_layers)."""
+        the sheet (layers["materials"] == "engine", set by char_lib.find_layers)."""
         import materials as _mt
 
         sheet = layers.get("sheet") or {}
@@ -1834,7 +1834,7 @@ def build(
                 import bake_v4
 
                 try:
-                    dur = struct.unpack_from(bake_v4._detect_clip_order(h) + "f", h, 4)[0]
+                    dur = struct.unpack_from(bake_v4.detect_clip_order(h) + "f", h, 4)[0]
                 except (struct.error, ValueError) as ex:
                     ex.add_note("clip %s: header of %d bytes in the bank" % (nm, len(h)))
                     raise

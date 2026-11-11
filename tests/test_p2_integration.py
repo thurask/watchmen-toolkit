@@ -19,11 +19,7 @@ import skeleton_records as sr
 import watchmen_extract as we
 
 import test_p2_part1 as tp1
-
-
-def _cls(order, name="ModelRes"):
-    raw = name.encode("ascii") + b"\0"
-    return struct.pack(order + "I", len(raw)) + raw
+from conftest import class_name_record
 
 
 # ---------------------------------------------------------------------------
@@ -31,7 +27,7 @@ def _cls(order, name="ModelRes"):
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize("order", ["<", ">"])
 def test_every_standalone_reader_takes_the_order_the_header_states(order):
-    hdr = _cls(order) + b"\0" * 64
+    hdr = class_name_record(order) + b"\0" * 64
     assert we.header_order(hdr) == order
     assert char_lib.header_order(hdr) == order  # the same function, not a second rule
     assert rr.byte_order(hdr) == order
@@ -142,7 +138,7 @@ def test_extract_names_an_asset_without_stream_once_for_all_blocks(tmp_path):
 
 def test_an_empty_stream_model_is_an_expected_absence_not_a_warning(tmp_path):
     lines = []
-    hdr = _cls("<") + bytes(64)
+    hdr = class_name_record("<") + bytes(64)
     assert we.decode_model(hdr, b"", tmp_path / "X.model.obj", {}, lines.append) is False
     assert lines == [
         "      note: model X.model.obj: not decoded: empty stream: the model has no mesh data"

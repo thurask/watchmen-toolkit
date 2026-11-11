@@ -18,6 +18,7 @@ import numpy as np
 import pytest
 
 import watchmen
+import kapow_props
 import watchmen_extract as we
 from test_formats_v2 import _TEX, _block
 
@@ -32,16 +33,16 @@ def _notes(ei):
 
 
 def test_rescue_plan_refuses_a_mip_tuple_shorter_than_its_records(monkeypatch):
-    """_rescue_texture_plan pairs every candidate record with one mip count; a
+    """rescue_texture_plan pairs every candidate record with one mip count; a
     solution of the wrong length used to score a plan with the tail left out."""
     recs = {0: {"enum": 5, "aw": 4, "ah": 4, "mip": 1}, 40: {"enum": 5, "aw": 4, "ah": 4, "mip": 1}}
     monkeypatch.setattr(we, "parse_texture_header", lambda h, o="<": {"images": [{"rec_off": 0}]})
     monkeypatch.setattr(we, "_tex_path_off", lambda h: 80)
     monkeypatch.setattr(we, "_valid_rec", lambda h, pos, powtwo=False, order="<": recs.get(pos))
-    monkeypatch.setattr(we, "_decode_one_layer", lambda *a, **k: np.zeros((4, 4), np.uint8))
+    monkeypatch.setattr(we, "decode_one_layer", lambda *a, **k: np.zeros((4, 4), np.uint8))
     monkeypatch.setattr(we, "_exact_mip_sums", lambda r, total: [(1,) * (len(r) - 1 or 1)])
     with pytest.raises(ValueError, match="zip"):
-        we._rescue_texture_plan(b"\0" * 80, b"\0" * 64)
+        we.rescue_texture_plan(b"\0" * 80, b"\0" * 64)
 
 
 def test_rescue_plan_unchanged_when_the_lengths_agree(monkeypatch):
@@ -49,9 +50,9 @@ def test_rescue_plan_unchanged_when_the_lengths_agree(monkeypatch):
     monkeypatch.setattr(we, "parse_texture_header", lambda h, o="<": {"images": [{"rec_off": 0}]})
     monkeypatch.setattr(we, "_tex_path_off", lambda h: 80)
     monkeypatch.setattr(we, "_valid_rec", lambda h, pos, powtwo=False, order="<": recs.get(pos))
-    monkeypatch.setattr(we, "_decode_one_layer", lambda *a, **k: np.zeros((4, 4), np.uint8))
+    monkeypatch.setattr(we, "decode_one_layer", lambda *a, **k: np.zeros((4, 4), np.uint8))
     monkeypatch.setattr(we, "_exact_mip_sums", lambda r, total: [(1,) * len(r)])
-    assert we._rescue_texture_plan(b"\0" * 80, b"\0" * 64) == [(5, 4, 4, 1)]
+    assert we.rescue_texture_plan(b"\0" * 80, b"\0" * 64) == [(5, 4, 4, 1)]
 
 
 def _restored_lashes():
@@ -71,15 +72,15 @@ def test_lash_is_restored_refuses_a_round_trip_of_another_length(monkeypatch):
 
 
 def test_mtl_writer_refuses_names_that_do_not_pair_with_the_materials(tmp_path, monkeypatch):
-    """_write_obj_mtl writes one newmtl per material under its unique name; a name
+    """write_obj_mtl writes one newmtl per material under its unique name; a name
     list of another length used to leave materials out of the .mtl."""
     v = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)]
     args = (v, None, None, [(0, 1, 2)], [(0, 3, 0, 1, 44)], ["a", "b"], None, None)
-    we._write_obj_mtl(tmp_path / "ok.obj", "ok", *args)
+    we.write_obj_mtl(tmp_path / "ok.obj", "ok", *args)
     assert (tmp_path / "ok.mtl").read_text().count("newmtl") == 2
     monkeypatch.setattr(we, "unique_material_names", lambda mats: [str(m) for m in mats][:1])
     with pytest.raises(ValueError, match="zip"):
-        we._write_obj_mtl(tmp_path / "bad.obj", "bad", *args)
+        we.write_obj_mtl(tmp_path / "bad.obj", "bad", *args)
 
 
 def test_rows3_refuses_ragged_columns():
@@ -224,10 +225,10 @@ def test_cli_prints_the_notes_under_the_error(monkeypatch, capsys):
 def test_batched_pairs_and_cached_tables_match_the_loops():
     v = tuple(range(12))
     assert list(we.itertools.batched(v, 2)) == [(v[2 * k], v[2 * k + 1]) for k in range(6)]
-    assert we._COEF_PAIRS == tuple(zip(we._C1, we._C2))
-    assert we.asset_type_name(we._name_hash("Texture")) == "Texture"
+    assert we.ADPCM_COEF_PAIRS == tuple(zip(we._C1, we._C2))
+    assert we.asset_type_name(kapow_props.name_hash("Texture")) == "Texture"
     assert we.asset_type_name(0) == ""
-    assert we._sheet_keys() is we._sheet_keys() and we._sheet_hashes() is we._sheet_hashes()
+    assert we.sheet_keys() is we.sheet_keys() and we.sheet_hashes() is we.sheet_hashes()
     assert we._names_mod() is we._names_mod()
 
 
@@ -254,27 +255,27 @@ def test_cached_tables_hold_what_their_sources_give():
         with open(os.path.join(wlib, name), encoding="utf-8") as fh:
             return json.load(fh)
 
-    assert we._asset_types() == {we._name_hash(n): n for n in we.ASSET_TYPE_NAMES}
+    assert we._asset_types() == {kapow_props.name_hash(n): n for n in we.ASSET_TYPE_NAMES}
     sheet_names = [*we.TEXTURE_SHEET_PROPS, "integer", "truth", "number"]
-    assert we._sheet_hashes() == {n: we._name_hash(n) for n in sheet_names}
+    assert we.sheet_hashes() == {n: kapow_props.name_hash(n) for n in sheet_names}
     types = ("number", "integer", "truth", "string", "vector", "color")
-    assert we._sheet_keys() == (
-        {we._name_hash(n): n for n in we.SHEET_PROPERTIES}
-        | {("type", we._name_hash(t)): t for t in types}
+    assert we.sheet_keys() == (
+        {kapow_props.name_hash(n): n for n in we.SHEET_PROPERTIES}
+        | {("type", kapow_props.name_hash(t)): t for t in types}
         | {("type", we._T_UNIQUE_ID): "id"}
     )
     assert we._names_mod() is canonical_names and we._kapow_json() is kapow_json
     assert canonical_names.table() == dict(shipped("canonical_names.json")["names"])
     assert engine_enums.data() == shipped("engine_enums.json")
-    assert level_meta._input_codes() == shipped("input_code_enums.json")
+    assert level_meta.input_codes() == shipped("input_code_enums.json")
     assert engine_schema.prop_names() == gen_data.derive_prop_names(engine_schema.reg())
     for table in (
         we._asset_types,
-        we._sheet_hashes,
-        we._sheet_keys,
+        we.sheet_hashes,
+        we.sheet_keys,
         canonical_names.table,
         engine_enums.data,
-        level_meta._input_codes,
+        level_meta.input_codes,
         engine_schema.prop_names,
     ):
         assert table() is table(), table.__qualname__

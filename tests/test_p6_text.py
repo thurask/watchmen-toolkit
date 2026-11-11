@@ -8,10 +8,7 @@ Synthetic fixtures only (the builders of test_text_assets / test_p1_formats)."""
 
 import os
 import struct
-import sys
 
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wlib"))
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import text_assets as ta
 import test_audio_v2 as au
 import test_p1_formats as tp

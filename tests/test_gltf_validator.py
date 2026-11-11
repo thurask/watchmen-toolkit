@@ -19,6 +19,7 @@ import subprocess
 from pathlib import Path
 
 import numpy as np
+from conftest import rig_part
 
 HERE = Path(__file__).resolve().parent
 RUNNER = HERE / "data" / "gltf_validate.js"
@@ -64,7 +65,6 @@ def _write_all(tmp_path, monkeypatch, rig):
 
     import test_face_rule as tfr
     import test_nav_data as tn
-    import test_outfits_integration as toi
     import test_p3_raw_formats as trf
     import test_v150_e2e as te
 
@@ -82,8 +82,8 @@ def _write_all(tmp_path, monkeypatch, rig):
     char(
         "char_outfits.glb",
         outfit_parts=[
-            ("OUTFIT 1 Jacket", [toi._part(rig, 1.0, "outfit")], True),
-            ("OUTFIT 2 Jacket", [toi._part(rig, 1.0, "outfit_3")], False),
+            ("OUTFIT 1 Jacket", [rig_part(rig, 1.0, "outfit")], True),
+            ("OUTFIT 2 Jacket", [rig_part(rig, 1.0, "outfit_3")], False),
         ],
         parts_record={
             "mode": "game",

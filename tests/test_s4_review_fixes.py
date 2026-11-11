@@ -17,13 +17,10 @@ import json
 import os
 import re
 import struct
-import sys
 
 import numpy as np
 import pytest
 
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wlib"))
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import bake_v4
 import canonical_names as cn
 import characters_export as ce
@@ -36,6 +33,7 @@ import variant_glb as vg
 import test_p1_formats as tf
 import test_p1_level as tl
 import test_p6_anim as tp
+from conftest import model_named, write_bytes
 
 bind = tp.bind  # the fixtures of those modules, used below
 movie_extract = tf.movie_extract
@@ -70,14 +68,14 @@ def test_the_name_scan_starts_behind_the_header():
     # 00 00 03 72 at byte 12: read from byte 11 it is the length 3 and the name "r"
     assert bake_v4._name_scan(be, ">", 0) == 11 and bake_v4.NAME_SCAN_START == 20
     assert bake_v4._name_scan(be, ">") == 24 and bake_v4._name_scan(be, "<") is None
-    assert bake_v4._detect_clip_order(be) == ">"
+    assert bake_v4.detect_clip_order(be) == ">"
     assert sorted(bake_v4.walk(be)) == ["Bip", "Hand"]
     assert bake_v4.scan_start_matters(be) and bake_v4.scan_start_matters(be[:400])
     le = _const_clip("<", 0x372, ["Bip", "Hand"])
-    assert bake_v4._detect_clip_order(le) == "<" and sorted(bake_v4.walk(le)) == ["Bip", "Hand"]
+    assert bake_v4.detect_clip_order(le) == "<" and sorted(bake_v4.walk(le)) == ["Bip", "Hand"]
     assert not bake_v4.scan_start_matters(le)
     assert not bake_v4.scan_start_matters(_const_clip(">", 13, ["Bip", "Hand"]))
-    assert bake_v4.walk(b"\0" * 64) == {} and bake_v4._detect_clip_order(b"") == "<"
+    assert bake_v4.walk(b"\0" * 64) == {} and bake_v4.detect_clip_order(b"") == "<"
 
 
 def test_a_bake_of_a_clip_the_old_scan_misread_is_baked_again(tmp_path, bind, monkeypatch):
@@ -123,11 +121,21 @@ def test_a_glb_older_than_a_bake_of_its_skeleton_is_rewritten(tmp_path, capsys):
     assert not ce.glb_is_current(str(glb), 1100.5)
     assert "older than a bake of its skeleton" in capsys.readouterr().out
     assert not ce.glb_is_current(str(tmp_path / "missing.glb"), 1)
-    import inspect
 
-    src = inspect.getsource(ce.export)
-    assert "baked = newest_bake_time(cdir)" in src
-    assert "glb_is_current(out, baked, opts, outdir)" in src
+
+def test_export_rewrites_a_glb_older_than_a_bake_of_its_skeleton(export_env, capsys):
+    ex, out, calls = export_env
+
+    def run():
+        ce.export(str(ex), str(out), naz="none.naz", only="Heavy", jiggle_model="pinned")
+        return capsys.readouterr().out
+
+    run()
+    assert "kept 1 existing GLB" in run() and len(calls["load_parts"]) == 1
+    glb = out / "Heavy" / "Heavy.glb"
+    t = os.path.getmtime(glb) + 100
+    os.utime(out / "_bake" / "large" / "clip_test.npz", (t, t))
+    assert "kept" not in run() and len(calls["load_parts"]) == 2
 
 
 # ------------------------------------------------------------------ watchmen char
@@ -151,10 +159,39 @@ def test_char_takes_the_clip_families_of_the_skeleton(tmp_path):
     assert vg.clip_families("Small_Skeleton", str(tmp_path / "loose.json")) == ("EN1",)
     note = vg.no_bake_note("bake", ("EN1", "EN3"))
     assert "no bake in bake for the clip families EN1/EN3 (EN1*.npy)" in note
-    import inspect
 
-    src = inspect.getsource(vg.build)
-    assert "clip_families(skel, fragjson)" in src and "no_bake_note(bakedir, prefix)" in src
+
+def test_char_bakes_in_the_clip_families_of_its_skeleton_and_says_when_none_is_there(
+    tmp_path, monkeypatch, capsys
+):
+    d = tmp_path / "p1" / "extracted" / "TNT" / "Production" / "Fragments" / "Enemy"
+    d.mkdir(parents=True)
+    (d / "Biker.fragment").write_bytes(b"")  # a Part 1 extract
+    frag = d / "ThugFast.fragment.json"
+    frag.write_text('{"instances": [{"name": "V", "model_ref": ["/a/Small_Skeleton.model"]}]}')
+    bind = tmp_path / "bind.npz"
+    np.savez(
+        bind,
+        Rb=np.eye(3)[None],
+        tb=np.zeros((1, 3)),
+        tloc=np.zeros((1, 3)),
+        par=np.array([-1]),
+        names=np.array(["Bip"]),
+    )
+    bakedir = tmp_path / "bake"
+    bakedir.mkdir()
+    for nm in ("EN1_a", "EN3_b", "EN4_c"):
+        np.save(bakedir / (nm + ".npy"), np.zeros((3, 1, 3, 4), np.float32))
+    got = []
+    monkeypatch.setattr(vg, "load_parts", lambda meshes, pal, naz=None: [])
+    monkeypatch.setattr(vg, "write_glb", lambda parts, anims, *a, **k: got.append(anims))
+    vg.build(str(frag), "V", str(tmp_path / "o.glb"), bakedir=str(bakedir), bind=str(bind))
+    assert sorted(a[0] for a in got[0]) == ["EN1_a", "EN3_b"]
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    capsys.readouterr()
+    vg.build(str(frag), "V", str(tmp_path / "o.glb"), bakedir=str(empty), bind=str(bind))
+    assert got[1] == [] and vg.no_bake_note(str(empty), ("EN1", "EN3")) in capsys.readouterr().out
 
 
 # ------------------------------------------------------------------ levelmeta
@@ -180,7 +217,7 @@ def level(tmp_path_factory):
         LVL, "SceneScope(LoadBlock)", "Lvl", SCENE, 1, assetName="/L/Lvl.fragment",
         localPos=HOST_POS, localOrient=ID,
     )  # fmt: skip
-    tl._write(base / "L" / "Lvl.scene", tl._fragment(scene))
+    write_bytes(base / "L" / "Lvl.scene", tl._fragment(scene))
     model = lambda nid, name, parent, order, pos, quat=ID, **kw: n(
         nid, "Model", name, parent, order, localPos=pos, localOrient=quat,
         modelNames=["/art/props/%s.model" % name], **kw,
@@ -199,43 +236,39 @@ def level(tmp_path_factory):
     f += model(M_PLACED2, "placed2", PVS, 1, [80.0, 3.0, -130.0], Q_PLACED)
     f += model(M_UP3, "copy3", FOLD, 4, [70.0, 3.0, -120.0], Q_COPY)
     f += model(M_PLACED3, "placed3", PVS, 2, [70.0, 3.0, -120.0], Q_OTHER)
-    tl._write(base / "L" / "Lvl.fragment", tl._fragment(f, name="Lvl_Main", singleton=True))
+    write_bytes(base / "L" / "Lvl.fragment", tl._fragment(f, name="Lvl_Main", singleton=True))
     return lm.build_level(str(base / "L" / "Lvl.scene"), "Lvl", "%08x" % LVL, None)
 
 
-def _m(level, name):
-    return next(r for r in level["models"] if r["name"] == name)
-
-
 def test_models_carry_the_stored_transform_and_the_chain_passed_over(level):
-    copy, placed = _m(level, "copy"), _m(level, "placed")
+    copy, placed = model_named(level, "copy"), model_named(level, "placed")
     assert copy["local"] == placed["local"] == {"pos": [98.5, 3.0, -144.75], "quat": ID}
     assert copy["world"]["pos"] == [198.5, 53.0, -249.75]  # the host is applied once
     assert placed["world"]["pos"] == [98.5, 3.0, -144.75]
     assert copy["parent_chain_without_transform"] == ["Folder"]
     assert placed["parent_chain_without_transform"] == []
-    assert _m(level, "hostrel")["parent_chain_without_transform"] == []
-    deep = _m(level, "deepone")["parent_chain_without_transform"]
+    assert model_named(level, "hostrel")["parent_chain_without_transform"] == []
+    deep = model_named(level, "deepone")["parent_chain_without_transform"]
     assert len(deep) == 2 and deep[1] == "Folder"  # nearest first
-    kept = _m(level, "kept")
+    kept = model_named(level, "kept")
     # parentLink = 1 composes like any node (0x48d789): host + linked + local
     assert kept["world"]["pos"] == [108.0, 60.0, -93.0] and kept["local"]["pos"] == [1.0, 2.0, 3.0]
 
 
 def test_a_copy_left_in_host_coordinates_is_marked(level):
-    copy, placed = _m(level, "copy"), _m(level, "placed")
+    copy, placed = model_named(level, "copy"), model_named(level, "placed")
     assert copy["host_offset_copy"] == {"twin": placed["uid"]}
-    assert _m(level, "alone")["host_offset_copy"] == {"twin": None}  # same folder, no twin
+    assert model_named(level, "alone")["host_offset_copy"] == {"twin": None}  # same folder, no twin
     # the same stored position and a quaternion 1e-6 away in one component: a twin
-    copy2, placed2 = _m(level, "copy2"), _m(level, "placed2")
+    copy2, placed2 = model_named(level, "copy2"), model_named(level, "placed2")
     assert copy2["local"]["pos"] == placed2["local"]["pos"]
     dq = [abs(a - b) for a, b in zip(copy2["local"]["quat"], placed2["local"]["quat"])]
     assert 0 < max(dq) < 2e-6 and max(dq) < lm.HOST_OFFSET_QUAT_TOLERANCE == 1e-5
     assert copy2["host_offset_copy"] == {"twin": placed2["uid"]}
     # 1e-3 away is another orientation: no twin, marked as a model of the same folder
-    assert _m(level, "copy3")["host_offset_copy"] == {"twin": None}
+    assert model_named(level, "copy3")["host_offset_copy"] == {"twin": None}
     for name in ("placed", "placed2", "placed3", "hostrel", "deepone", "kept"):
-        assert "host_offset_copy" not in _m(level, name), name
+        assert "host_offset_copy" not in model_named(level, name), name
     c = level["counts"]
     assert c["host_offset_copies"] == 4 and c["parent_link_1"] == 1
     assert c["placements_below_transformless_ancestor"] == 5
@@ -250,7 +283,7 @@ def test_a_host_at_the_origin_marks_nothing(tmp_path):
     n = tl._node
     scene = n(SCENE, "SceneNode", "", None)
     scene += n(LVL, "SceneScope(LoadBlock)", "Lvl", SCENE, 1, assetName="/L/Lvl.fragment")
-    tl._write(base / "L" / "Lvl.scene", tl._fragment(scene))
+    write_bytes(base / "L" / "Lvl.scene", tl._fragment(scene))
     f = n(FOLD, "Folder", "a", "host", 0)
     f += n(PVS, "Folder", "b", "host", 1)
     for nid, par in ((M_UP, FOLD), (M_PLACED, PVS)):
@@ -258,7 +291,7 @@ def test_a_host_at_the_origin_marks_nothing(tmp_path):
             nid, "Model", "twin%d" % nid, par, 0, localPos=[1.0, 2.0, 3.0], localOrient=ID,
             modelNames=["/art/props/x.model"],
         )  # fmt: skip
-    tl._write(base / "L" / "Lvl.fragment", tl._fragment(f, name="Lvl_Main", singleton=True))
+    write_bytes(base / "L" / "Lvl.fragment", tl._fragment(f, name="Lvl_Main", singleton=True))
     lv = lm.build_level(str(base / "L" / "Lvl.scene"), "Lvl", "%08x" % LVL, None)
     assert len(lv["models"]) == 2 and lv["counts"]["host_offset_copies"] == 0
     assert all("host_offset_copy" not in m for m in lv["models"])

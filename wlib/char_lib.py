@@ -63,7 +63,7 @@ _LAYERCACHE = {}  # (matname,tuple(texroots),flip) -> layers (perf:
 # green-flip PNG re-encode is paid once, not per variant)
 
 
-def _find_layers(matname, texroots, flip_normal_g=True):
+def find_layers(matname, texroots, flip_normal_g=True):
     # the path is part of the key: a TexRef equals the plain name it carries
     _ck = (str(matname), getattr(matname, "path", None), tuple(texroots), flip_normal_g)
     _ck += (os.environ.get("WATCHMEN_MATERIALS"), os.environ.get("WATCHMEN_MATERIAL_OPTS"))
@@ -73,6 +73,9 @@ def _find_layers(matname, texroots, flip_normal_g=True):
     _r = _find_layers_uncached(matname, texroots, flip_normal_g)
     _LAYERCACHE[_ck] = dict(_r) if _r else _r
     return _r
+
+
+_find_layers = find_layers  # the private spelling, kept for existing callers
 
 
 SHEET_TAG = "#sheet="  # TexRef path suffix naming a texture sheet other than the first
@@ -379,7 +382,7 @@ def dropped_pieces(reset=False):
 def flat_buffer(ms, off, nv, stride, ib, order):
     """Stream offset of a PLANAR submesh's vertex buffer (one flat axis: the eye
     card of Large_Head_2), searched only after the strict scan found nothing --
-    the fallback watchmen_extract.decode_model uses (_vb_ok_flat).  None when
+    the fallback watchmen_extract.decode_model uses (vb_ok_flat).  None when
     there is none.  (Large_Head_2 submesh 3: 69803, the offset the header-driven
     layout of the PC file gives.)"""
     import watchmen_extract as we
@@ -387,9 +390,9 @@ def flat_buffer(ms, off, nv, stride, ib, order):
     c = off
     while c <= min(off + 65536, len(ms) - nv * stride - ib):
         if (
-            we._sane(struct.unpack_from(order + "f", ms, c)[0])
-            and we._vb_ok_flat(ms, c, nv, stride, ib, order)
-            and we._ib_ok(ms, c, nv, stride, ib, order)
+            we.is_finite_float(struct.unpack_from(order + "f", ms, c)[0])
+            and we.vb_ok_flat(ms, c, nv, stride, ib, order)
+            and we.ib_ok(ms, c, nv, stride, ib, order)
         ):
             return c
         c += 1
@@ -541,7 +544,7 @@ def find_textures(parts, texroots):
     for pt in parts:
         nm = pt[5]
         if nm not in tex:
-            layers = _find_layers(nm, texroots)
+            layers = find_layers(nm, texroots)
             if layers:
                 tex[nm] = layers
     return tex
@@ -570,7 +573,7 @@ def build_lib(bind, models, clips, out, animroot, texroots=(), upsample=2, track
     for pt in parts:
         nm = pt[5]
         if nm not in tex:
-            layers = _find_layers(nm, texroots)
+            layers = find_layers(nm, texroots)
             if layers:
                 tex[nm] = layers
     vg.write_glb(parts, anims, out, bind, textures=tex)

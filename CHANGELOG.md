@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- **Same-named fragments are tried nearest folder first, by whole folder names.** When an
+  entity reference names a fragment that exists in several folders (`Sound.fragment` of every
+  level, say), `sound_meta` tries first the one sharing the longest folder path with the
+  fragment the reference was read from. That path is now `os.path.commonpath` (whole folder
+  names) instead of `os.path.commonprefix` (characters, so `Enemy01/` and `Enemy02/` counted as
+  sharing `Enemy0`); `commonprefix` is deprecated from Python 3.15. The rule is
+  `sound_meta.nearest_first`. On the six sets the `animmeta`, `soundmeta` and `fxmeta` tables
+  never reach it (measured), so no output changes. (2026-11-11)
+- **Public names for the helpers the tests and the mod builders reach; no test reads source
+  text.** 54 private functions, classes and constants have public names, the private spelling
+  kept as an alias; calls inside the toolkit use the public one, so a test that patches the
+  private name no longer reaches them. Among them `watchmen_extract.ByteReader` (`_Rd`),
+  `read_meshbuffer`, `decode_one_layer`, `decode_mesh_vertices` (`_decode_sub`),
+  `maybe_inflate`, `write_obj_mtl`, `chain_bytes_exact`, `x360_base_level`, `ps3_layer_image`;
+  `jiggle_d6.FILE_DEFAULTS`; `level_meta.save_value`; `anim_meta.state_event_records`
+  (`_events`); `face_rule.shared_time`. The 28 `inspect.getsource` assertions are gone: 25
+  became behaviour tests (each fails when the code line it stands for is broken), 3 were
+  dropped. `tests/conftest.py` sets the import path once and holds the shared builders and
+  fixtures; no test file edits `sys.path`. `tools/blender_import_level.py` names the groups it
+  switches off after an import in `GROUPS_SWITCHED_OFF`. No output change. (2026-11-11)
 - **Failures that change the output are `WARNING:` lines.** `extract`: `kapow_json` not
   importable (one line per asset left raw), a property bag longer than the 64 records the walk
   reads, a text blob that does not inflate, a text asset a later block stores with other bytes,

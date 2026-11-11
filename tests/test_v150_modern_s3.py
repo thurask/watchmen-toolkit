@@ -314,13 +314,13 @@ def test_interval_types():
 
 def test_shared_clock_by_trigger():
     x = {"raw": 0.5, "t_s": 0.3}
-    assert fr._shared(dict(x, trigger="TOTAL_PLAY_TIME"), 0.0, 2.0, False) == 0.5
-    assert fr._shared(dict(x, trigger="ENTER_STATE"), 0.0, 2.0, False) == 0.0
-    assert fr._shared(dict(x, trigger="LEAVE_STATE"), 0.0, 2.0, False) is None
-    assert fr._shared(dict(x, trigger="PLAY_POS"), 0.0, 2.0, True) == 0.25
-    assert fr._shared(dict(x, trigger="PLAY_POS"), 0.0, 2.0, False) == 0.3  # not slaved
-    assert fr._shared(dict(x, trigger="PLAY_POS"), 0.0, 0.0, True) is None
-    assert fr._shared(dict(x, trigger=None), 0.0, 2.0, True) == 0.3
+    assert fr.shared_time(dict(x, trigger="TOTAL_PLAY_TIME"), 0.0, 2.0, False) == 0.5
+    assert fr.shared_time(dict(x, trigger="ENTER_STATE"), 0.0, 2.0, False) == 0.0
+    assert fr.shared_time(dict(x, trigger="LEAVE_STATE"), 0.0, 2.0, False) is None
+    assert fr.shared_time(dict(x, trigger="PLAY_POS"), 0.0, 2.0, True) == 0.25
+    assert fr.shared_time(dict(x, trigger="PLAY_POS"), 0.0, 2.0, False) == 0.3  # not slaved
+    assert fr.shared_time(dict(x, trigger="PLAY_POS"), 0.0, 0.0, True) is None
+    assert fr.shared_time(dict(x, trigger=None), 0.0, 2.0, True) == 0.3
 
 
 def test_face_script_by_input():

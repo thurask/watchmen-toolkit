@@ -2,13 +2,8 @@
 FontBuffer 0x440c1e, 0x4419bc, 0x43ef4d, 0x4418ca), the %N parameter table and the
 sender tables of `watchmen textmeta`.  Synthetic advances only."""
 
-import os
-import sys
-
 import pytest
 
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wlib"))
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import text_assets as ta
 import test_text_assets as tta
 

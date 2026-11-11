@@ -209,7 +209,7 @@ state's `m_nstartplaypos` unless the transition says otherwise
 Each event carries `start_playpos` and `start_basis` (`state_default`) so the
 assumption is explicit; a transition with an override or sync-marker start,
 or a walk-cycle carry-over (see *Transitions*), enters the state elsewhere and
-shifts the times — `anim_meta._events(state, …, start=…)` computes them for
+shifts the times — `anim_meta.state_event_records(state, …, start=…)` computes them for
 another entry. Class, character and controller speed factors are taken as 1.
 
 Read from `CheckPlayPosEvents` 0x5b51f3 and `SetupNewPage` 0x5b7788:

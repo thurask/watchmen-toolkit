@@ -10,17 +10,15 @@ no_collection    command_set_weapon 0x694440
 Synthetic binary fixtures only."""
 
 import json
-import os
 import struct
-import sys
 
 import pytest
 
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wlib"))
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import kapow_props as kp
 import level_meta as lm
+import conftest
 import test_level_meta as tl
+from conftest import ENTITY_KEYS, frag_node, fragment_bytes, u32s, write_bytes
 
 DEFAULT_SHEET = int.from_bytes(bytes.fromhex("63f07e442f0f1807"), "little")
 SEE_THROUGH = int.from_bytes(bytes.fromhex("12ea38493bc52366"), "little")
@@ -28,23 +26,23 @@ WORLD, CTRL, RSH, NTO, ACT, ACT0, BLOCK, GLASS, BARE, DEF, ROOT = range(0x60, 0x
 
 
 def _big(name, v):
-    return tl._u(kp.name_hash(name)) + struct.pack("<Q", v)
+    return u32s(kp.name_hash(name)) + struct.pack("<Q", v)
 
 
 def _build(tmp_path, monkeypatch, asset="/Levels/T/Street2.fragment", books=None):
     monkeypatch.setenv("WATCHMEN_FRAME", "true")
     monkeypatch.setattr(
-        tl,
-        "ENTITY",
-        tl.ENTITY + ("_emodelrsh", "_emodelnto", "_emodelntohead", "m_emodelcollbash1h"),
+        conftest,
+        "ENTITY_KEYS",
+        ENTITY_KEYS + ("_emodelrsh", "_emodelnto", "_emodelntohead", "m_emodelcollbash1h"),
     )
     lm._SHEETS.clear()
     base = tmp_path / "extracted"
-    scene = tl._node(tl.SCENE, "SceneNode", "", None)
-    scene += tl._node(tl.SCENES, "Folder", "Scenes", tl.SCENE)
-    scene += tl._node(tl.LVL, "SceneScope(LoadBlock)", "Streets2", tl.SCENES, 1, assetName=asset)
-    tl._write(base / "Levels" / "T" / "Test.scene", tl._fragment(scene))
-    lvl = tl._node(
+    scene = frag_node(tl.SCENE, "SceneNode", "", None)
+    scene += frag_node(tl.SCENES, "Folder", "Scenes", tl.SCENE)
+    scene += frag_node(tl.LVL, "SceneScope(LoadBlock)", "Streets2", tl.SCENES, 1, assetName=asset)
+    write_bytes(base / "Levels" / "T" / "Test.scene", fragment_bytes(scene))
+    lvl = frag_node(
         WORLD,
         "AIWorld(AIWorldNode)",
         "",
@@ -58,9 +56,11 @@ def _build(tmp_path, monkeypatch, asset="/Levels/T/Street2.fragment", books=None
         entityRadius=0.4,
         nbSectors=25,
     )
-    lvl += tl._u(kp.name_hash("aiStaticPathObjectNodes")) + tl._u(0)  # an empty list
-    lvl += tl._node(CTRL, "LevelSceneCtrl(Node)", "ctrl", "host", 1, _emodelrsh=RSH, _emodelnto=NTO)
-    lvl += tl._node(
+    lvl += u32s(kp.name_hash("aiStaticPathObjectNodes")) + u32s(0)  # an empty list
+    lvl += frag_node(
+        CTRL, "LevelSceneCtrl(Node)", "ctrl", "host", 1, _emodelrsh=RSH, _emodelnto=NTO
+    )
+    lvl += frag_node(
         RSH,
         "Character",
         "Rorschach",
@@ -71,8 +71,8 @@ def _build(tmp_path, monkeypatch, asset="/Levels/T/Street2.fragment", books=None
         localOrient=tl.ID,
         modelNames=["/art/Rorschach_Dry.model"],
     )
-    lvl += tl._node(NTO, "Character", "NiteOwl", CTRL, 1, localPos=[0.0] * 3, localOrient=tl.ID)
-    lvl += tl._node(
+    lvl += frag_node(NTO, "Character", "NiteOwl", CTRL, 1, localPos=[0.0] * 3, localOrient=tl.ID)
+    lvl += frag_node(
         ACT,
         "TriggerActionCharacter(Node)",
         "flip",
@@ -83,19 +83,19 @@ def _build(tmp_path, monkeypatch, asset="/Levels/T/Street2.fragment", books=None
         m_iinteger2=9,
         m_nnumber1=0.05,
     )
-    lvl += tl._node(
+    lvl += frag_node(
         ACT0, "TriggerActionCharacter(Node)", "hold", "host", 3, m_iactiontype=28, m_iinteger2=7
     )
     box = dict(localPos=[0.0] * 3, localOrient=tl.ID, width=1.0, height=1.0, depth=1.0)
-    lvl += tl._node(BLOCK, "visionblocker(CollisionBoxNode)", "b", "host", 4, physicsType=1, **box)
+    lvl += frag_node(BLOCK, "visionblocker(CollisionBoxNode)", "b", "host", 4, physicsType=1, **box)
     lvl += _big("pivotSheet_Id", DEFAULT_SHEET)
-    lvl += tl._node(GLASS, "CollisionBoxNode", "g", "host", 5, physicsType=1, **box)
+    lvl += frag_node(GLASS, "CollisionBoxNode", "g", "host", 5, physicsType=1, **box)
     lvl += _big("pivotSheet_Id", SEE_THROUGH)
-    lvl += tl._node(BARE, "visionblocker(CollisionBoxNode)", "n", "host", 6, **box)
-    lvl += tl._node(
+    lvl += frag_node(BARE, "visionblocker(CollisionBoxNode)", "n", "host", 6, **box)
+    lvl += frag_node(
         DEF, "CharacterDef(Node)", "{COP}", "host", 7, m_icharactertype=5, m_emodelcollbash1h=None
     )
-    lvl += tl._node(
+    lvl += frag_node(
         ROOT,
         "CharacterRoot(PivotNode)",
         "cop",
@@ -106,9 +106,9 @@ def _build(tmp_path, monkeypatch, asset="/Levels/T/Street2.fragment", books=None
         _icharactertype=5,
         _iweapontype=1,
     )
-    tl._write(base / "Levels" / "T" / "Street2.fragment", tl._fragment(lvl))
+    write_bytes(base / "Levels" / "T" / "Street2.fragment", fragment_bytes(lvl))
     if books is not None:
-        tl._write(base / "pivotbooks" / "default.pb.json", json.dumps(books).encode())
+        write_bytes(base / "pivotbooks" / "default.pb.json", json.dumps(books).encode())
     (found,) = lm.levels(str(tmp_path))
     return lm.build_level(found[0], found[1], found[2], str(tmp_path))
 

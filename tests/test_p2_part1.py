@@ -26,8 +26,8 @@ import kapow_json
 import kapow_props as kp
 import watchmen_extract as we
 
-_TEX = we._name_hash("Texture")
-_MDL = we._name_hash("modelRes")
+_TEX = kp.name_hash("Texture")
+_MDL = kp.name_hash("modelRes")
 
 
 # ---------------------------------------------------------------------------
@@ -496,7 +496,7 @@ def test_texture_sheets_of_the_older_layout_equal_the_typed_ones(bo):
 def test_sheet_json_is_written_for_the_older_layout(tmp_path):
     for sub, typed in (("old", False), ("new", True)):
         (tmp_path / sub).mkdir()
-        we._write_sheet_json(_texture_header("<", typed), tmp_path / sub, "<")
+        we.write_sheet_json(_texture_header("<", typed), tmp_path / sub, "<")
     old = json.loads((tmp_path / "old" / "sheet.json").read_text())
     assert old == json.loads((tmp_path / "new" / "sheet.json").read_text())
     assert old["twoSided"] is True and old["sheets"][0]["name"] == "default"

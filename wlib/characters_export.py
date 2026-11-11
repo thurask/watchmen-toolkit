@@ -523,12 +523,12 @@ def _brown_hair_layers(texroots, hair_mat, tint_mat):
     import io
     from PIL import Image
 
-    src = char_lib._find_layers(hair_mat, texroots)
+    src = char_lib.find_layers(hair_mat, texroots)
     if not src or "diffuse" not in src:
         return None
     out = dict(src)
     brown = np.array([87.0, 52.0, 27.0])  # fallback = measured FimaleGimpMask brown
-    tl = char_lib._find_layers(tint_mat, texroots)
+    tl = char_lib.find_layers(tint_mat, texroots)
     if tl and "diffuse" in tl:
         g = (
             np.asarray(Image.open(io.BytesIO(tl["diffuse"])).convert("RGB"))
@@ -1405,7 +1405,7 @@ def export(
                     base = os.path.basename(m)
                     if base in HEAD_SWAPS and HEAD_SWAPS[base] in midx:
                         usemodels.remove(m)
-                        face = _face_attach(
+                        face = face_attach(
                             midx[HEAD_SWAPS[base]],
                             "Head",
                             bind,
@@ -1420,7 +1420,7 @@ def export(
                 if cname == "NiteOwl" and "Dry" not in vname and "NiteOwl_Mask2" in midx:
                     extra = ("NiteOwl_Mask2", "Head")  # non-dry cowl variant
                 if face is None and extra and extra[0] in midx:
-                    face = _face_attach(
+                    face = face_attach(
                         midx[extra[0]], extra[1], bind, bn, cname, extract_out, outdir
                     )
                 if face is None and _engine:
@@ -1430,7 +1430,7 @@ def export(
                     if gh is not None and gh["head"] in midx:
                         static = [m for m in usemodels if os.path.basename(m) == gh["static"]][0]
                         usemodels.remove(static)
-                        face = _face_attach(
+                        face = face_attach(
                             midx[gh["head"]],
                             "Head",
                             bind,
@@ -1507,7 +1507,7 @@ def export(
                         tex[sv["hair_mat"]] = bl
                 if not os.environ.get("WATCHMEN_NO_RESTORE"):
                     for mat, repl in TEX_OVERRIDES.get((cname, vname), {}).items():
-                        layers = char_lib._find_layers(repl, texroots)
+                        layers = char_lib.find_layers(repl, texroots)
                         if layers and mat in tex:
                             if "alphaMask" in tex[mat]:
                                 layers["alphaMask"] = tex[mat]["alphaMask"]
@@ -1913,7 +1913,7 @@ def _rigid_attach_parts(model_base, bone, bind, bn):
     """Decode a runtime-attached model (e.g. facial-rigged head) as rigid parts
     on `bone`: verts moved from the model's own node space into the body's bind
     space, all weights on the attach bone's slot.  The export itself attaches
-    heads with their face rig (_face_attach); this rigid form is kept for
+    heads with their face rig (face_attach); this rigid form is kept for
     callers of the module and reads its pieces through _rigid_parts, like the
     weapon loader."""
     import parse_model_nodes
@@ -2010,11 +2010,11 @@ def _face_textures(face, texroots, extract_out):
             continue
         path = getattr(nm, "path", None) or ""
         base, _, sheet = path.partition("#sheet=")
-        layers = char_lib._find_layers(we.TexRef(str(nm), base) if sheet else nm, texroots)
+        layers = char_lib.find_layers(we.TexRef(str(nm), base) if sheet else nm, texroots)
         if layers and sheet:
             layers = dict(layers)
             for layer, opath in over[we.texture_key(base)]["overrides"].items():
-                src = char_lib._find_layers(we.texture_ref(opath), texroots) or {}
+                src = char_lib.find_layers(we.texture_ref(opath), texroots) or {}
                 if layer in src:
                     layers[layer] = src[layer]
                     if layer == "diffuse":
@@ -2034,7 +2034,7 @@ def _face_textures(face, texroots, extract_out):
     return tex
 
 
-def _face_attach(model_base, bone, bind, bn, cname, extract_out, outdir, align_ref=None):
+def face_attach(model_base, bone, bind, bn, cname, extract_out, outdir, align_ref=None):
     """Animated face attach: face bind from the head model's own nodes, its
     family's expression poses baked on, alignment M,t mapping face-model space
     -> body bind space (the node-FK alignment of _rigid_attach_parts)."""
@@ -2303,3 +2303,6 @@ def _face_attach(model_base, bone, bind, bn, cname, extract_out, outdir, align_r
         family=fam,
         head=head,
     )
+
+
+_face_attach = face_attach  # the private spelling, kept for existing callers

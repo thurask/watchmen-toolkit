@@ -1474,13 +1474,19 @@ What the test files pin:
   MTL's plain `Ns` against Blender's rule, the light-layer opacity of the
   sky pass alone and the one first-sheet reader.
 
-A checkout on its own reports 2,187 passed, 2 skipped, 2 deselected (2,189
-tests and the two opt-in validator tests; measured on Python 3.13.15 with the
+A checkout on its own reports 2,241 passed, 2 skipped, 2 deselected (2,243
+tests and the two opt-in validator tests; measured on Python 3.13.18 with the
 `regdump` extra installed, without which one more test of `test_names` is
 skipped for want of `capstone`); the comparison with the reference jiggle
 values runs there on frozen numbers.
 `conftest.py` fails a test that leaves a `WATCHMEN_*` variable changed, so
-the result does not depend on the order the tests run in. The suite writes
+the result does not depend on the order the tests run in. It also puts `wlib/`,
+`tools/`, the toolkit folder and `tests/` on `sys.path` (no test file edits the
+path itself) and holds the builders and fixtures more than one test file uses:
+the fragment record writers (`u32s`, `kstr`, `frag_node`, `fragment_bytes`, …),
+a synthetic character export (`export_env`), face bakes (`face_env`,
+`faces_env`) and the cache resets (`character_caches`, `material_caches`).
+Tests check behaviour, never source text. The suite writes
 about 65 MB below the temp folder (`$TMPDIR`); on a full temp disk tests
 fail with `No space left on device` and pytest can stop with an internal
 error.

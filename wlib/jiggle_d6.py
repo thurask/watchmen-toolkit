@@ -63,18 +63,19 @@ _FRAG_CANDIDATES = ("extracted/TNT/Production/Fragments/GameEssentials.fragment.
 
 # GameEssentials.fragment PhysicsWorld values (equal in the six shipped sets, measured);
 # used when no extract is named or its fragment has no PhysicsWorld node.
-_FILE_DEFAULTS = {
+FILE_DEFAULTS = {
     "gravity": (0.0, -14.82, 0.0),
     "rate_hz": 60,
     "breast": dict(k=200.0, d=0.8, limit=0.08),
     "belly": dict(k=70.0, d=0.8, limit=0.1),
     "hair": dict(k=100.0, d=0.8, limit=0.3),
 }
+_FILE_DEFAULTS = FILE_DEFAULTS  # the private spelling, kept for existing callers
 
 
 def load_world_props(extract_root=None):
     """PhysicsWorld jiggle props from the GameEssentials fragment of the extract output
-    `extract_root`; the shipped values (_FILE_DEFAULTS) when it is None or has no such
+    `extract_root`; the shipped values (FILE_DEFAULTS) when it is None or has no such
     node.  No other folder is looked in."""
     roots = [extract_root] if extract_root else []
     for r in roots:
@@ -98,17 +99,17 @@ def load_world_props(extract_root=None):
                 pr = {q[0]: q[2] for q in n.get("props", [])}
                 if pr.get("name") != "PhysicsWorld":
                     continue
-                out = dict(_FILE_DEFAULTS)
+                out = dict(FILE_DEFAULTS)
                 out["gravity"] = tuple(pr.get("gravity", out["gravity"]))
                 out["rate_hz"] = int(pr.get("physicsIntegrationRateInHz", out["rate_hz"]))
                 for g in ("breast", "belly", "hair"):
                     out[g] = dict(
-                        k=float(pr.get("m_n%sspringconstant" % g, _FILE_DEFAULTS[g]["k"])),
-                        d=float(pr.get("m_n%sspringdamping" % g, _FILE_DEFAULTS[g]["d"])),
-                        limit=float(pr.get("m_n%sdistancelimit" % g, _FILE_DEFAULTS[g]["limit"])),
+                        k=float(pr.get("m_n%sspringconstant" % g, FILE_DEFAULTS[g]["k"])),
+                        d=float(pr.get("m_n%sspringdamping" % g, FILE_DEFAULTS[g]["d"])),
+                        limit=float(pr.get("m_n%sdistancelimit" % g, FILE_DEFAULTS[g]["limit"])),
                     )
                 return out
-    return dict(_FILE_DEFAULTS)
+    return dict(FILE_DEFAULTS)
 
 
 def _group(bone):
@@ -127,13 +128,16 @@ def _orth(R):
     return U @ Vt
 
 
-def _rotv2m(v):
+def rotvec_to_mat(v):
     a = np.linalg.norm(v)
     if a < 1e-12:
         return np.eye(3)
     x, y, z = v / a
     K = np.array([[0, -z, y], [z, 0, -x], [-y, x, 0.0]])
     return np.eye(3) + np.sin(a) * K + (1 - np.cos(a)) * K @ K
+
+
+_rotv2m = rotvec_to_mat  # the private spelling, kept for existing callers
 
 
 def solver_soften(k, zeta, dts=1.0 / 120.0):
@@ -403,7 +407,7 @@ def _apply_jiggle_pinned(
             w = min(ti * hz - j, 1.0)
             xw = (1 - w) * x[j] + w * x[j + 1]
             Ai = A_o[i]
-            Dm = Ai @ _rotv2m(xw) @ Ai.T
+            Dm = Ai @ rotvec_to_mat(xw) @ Ai.T
             P[i, k, :, :3] = Dm @ P[i, k, :, :3]
             jw = anch_o[i]
             P[i, k, :, 3] = jw - P[i, k, :, :3] @ tb[k]
@@ -480,7 +484,7 @@ def cache_signature(model=None, mode=None, props=None):
     name of on-disk jiggle caches (characters_export), so palettes baked with one
     model or one set of constants are never served for another.  props: the
     PhysicsWorld values the bake uses (load_world_props); they enter the tag when
-    they differ from the shipped values (_FILE_DEFAULTS), so the tag of the shipped
+    they differ from the shipped values (FILE_DEFAULTS), so the tag of the shipped
     values is the one without them."""
     import hashlib
 
@@ -535,7 +539,7 @@ def _world_key(props):
         )
 
     key = canon(props)
-    return None if key == canon(_FILE_DEFAULTS) else key
+    return None if key == canon(FILE_DEFAULTS) else key
 
 
 def _slerp_m(Ra, Rb_, t):
@@ -547,7 +551,7 @@ def _slerp_m(Ra, Rb_, t):
     s = np.linalg.norm(v)
     if a < 1e-9 or s < 1e-12:
         return Rb_.copy() if t >= 0.5 else Ra.copy()
-    return Ra @ _rotv2m(v / s * (a * t))
+    return Ra @ rotvec_to_mat(v / s * (a * t))
 
 
 def swing_constants(mode, grp, W, model="pivot"):
@@ -680,7 +684,7 @@ def _apply_jiggle_pivot(P, fps, bindpath, bones, gain, mode, props, extract_root
             Rp = _orth(Pp_l[i, :, :3])
             Al = Rp @ Rb[p]
             cl = Rp @ tb[p] + Pp_l[i, :, 3]
-            Dm = Al @ _rotv2m(xs[i]) @ Al.T
+            Dm = Al @ rotvec_to_mat(xs[i]) @ Al.T
             Rbody = Dm @ Rp
             org_body = cl + Dm @ (Rp @ tb[k] + Pp_l[i, :, 3] - cl)
             Ra = P0[i, k, :, :3]
@@ -765,7 +769,7 @@ def _q_axes(q):
     )
 
 
-def _m2q(M):
+def mat_to_quat(M):
     """Rotation matrix -> unit quaternion (x, y, z, w)."""
     t = M[0][0] + M[1][1] + M[2][2]
     if t > 0:
@@ -782,6 +786,9 @@ def _m2q(M):
         q = ((M[0][2] + M[2][0]) / s, (M[1][2] + M[2][1]) / s, 0.25 * s, (M[1][0] - M[0][1]) / s)
     n = math.sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3])
     return (q[0] / n, q[1] / n, q[2] / n, q[3] / n)
+
+
+_m2q = mat_to_quat  # the private spelling, kept for existing callers
 
 
 def _q_slerp(q0, q1, t):
@@ -1167,7 +1174,7 @@ def _apply_jiggle_solver(
             A_o.append(_em.mat_mul(rot, Rb_p))  # parent bone frame
             x = _em.mat_vec(rot, tb_p)
             c_o.append((x[0] + Pp[i][0][3], x[1] + Pp[i][1][3], x[2] + Pp[i][2][3]))  # pivot
-        qA = [_m2q(_em.nearest_rotation(A_o[i])) for i in range(F)]
+        qA = [mat_to_quat(_em.nearest_rotation(A_o[i])) for i in range(F)]
 
         for i in range(1, F):  # one quaternion sheet, so components can be interpolated
             if _q_dot(qA[i], qA[i - 1]) < 0:

@@ -16,6 +16,7 @@ import engine_enums as ee
 import face_rule
 import kapow_props
 from test_anim_meta import Frag, write_clip
+from conftest import state_named
 
 RORSCHACH, ENEMY_04 = 1, 7
 PUNCH, HEAVY_PUNCH, COUNTER, FINISH, INITIAL = 0, 7, 12, 3, 21
@@ -282,11 +283,7 @@ def meta(extract):
 
 
 def hero_basis(meta):
-    return _state(meta, "Rorschach", "Chain_A")["combat"]["defender"]["whiff_basis"]
-
-
-def _state(meta, cls, name):
-    return next(s for s in meta["classes"][cls]["states"] if s["name"] == name)
+    return state_named(meta, "Rorschach", "Chain_A")["combat"]["defender"]["whiff_basis"]
 
 
 # ------------------------------------------------------------------- marker
@@ -315,7 +312,7 @@ def test_existing_state_fields_are_untouched(extract, meta):
 def test_intervals_are_rendered_from_the_stored_values(meta):
     """The caption says 2.2, the stored maximum is 2.0 (seen in the shipped
     Enemy04 dash group): the rendered text follows the value."""
-    s = _state(meta, "Enemy04", "Light_A")
+    s = state_named(meta, "Enemy04", "Light_A")
     g = {x["group"].split("/")[-1]: x for x in s["group_criteria"]}
     assert {"text": "ATTACK_MOVE_DIST < 2"} in g["LightAttacks"]["criteria"]
     assert {"text": "ACTION PUNCH", "entry_only": True} in g["LightAttacks"]["criteria"]
@@ -323,7 +320,7 @@ def test_intervals_are_rendered_from_the_stored_values(meta):
 
 
 def test_group_chain_is_outermost_first_with_the_random_flag(meta):
-    s = _state(meta, "Enemy04", "Light_A")
+    s = state_named(meta, "Enemy04", "Light_A")
     names = [x["group"].split("/")[-1] for x in s["group_criteria"]]
     # AttackGroup and Plain test nothing and do not pick at random: left out
     assert names == ["LightAttacks", "Unarmed", "GeneralAttacks"]
@@ -354,26 +351,28 @@ def test_every_attack_state_gets_a_block(meta):
 
 
 def test_attack_class_weapon_entry_and_override(meta):
-    b = _state(meta, "Enemy04", "Light_A")["combat"]
+    b = state_named(meta, "Enemy04", "Light_A")["combat"]
     assert b["attack_class"] == "light" and b["weapon_classes"] == ["UNARMED"]
     assert b["entry"] == "general" and b["combo_override"]["required"] is None
     assert b["attack_move_dist_m"] == [None, 2.0]
     assert b["flags"] == {"keep_combo_alive": True}
-    b = _state(meta, "Enemy04", "Sidekick")["combat"]
+    b = state_named(meta, "Enemy04", "Sidekick")["combat"]
     assert b["attack_class"] == "heavy" and b["combo_override"]["required"] == "STUN"
     assert b["sweep"]["beginsweepangle"] == 30.0
     # heavy_attack: an ACTION HEAVY_PUNCH criterion on a group (computed, 0x5f0e63)
     assert b["flags"] == {"sweep": True, "heavy_attack": True}
-    assert "STUN" not in _state(meta, "Enemy04", "Heavy_A")["combat"]["combo_override"]["allowed"]
-    assert _state(meta, "Rorschach", "Initial_A")["combat"]["entry"] == "initial"
-    assert _state(meta, "Rorschach", "Chain_A")["combat"]["entry"] == "general"
+    assert (
+        "STUN" not in state_named(meta, "Enemy04", "Heavy_A")["combat"]["combo_override"]["allowed"]
+    )
+    assert state_named(meta, "Rorschach", "Initial_A")["combat"]["entry"] == "initial"
+    assert state_named(meta, "Rorschach", "Chain_A")["combat"]["entry"] == "general"
 
 
 def test_damage_is_base_times_modifier_with_its_sources(meta):
     """5 (fast, unarmed, Enemy Combos) x 1.5: the base EnemyDef has no modifier
     of its own (0 -> the CharacterDef's), phase 1 has 2.0.  The EnemyDef's
     m_ndamagemodifier is a run-time field and is never an input."""
-    rows = _state(meta, "Enemy04", "Light_A")["combat"]["damage"]
+    rows = state_named(meta, "Enemy04", "Light_A")["combat"]["damage"]
     assert len(rows) == 1
     r = rows[0]
     assert r["character_def"] == "DOMINATRICE" and r["combo_database"] == "Enemy Combos"
@@ -382,12 +381,12 @@ def test_damage_is_base_times_modifier_with_its_sources(meta):
         {"modifier": 1.5, "damage": 7.5, "ai_defs": ["base_def"]},
         {"modifier": 2.0, "damage": 10.0, "ai_defs": ["phase_1"]},
     ]
-    heavy = _state(meta, "Enemy04", "Sidekick")["combat"]["damage"][0]
+    heavy = state_named(meta, "Enemy04", "Sidekick")["combat"]["damage"][0]
     assert heavy["base"] == 10.0 and heavy["variants"][0]["damage"] == 15.0
 
 
 def test_a_class_without_an_owner_says_why_there_is_no_damage(meta):
-    b = _state(meta, "Rorschach", "Chain_A")["combat"]
+    b = state_named(meta, "Rorschach", "Chain_A")["combat"]
     assert b["damage"] == [] and "no CharacterDef" in b["damage_reason"]
     assert meta["combat"]["classes"]["Rorschach"]["attack_states_without_damage"]
 
@@ -395,7 +394,7 @@ def test_a_class_without_an_owner_says_why_there_is_no_damage(meta):
 def test_timings_are_anim_metas_own_event_times(meta):
     """Seconds from entry and play positions are copied from the state's event
     records (start position 0.2, 2 s clip): nothing is re-derived."""
-    s = _state(meta, "Enemy04", "Light_A")
+    s = state_named(meta, "Enemy04", "Light_A")
     t = s["combat"]["timing"]
     ev = {e["name"]: e for e in s["events"]}
     for key, name in (("pre_impact", "PRE_IMPACT"), ("impact", "IMPACT"), ("branch", "BRANCH")):
@@ -409,13 +408,13 @@ def test_counter_window_and_whiff_distance(meta):
     """Counter: 0.13 s of CLIP time must remain before IMPACT (0x68d36a) ->
     play position 0.6 - 0.13 / 2.0.  Whiff: 1.8 m for an AI attacker, none for
     a player class."""
-    d = _state(meta, "Enemy04", "Light_A")["combat"]["defender"]
+    d = state_named(meta, "Enemy04", "Light_A")["combat"]["defender"]
     assert d["counter"]["latest_playpos"] == pytest.approx(0.535)
     assert d["counter"]["latest_from_entry_s"] == pytest.approx(0.67)
     assert d["whiff_distance_m"] == 1.8 and d["reaction_table_sees"] == "LIGHTATTACK"
     assert d["whiff_basis"] == "ai" and hero_basis(meta) == "player"
     assert d["hit_reaction_starts_from_entry_s"] == pytest.approx(0.7)
-    hero = _state(meta, "Rorschach", "Chain_A")["combat"]["defender"]
+    hero = state_named(meta, "Rorschach", "Chain_A")["combat"]["defender"]
     # the type is computed from the group's ACTION PUNCH criterion (0x5f277a), not stored
     assert hero["whiff_distance_m"] is None and hero["reaction_table_sees"] == "LIGHTATTACK"
 
@@ -423,13 +422,13 @@ def test_counter_window_and_whiff_distance(meta):
 def test_combo_speedup_entry_play_position(meta):
     """CLEAR_DEADZONE minus 0.15 s / duration for LIGHTATTACK, 0.2 s for
     HEAVYATTACK; a NOTSET state never speeds up (0x688961)."""
-    sp = _state(meta, "Enemy04", "Light_A")["combat"]["combo_speedup"]
+    sp = state_named(meta, "Enemy04", "Light_A")["combat"]["combo_speedup"]
     assert sp["applies"] and sp["entry_playpos"] == pytest.approx(0.5 - 0.15 / 2.0)
     assert sp["impact_from_entry_s"] == pytest.approx((0.6 - 0.425) * 2.0)
-    sp = _state(meta, "Enemy04", "Sidekick")["combat"]["combo_speedup"]
+    sp = state_named(meta, "Enemy04", "Sidekick")["combat"]["combo_speedup"]
     assert sp["entry_playpos"] == pytest.approx(0.5 - 0.2 / 4.0)
     # Heavy_A stores no type; its group's ACTION HEAVY_PUNCH makes it HEAVYATTACK (0x5f277a)
-    sp = _state(meta, "Enemy04", "Heavy_A")["combat"]["combo_speedup"]
+    sp = state_named(meta, "Enemy04", "Heavy_A")["combat"]["combo_speedup"]
     assert sp["applies"] and sp["entry_playpos"] == pytest.approx(0.5 - 0.2 / 4.0)
     bare = asm.Node("x", asm.CLS_STATE, "x")
     bare.props = {"m_ianimationtype": 4}  # a stored type without a criterion is not used
@@ -452,10 +451,10 @@ def test_damage_pose_and_conversions():
 
 
 def test_other_combat_states_get_a_short_block(meta):
-    hr = _state(meta, "Enemy04", "LightMiddleRight")["combat"]
+    hr = state_named(meta, "Enemy04", "LightMiddleRight")["combat"]
     assert hr == {"kind": "hit_reaction", "damage_poses": ["LIGHT_MIDDLE_RIGHT"]}
-    assert _state(meta, "Enemy04", "Counter_A RSH")["combat"]["impact"]["from_entry_s"] == 1.0
-    assert "combat" not in _state(meta, "Enemy04", "Idle")
+    assert state_named(meta, "Enemy04", "Counter_A RSH")["combat"]["impact"]["from_entry_s"] == 1.0
+    assert "combat" not in state_named(meta, "Enemy04", "Idle")
 
 
 # ---------------------------------------------------------- reaction table
@@ -559,10 +558,10 @@ def test_summary_lists_the_classes(meta):
 def test_an_attack_on_a_prone_target_is_a_kick(meta):
     """Groups that require TARGET_MODE 4 (prone): the combo item is KICK while
     the base damage stays the button's (AddAttackToCombo 0x68bca8)."""
-    b = _state(meta, "Rorschach", "Kick")["combat"]
+    b = state_named(meta, "Rorschach", "Kick")["combat"]
     assert b["target_mode"] == {"requires": ["TARGET_PRONE"], "excludes": []}
     assert b["combo_item"] == "KICK" and b["attack_class"] == "light"
-    assert "combo_item" not in _state(meta, "Rorschach", "Chain_A")["combat"]
+    assert "combo_item" not in state_named(meta, "Rorschach", "Chain_A")["combat"]
 
 
 def test_a_failing_combat_build_does_not_take_the_table_down(extract, monkeypatch):

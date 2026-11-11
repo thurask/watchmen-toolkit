@@ -2,10 +2,6 @@
 BuiltinModule::RegisterMembers (0x47ff8c).  Pins the counts read from the code and the
 internal consistency of the table."""
 
-import os
-import sys
-
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wlib"))
 import script_builtins as sb
 
 

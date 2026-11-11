@@ -41,7 +41,7 @@ import rig_glb
 import skeleton_records as sr
 import variant_glb as vg
 import watchmen_extract as we
-from conftest import build_clip_header, build_model_header, synthetic_nodes
+from conftest import build_clip_header, build_model_header, rot_vector, synthetic_nodes
 
 import watchmenlib as wl  # a broken facade (missing table, bad import) is an error
 
@@ -116,8 +116,8 @@ def test_synthetic_model_is_unambiguous_and_carvable(order):
     other = ">" if order == "<" else "<"
     assert we.find_descriptors(hdr, order) == [(8, STRIDE[order], 36)]
     assert we.find_descriptors(hdr, other) == []
-    assert we._vb_ok(stream, 0, 8, STRIDE[order], 36, order)
-    assert we._ib_ok(stream, 0, 8, STRIDE[order], 36, order)
+    assert we.vb_ok(stream, 0, 8, STRIDE[order], 36, order)
+    assert we.ib_ok(stream, 0, 8, STRIDE[order], 36, order)
     si, sw = rig_glb.decode_skin(stream, 0, 8, STRIDE[order], order)
     assert si[:, 0].tolist() == [j[0] for j in joints]
     assert np.allclose(sw[:, 0], 1.0)
@@ -758,13 +758,6 @@ def test_bake_frame_count_comes_from_the_longest_track_of_any_kind(two_bone_bind
 # ---------------------------------------------------------------------------
 
 
-def _rotvec(R):
-    a = float(np.arccos(np.clip((np.trace(R) - 1.0) / 2.0, -1.0, 1.0)))
-    if a < 1e-12:
-        return np.zeros(3)
-    return a * np.array([R[2, 1] - R[1, 2], R[0, 2] - R[2, 0], R[1, 0] - R[0, 1]]) / (2 * np.sin(a))
-
-
 def test_jiggle_resample_never_extrapolates_past_the_last_sim_sample(tmp_path):
     """Frames beyond the last sim sample all carry x[N-1] -- weight clamped at 1.
 
@@ -783,13 +776,13 @@ def test_jiggle_resample_never_extrapolates_past_the_last_sim_sample(tmp_path):
         par=np.array([-1, 0]),
     )
     F, fps, hz = 40, 240.0, 60
-    props = dict(jiggle_d6._FILE_DEFAULTS)
+    props = dict(jiggle_d6.FILE_DEFAULTS)
     props["rate_hz"] = hz
     P = np.zeros((F, 2, 3, 4), np.float32)
     P[:, :, :, :3] = np.eye(3)  # static parent -> constant gravity torque drives the sim
     out = jiggle_d6.apply_jiggle(P, fps, str(bind), props=props, model="pinned")
     assert out.shape == P.shape
-    dev = [_rotvec(out[i, 1, :, :3].astype(np.float64) @ P[i, 1, :, :3].T) for i in range(F)]
+    dev = [rot_vector(out[i, 1, :, :3].astype(np.float64) @ P[i, 1, :, :3].T) for i in range(F)]
     N = int(round(F / fps * hz))
     tail = [i for i in range(F) if (i / fps) * hz >= N - 1 - 1e-9]
     assert len(tail) == 4, tail

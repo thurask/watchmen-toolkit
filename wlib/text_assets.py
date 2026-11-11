@@ -724,7 +724,7 @@ def block_text_assets(h_data, warn=None):
                     )
 
                 try:
-                    rec[1][lang] = wx._maybe_inflate(
+                    rec[1][lang] = wx.maybe_inflate(
                         h_data[cur : cur + size], e.type_name, report=_report
                     )
                 except ValueError as ex:  # past the inflate ceiling

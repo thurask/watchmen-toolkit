@@ -25,15 +25,11 @@ import watchmen_extract as we
 
 import test_ragdoll_rig as trr
 import test_v120_regressions as tv
+from conftest import class_name_record
 
 # ---------------------------------------------------------------------------
 # fixtures
 # ---------------------------------------------------------------------------
-
-
-def _cls(order, name="ModelRes"):
-    raw = name.encode("ascii") + b"\0"
-    return struct.pack(order + "I", len(raw)) + raw
 
 
 def _false_descriptor(order, nv=3000, ib=600):
@@ -51,7 +47,7 @@ def console_skinned_model(with_class=True, false_le=True, nv=8):
     if false_le:
         hdr += _false_descriptor("<")
     if with_class:
-        hdr = _cls(">") + hdr
+        hdr = class_name_record(">") + hdr
     return hdr, stream
 
 
@@ -59,7 +55,9 @@ def console_rigid_model(nv=6):
     """Big-endian rigid prop (G=5, stride 32) with the same tie: WPN_2x4_2H."""
     tris = [(i, i + 1, i + 2) for i in range(nv - 2)]
     ib = len(tris) * 6
-    hdr = _cls(">") + b"\xff" * 4 + struct.pack(">6I", 0, nv, 5, 0, ib, 1) + b"\xff" * 8
+    hdr = (
+        class_name_record(">") + b"\xff" * 4 + struct.pack(">6I", 0, nv, 5, 0, ib, 1) + b"\xff" * 8
+    )
     hdr += _false_descriptor("<")
     vb = bytearray()
     for i in range(nv):
@@ -126,9 +124,12 @@ def _bind_file(tmp_path, rig):
 
 @pytest.mark.parametrize("order", ["<", ">"])
 def test_header_order_is_read_from_the_class_name_length(order):
-    assert char_lib.header_order(_cls(order) + b"\0" * 64) == order
-    assert char_lib.header_order(_cls(order, "ModelEffects(ModelRes)") + b"\0" * 8) == order
-    assert rr.byte_order(_cls(order) + b"\0" * 64) == order
+    assert char_lib.header_order(class_name_record(order) + b"\0" * 64) == order
+    assert (
+        char_lib.header_order(class_name_record(order, "ModelEffects(ModelRes)") + b"\0" * 8)
+        == order
+    )
+    assert rr.byte_order(class_name_record(order) + b"\0" * 64) == order
 
 
 def test_header_order_is_none_when_the_header_does_not_say():
@@ -285,7 +286,9 @@ def test_export_hook_writes_the_same_sidecar_for_a_console_extract(
 
 def test_no_rig_says_why_in_the_log_and_to_the_caller(tmp_path, capsys, monkeypatch):
     monkeypatch.delenv("WATCHMEN_RAGDOLL", raising=False)
-    old_layout = _cls("<") + b"\x07" * 400  # a ModelRes header the Part 2 reader cannot walk
+    old_layout = (
+        class_name_record("<") + b"\x07" * 400
+    )  # a ModelRes header the Part 2 reader cannot walk
     assert rr.build(old_layout) is None and rr.explain(old_layout) == rr.NO_LAYOUT
     assert rr.explain(trr.build_model()) is None
     ex = _tree(tmp_path, old_layout, trr.build_pivot_book(SHEETS))
@@ -421,7 +424,7 @@ def test_a_planar_piece_is_found_by_the_flat_fallback(order, tmp_path, capsys):
     nv, stride = 6, tv.STRIDE[order]
     tris = [(i, i + 1, i + 2) for i in range(nv - 2)]
     ib = len(tris) * 6
-    hdr = _cls(order) + tv.build_model_header(tv.synthetic_nodes(tv.MESH_NODES), order)
+    hdr = class_name_record(order) + tv.build_model_header(tv.synthetic_nodes(tv.MESH_NODES), order)
     hdr += b"\xff" * 4 + struct.pack(order + "6I", 0, nv, 6, 0, ib, 1) + b"\xff" * 8
     vb = bytearray()
     for i in range(nv):
@@ -429,7 +432,7 @@ def test_a_planar_piece_is_found_by_the_flat_fallback(order, tmp_path, capsys):
         struct.pack_into(order + "3f", rec, 0, 0.0988, 0.43 + 0.01 * i, 0.02 * (i % 3) - 0.02)
         vb += rec
     stream = bytes(vb) + b"".join(struct.pack(order + "3H", *t) for t in tris)
-    assert not we._vb_ok(stream, 0, nv, stride, ib, order)
+    assert not we.vb_ok(stream, 0, nv, stride, ib, order)
     assert char_lib.flat_buffer(stream, 0, nv, stride, ib, order) == 0
     base = _write_model(tmp_path, "Large_Head_2", hdr, stream)
     char_lib.dropped_pieces(reset=True)

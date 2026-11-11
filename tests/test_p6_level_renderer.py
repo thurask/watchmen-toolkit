@@ -14,6 +14,7 @@ import pytest
 import level_meta as lm
 
 import test_p1_level as tl
+from conftest import write_bytes
 
 ID = tl.ID
 SCENE, LVL = 0x10, 0x12
@@ -27,7 +28,7 @@ def level(tmp_path_factory):
     n = tl._node
     scene = n(SCENE, "SceneNode", "", None)
     scene += n(LVL, "SceneScope(LoadBlock)", "Lvl", SCENE, 1, assetName="/L/Lvl.fragment")
-    tl._write(base / "L" / "Lvl.scene", tl._fragment(scene))
+    write_bytes(base / "L" / "Lvl.scene", tl._fragment(scene))
     f = n(FOLD, "Folder", "room", "host", 0)
     # an invisible PVSRootNode hides what is below it (0x48e028); a Folder would not
     f += n(HID, "PVSRootNode", "hidden", "host", 1, Visible=False)
@@ -55,7 +56,7 @@ def level(tmp_path_factory):
         BOX2, "CullingBox(PivotNode)", "flat", FOLD, 8, localPos=[0.0, 0.0, 0.0],
         localOrient=ID, width=2.0, height=3.0,
     )  # fmt: skip
-    tl._write(base / "L" / "Lvl.fragment", tl._fragment(f, name="Lvl_Main", singleton=True))
+    write_bytes(base / "L" / "Lvl.fragment", tl._fragment(f, name="Lvl_Main", singleton=True))
     return lm.build_level(str(base / "L" / "Lvl.scene"), "Lvl", "%08x" % LVL, None)
 
 
@@ -101,7 +102,7 @@ def test_a_placement_gets_the_nearest_candidate_cube(level):
 
 def test_nearest_cube_helper_edge_cases():
     rec = {"world": {"pos": [0.0, 0.0, 0.0]}, "fragment": "/a"}
-    assert lm._nearest_cube(rec, []) is None and lm._nearest_cube(rec, None) is None
+    assert lm.nearest_cube(rec, []) is None and lm.nearest_cube(rec, None) is None
     c = lambda uid, x, ok=True, frag="/b": {
         "uid": uid,
         "texture": uid + ".bmp",
@@ -109,11 +110,11 @@ def test_nearest_cube_helper_edge_cases():
         "fragment": frag,
         "world": {"pos": [x, 0.0, 0.0]},
     }
-    assert lm._nearest_cube(rec, [c("n", 1.0, ok=False)]) is None
+    assert lm.nearest_cube(rec, [c("n", 1.0, ok=False)]) is None
     # equal distances: the first in file order stays (the engine compares with <)
-    got = lm._nearest_cube(rec, [c("a", 2.0), c("b", -2.0), c("c", 3.0, frag="/a")])
+    got = lm.nearest_cube(rec, [c("a", 2.0), c("b", -2.0), c("c", 3.0, frag="/a")])
     assert got["uid"] == "a" and got["same_fragment"] is False and got["distance"] == 2.0
-    assert lm._nearest_cube({"fragment": "/a"}, [c("a", 2.0)]) is None  # no position
+    assert lm.nearest_cube({"fragment": "/a"}, [c("a", 2.0)]) is None  # no position
 
 
 def test_model_nodes_carry_the_renderer_flags(level):
@@ -141,12 +142,12 @@ def test_a_level_without_cube_nodes(tmp_path):
     base = tmp_path / "extracted"
     scene = tl._node(SCENE, "SceneNode", "", None)
     scene += tl._node(LVL, "SceneScope(LoadBlock)", "B", SCENE, 1, assetName="/L/B.fragment")
-    tl._write(base / "L" / "B.scene", tl._fragment(scene))
+    write_bytes(base / "L" / "B.scene", tl._fragment(scene))
     frag = tl._node(
         0x30, "Model", "m", "host", 0, localPos=[0.0, 0.0, 0.0], localOrient=ID,
         modelNames=["/a.model"],
     )  # fmt: skip
-    tl._write(base / "L" / "B.fragment", tl._fragment(frag))
+    write_bytes(base / "L" / "B.fragment", tl._fragment(frag))
     j = lm.build_level(str(base / "L" / "B.scene"), "B", "%08x" % LVL, None)
     assert j["cube_maps"] == [] and j["models"][0]["cube_map"] is None
     assert j["culling"]["boxes"] == []

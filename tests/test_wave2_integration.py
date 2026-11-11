@@ -3,10 +3,7 @@ fragment key that had no name."""
 
 import pytest
 import json
-import os
-import sys
 
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wlib"))
 import anim_meta
 import characters_export as ce
 import face_rule

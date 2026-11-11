@@ -29,11 +29,11 @@ def _notes(ex):
 
 # ------------------------------------------------------------------- strict zips
 def test_identity_check_rejects_a_world_quat_of_the_wrong_length():
-    assert lm._is_identity({"pos": [0, 0, 0], "quat": [0.0, 0.0, 0.0, 1.0]}) is True
+    assert lm.is_identity({"pos": [0, 0, 0], "quat": [0.0, 0.0, 0.0, 1.0]}) is True
     with pytest.raises(ValueError, match="zip"):
-        lm._is_identity({"pos": [0, 0, 0], "quat": [0.0, 0.0, 0.0]})
+        lm.is_identity({"pos": [0, 0, 0], "quat": [0.0, 0.0, 0.0]})
     with pytest.raises(ValueError, match="zip"):
-        lm._is_identity({"pos": [0, 0, 0], "quat": [0.0, 0.0, 0.0, 1.0, 0.0]})
+        lm.is_identity({"pos": [0, 0, 0], "quat": [0.0, 0.0, 0.0, 1.0, 0.0]})
 
 
 def test_root_motion_sample_rejects_keys_of_different_widths():
@@ -46,7 +46,7 @@ def test_nearest_cube_keeps_plain_zip_for_stored_positions():
     # a malformed stored position (not 3 values) must not stop the level export
     rec = {"world": {"pos": [0.0, 0.0, 0.0]}, "fragment": "f"}
     cube = {"uid": "u", "world": {"pos": [3.0, 4.0]}, "candidate_at_load": True}
-    assert lm._nearest_cube(rec, [cube])["distance"] == 5.0
+    assert lm.nearest_cube(rec, [cube])["distance"] == 5.0
 
 
 def test_reaction_rows_compare_only_the_newest_attacks():
@@ -197,7 +197,7 @@ def test_bind_readers_note_the_bind_file(tmp_path):
         am.skeletons(str(tmp_path))
     assert "bind skeleton %s" % bind in _notes(ei.value)
     with pytest.raises(Exception) as ei:
-        am._ContactCheck(str(tmp_path))._load(str(tmp_path / "RSH_a.animation"))
+        am.ContactCheck(str(tmp_path))._load(str(tmp_path / "RSH_a.animation"))
     n = _notes(ei.value)
     assert "bind skeleton %s" % bind in n and "RSH_a.animation" in n
 
@@ -205,19 +205,19 @@ def test_bind_readers_note_the_bind_file(tmp_path):
 # --------------------------------------------------------------------- match
 def test_save_values_by_type():
     f = struct.unpack("<I", struct.pack("<f", 1.5))[0]
-    assert lm._save_value("truth", [1], 0) == (True, 1)
-    assert lm._save_value("integer", [0xFFFFFFFF], 0) == (-1, 1)
-    assert lm._save_value("number", [f], 0) == (1.5, 1)
-    assert lm._save_value("vector", [f, f, f, 9], 0) == ([1.5, 1.5, 1.5], 3)
-    assert lm._save_value("quaternion", [f] * 4, 0) == ([1.5] * 4, 4)
-    assert lm._save_value("Entity", [0xAB], 0) == ("000000ab", 1)
+    assert lm.save_value("truth", [1], 0) == (True, 1)
+    assert lm.save_value("integer", [0xFFFFFFFF], 0) == (-1, 1)
+    assert lm.save_value("number", [f], 0) == (1.5, 1)
+    assert lm.save_value("vector", [f, f, f, 9], 0) == ([1.5, 1.5, 1.5], 3)
+    assert lm.save_value("quaternion", [f] * 4, 0) == ([1.5] * 4, 4)
+    assert lm.save_value("Entity", [0xAB], 0) == ("000000ab", 1)
     raw = struct.unpack("<2I", b"abc\x00\x00\x00\x00\x00")
-    assert lm._save_value("string", [2, *raw], 0) == ("abc", 3)
-    assert lm._save_value("list(list(integer))", [2, 1, 5, 0], 0) == ([[5], []], 4)
+    assert lm.save_value("string", [2, *raw], 0) == ("abc", 3)
+    assert lm.save_value("list(list(integer))", [2, 1, 5, 0], 0) == ([[5], []], 4)
     with pytest.raises(ValueError, match="list count"):
-        lm._save_value("list(truth)", [99], 0)
+        lm.save_value("list(truth)", [99], 0)
     with pytest.raises(ValueError, match="mystery"):
-        lm._save_value("mystery", [0], 0)
+        lm.save_value("mystery", [0], 0)
 
 
 def test_damage_slots_by_case():
@@ -276,17 +276,17 @@ def test_volume_shapes_and_child_firing():
         n.props.update(props)
         return n
 
-    assert lm._child_when(node("TriggerActionDelay", m_ndelaynumber2=0.5), 2) == ("delay", 0.5)
-    assert lm._child_when(node("TriggerActionSound", _tchildrenafter=True), 0)[0] == "after_sound"
-    assert lm._child_when(node("TriggerActionSound"), 0)[0] == "immediate"
-    assert lm._child_when(node("TriggerActionCamera", _iaction=0), 0)[0] == "tour_refire"
-    assert lm._child_when(node("TriggerActionCamera", _iaction=1), 0)[0] == "immediate"
+    assert lm.child_when(node("TriggerActionDelay", m_ndelaynumber2=0.5), 2) == ("delay", 0.5)
+    assert lm.child_when(node("TriggerActionSound", _tchildrenafter=True), 0)[0] == "after_sound"
+    assert lm.child_when(node("TriggerActionSound"), 0)[0] == "immediate"
+    assert lm.child_when(node("TriggerActionCamera", _iaction=0), 0)[0] == "tour_refire"
+    assert lm.child_when(node("TriggerActionCamera", _iaction=1), 0)[0] == "immediate"
 
 
 def test_button_code_names_read_the_bundled_table_once():
     first = lm.input_code_name("KEYBOARD_MOUSE", 257)
     assert first is not None and first == lm.input_code_name("KEYBOARD_MOUSE", 257)
-    assert lm._input_codes() is lm._input_codes()
+    assert lm.input_codes() is lm.input_codes()
 
 
 def test_bind_npz_round_trip_still_reads(tmp_path):

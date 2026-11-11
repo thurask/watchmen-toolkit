@@ -15,7 +15,7 @@ is decoded as a strip, watchmen_extract.index_triangles).  Positions are kept
 part-local, as stored (part_space=True).
 
 Fallback: the descriptor scan (find_descriptors, then the first
-stream offset where _vb_ok and _ib_ok hold, then char_lib.flat_buffer for a
+stream offset where vb_ok and ib_ok hold, then char_lib.flat_buffer for a
 planar piece), used only for a model whose header path does not apply or for a
 geometry descriptor the header does not list -- and every such submesh is
 logged ("note: <model> sub<i>: header path not applicable (<why>); scanned").
@@ -258,11 +258,11 @@ def _scan_one(ms, off, nv, stride, ib, order):
     while c <= min(off + SCAN_WINDOW, hi):
         # require a CLEAN index buffer too: a false-positive VB (X360
         # TwilightLadyHair / rorschachspots) sits ~4 bytes before the real one,
-        # passes _vb_ok, but has a ~50% repeated-index IB.
+        # passes vb_ok, but has a ~50% repeated-index IB.
         if (
-            we._sane(struct.unpack_from(order + "f", ms, c)[0])
-            and we._vb_ok(ms, c, nv, stride, ib, order)
-            and we._ib_ok(ms, c, nv, stride, ib, order)
+            we.is_finite_float(struct.unpack_from(order + "f", ms, c)[0])
+            and we.vb_ok(ms, c, nv, stride, ib, order)
+            and we.ib_ok(ms, c, nv, stride, ib, order)
         ):
             return c, "strict"
         c += 1
@@ -378,7 +378,9 @@ def load_submeshes(
                     continue
                 path = "scan" if how == "strict" else "flat"
                 restored, notes = [], []
-                v, _, uvs = we._decode_sub(ms, vbo, nv, stride, order == ">", restored, notes)
+                v, _, uvs = we.decode_mesh_vertices(
+                    ms, vbo, nv, stride, order == ">", restored, notes
+                )
                 V = np.array(v, float)
                 ibo = vbo + nv * stride
                 idx_tris = [

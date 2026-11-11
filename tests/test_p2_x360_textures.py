@@ -14,14 +14,11 @@ numbers are in the docstrings of wlib/watchmen_extract.py):
 """
 
 import json
-import os
 import struct
-import sys
 
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "wlib"))
-import watchmen_extract as we  # noqa: E402
+import watchmen_extract as we
 
 np = pytest.importorskip("numpy")
 pytest.importorskip("PIL")
@@ -74,10 +71,10 @@ def _x360_tile(linear, we_, he, unit, xo=0, yo=0):
     out = bytearray(tw * th * unit)
     for y in range(he):
         for x in range(we_):
-            d = we._xg2d(x + xo, y + yo, tw, unit) * unit
+            d = we.xg2d_offset(x + xo, y + yo, tw, unit) * unit
             s = (y * we_ + x) * unit
             out[d : d + unit] = linear[s : s + unit]
-    return we._bswap16(bytes(out))
+    return we.bswap16(bytes(out))
 
 
 def _pngs(d):
@@ -138,11 +135,11 @@ def test_format_8_stays_a_console_format():
 
 def test_dxt3a_is_four_bits_per_texel_low_nibble_first():
     blk = bytes([0x10, 0x32, 0x54, 0x76, 0x98, 0xBA, 0xDC, 0xFE])
-    img = we._decode_one_layer(blk + bytes([0xFF] * 8), 8, 8, 4)
+    img = we.decode_one_layer(blk + bytes([0xFF] * 8), 8, 8, 4)
     assert img.shape == (4, 8) and img.dtype == np.uint8
     assert (img[:, :4].reshape(-1) == np.arange(16) * 17).all()
     assert (img[:, 4:] == 255).all()
-    assert we._decode_one_layer(blk, 8, 8, 4) is None  # short data
+    assert we.decode_one_layer(blk, 8, 8, 4) is None  # short data
 
 
 # ---------------------------------------------------------------------------
@@ -198,7 +195,7 @@ def test_x360_fourth_layer_in_format_8_is_written(tmp_path):
         ("2_specMap_128x128_DXT1.png", spec, 5),
         ("3_height_128x128_DXT3A.png", size, 8),
     ):
-        want = we._decode_one_layer(lin, en, 128, 128)
+        want = we.decode_one_layer(lin, en, 128, 128)
         assert (_px(tmp_path / "t" / name) == want).all(), name
 
 
@@ -262,9 +259,9 @@ def test_x360_animation_frames_keep_both_layers_and_pc_names(tmp_path):
     )
     for f in range(3):
         got = _px(tmp_path / "t" / ("frame%d_0_diffuse_16x16_DXT1.png" % f))
-        assert (got == we._decode_one_layer(small[f], 5, 16, 16)).all()
+        assert (got == we.decode_one_layer(small[f], 5, 16, 16)).all()
         got = _px(tmp_path / "t" / ("frame%d_1_glow_128x128_DXT1.png" % f))
-        assert (got == we._decode_one_layer(big[f], 5, 128, 128)).all()
+        assert (got == we.decode_one_layer(big[f], 5, 128, 128)).all()
 
 
 _FACE = [0xF800, 0x07E0, 0x001F, 0xFFE0, 0xF81F, 0x07FF]
@@ -278,7 +275,7 @@ def _x360_cube(w=64, mips=7):
     lvl0 = b"".join(_x360_tile(_dxt1([_FACE[k]] * (bw * bw), bw, bw), bw, bw, 8) for k in range(6))
     per_face = we._x360_layer_bytes(5, w, w, mips)
     n = (per_face * 6 - len(lvl0)) // 8
-    rest = we._bswap16(_dxt1([0x8410] * n, n, 1))
+    rest = we.bswap16(_dxt1([0x8410] * n, n, 1))
     stream = lvl0 + rest
     assert len(stream) == per_face * 6
     hdr = _header(
@@ -358,7 +355,7 @@ def _ps3_seg(data, fmt, mips, w, h, cube=0):
 
 def _ps3_cube(w=8, mips=4, pad=128):
     bw = w // 4
-    chain = we._chain_bytes(5, w, w, mips)
+    chain = we.chain_bytes(5, w, w, mips)
     data = b""
     for k in range(6):
         face = _dxt1([_FACE[k]] * (bw * bw), bw, bw)
@@ -371,7 +368,7 @@ def _ps3_cube(w=8, mips=4, pad=128):
 def test_ps3_cube_writes_six_faces_from_128_byte_aligned_chains(tmp_path):
     """Was: one PNG (face 0) and no word about the other five."""
     hdr, stream = _ps3_cube()
-    assert we._chain_bytes(5, 8, 8, 4) == 56  # so every face but the last is padded
+    assert we.chain_bytes(5, 8, 8, 4) == 56  # so every face but the last is padded
     ok, log = _carve(stream, hdr, tmp_path / "t")
     assert ok and log == ["Hall_cubemap: PS3 1 segs -> t/ (6 png)"]
     assert _pngs(tmp_path / "t") == ["face%d_0_diffuse_8x8_DXT1.png" % k for k in range(6)]
@@ -476,8 +473,8 @@ def test_x360_normal_in_the_packed_tail_is_x_first_without_a_half_swap(w, h, xo,
     pc = _rand_blocks(bw * bh, 16, w + h)
     xfirst = b"".join(pc[i + 8 : i + 16] + pc[i : i + 8] for i in range(0, len(pc), 16))
     raw = _x360_tile(xfirst, bw, bh, 16, xo, yo)
-    a = we._decode_one_layer(pc, 9, w, h)
-    b = we._x360_base_level(raw, 10, w, h)
+    a = we.decode_one_layer(pc, 9, w, h)
+    b = we.x360_base_level(raw, 10, w, h)
     assert np.array_equal(np.asarray(a), np.asarray(b))
 
 
@@ -489,12 +486,12 @@ def test_x360_arrowmore_base_is_its_own_tiled_surface_at_element_28():
     tile = bytearray(32 * 32 * 8)
     for y in range(6):
         for x in range(4):
-            d = (28 + we._xg2d(x, y, 32, 8)) * 8
+            d = (28 + we.xg2d_offset(x, y, 32, 8)) * 8
             tile[d : d + 8] = lin[(y * 4 + x) * 8 : (y * 4 + x + 1) * 8]
-    raw = we._bswap16(bytes(tile))
+    raw = we.bswap16(bytes(tile))
     assert we._x360_packed_offset("blk", 8, 16, 24, 4, 6) == (0, 0, 28)
-    a = we._decode_one_layer(lin, 5, 16, 24)
-    b = we._x360_base_level(raw, 5, 16, 24)
+    a = we.decode_one_layer(lin, 5, 16, 24)
+    b = we.x360_base_level(raw, 5, 16, 24)
     assert np.array_equal(np.asarray(a), np.asarray(b))
     # any other packed DXT1 base keeps its place in the tile
     assert we._x360_packed_offset("blk", 8, 16, 32, 4, 8) == (4, 0, None)

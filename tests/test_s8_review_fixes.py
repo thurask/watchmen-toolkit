@@ -20,7 +20,6 @@
 
 Synthetic fixtures only."""
 
-import inspect
 import json
 import os
 import re
@@ -31,7 +30,6 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import bake_v4
 import characters_export as ce
 import jiggle_d6
@@ -94,8 +92,27 @@ def test_characters_writes_every_cached_bake_at_its_stored_rate(tmp_path):
     np.savez(old, pal=np.zeros((21, 1, 3, 4), np.float32), dur=np.float32(2.0))
     with np.load(old) as d:
         assert ce.bake_fps(d) == pytest.approx(10.0)
-    src = inspect.getsource(ce.export)
-    assert "fps = bake_fps(d)" in src and "speed_mult" not in src
+
+
+def test_export_writes_and_jiggles_each_clip_at_its_stored_rate(export_env, rig, monkeypatch):
+    """The stored rate (15) is used, not (frames - 1) / duration and no multiplier."""
+    ex, out, calls = export_env
+    frames = len(rig.palette)
+
+    def bake_cache(key, bind, e, o, budget=None):
+        cdir = os.path.join(o, "_bake", key)
+        os.makedirs(cdir, exist_ok=True)
+        f = os.path.join(cdir, "RSH_COM_MOV_run_cycle.npz")
+        np.savez(f, pal=rig.palette, dur=np.float32((frames - 1) / 10.0), fps=np.float32(15.0))
+        return 1, 0
+
+    monkeypatch.setattr(ce, "bake_cache", bake_cache)
+    got = []
+    monkeypatch.setattr(vg, "write_glb", lambda parts, anims, *a, **k: got.append(anims))
+    ce.export(str(ex), str(out), naz="none.naz", only="Heavy")
+    ((nm, _pal, fps),) = got[0]
+    assert nm == "RSH_COM_MOV_run_cycle" and fps == pytest.approx(15.0)
+    assert [k["fps"] for k in calls["jiggle_kw"]] == [pytest.approx(15.0)]
 
 
 def test_a_jiggle_memo_is_used_only_at_the_rate_it_was_solved_at(tmp_path):
@@ -244,9 +261,6 @@ def test_a_glb_written_with_other_options_is_rewritten(tmp_path, capsys):
     assert ce.glb_is_current(str(out), None, a, str(tmp_path))
     assert not ce.glb_is_current(str(out), None, b, str(tmp_path))
     assert "written with other parts" in capsys.readouterr().out
-    src = inspect.getsource(ce.export)
-    assert "glb_is_current(out, baked, opts, outdir)" in src
-    assert "record_glb_options(out, outdir, opts)" in src
 
 
 def test_faces_keep_a_head_only_with_the_same_options_and_write_atomically(tmp_path, monkeypatch):
@@ -334,27 +348,48 @@ def test_an_interrupted_write_glb_leaves_no_glb(tmp_path, rig, monkeypatch):
     assert not (tmp_path / "c.glb").exists()
 
 
-def test_characters_and_faces_hand_write_glb_the_final_path():
+def test_characters_hand_write_glb_the_final_path(export_env, monkeypatch):
+    """The temporary file and the rename are write_glb's own (the tests above); the
+    export passes it the final path and leaves nothing else behind."""
+    ex, out, _calls = export_env
+    real, paths = vg.write_glb, []
+
+    def spy(parts, anims, path, *a, **k):
+        paths.append(str(path))
+        return real(parts, anims, path, *a, **k)
+
+    monkeypatch.setattr(vg, "write_glb", spy)
+    ce.export(str(ex), str(out), naz="none.naz", only="Heavy")
+    assert paths == [str(out / "Heavy" / "Heavy.glb")]
+    assert sorted(p.name for p in (out / "Heavy").iterdir()) == ["Heavy.glb"]
+
+
+def test_faces_hand_write_glb_the_final_path(faces_env):
     import face_export
 
-    for mod in (ce, face_export):
-        src = inspect.getsource(mod)
-        assert 'out + ".tmp"' not in src and "os.replace(out" not in src
+    assert face_export.export(str(faces_env["ex"]), str(faces_env["out"])) == 0
+    assert faces_env["written"] == [str(faces_env["out"] / "Head1.glb")]
 
 
 # ------------------------------------------------------------- M3 / M4 bakes
-def test_the_baker_reads_only_the_bank_it_is_given(tmp_path):
+def test_the_baker_reads_only_the_bank_it_is_given(tmp_path, monkeypatch):
+    import pickle
+
     assert not hasattr(bake_v4, "_bank_lookup")
-    src = inspect.getsource(bake_v4)
-    assert "import pickle" not in src and "pickle.load" not in src and "clipbank" not in src
+
+    def no_pickle(*a, **k):
+        raise AssertionError("the baker read a pickled clip bank")
+
+    monkeypatch.setattr(pickle, "load", no_pickle)
+    monkeypatch.setattr(pickle, "loads", no_pickle)
+    (tmp_path / "clipbank.pkl").write_bytes(b"")  # a bank file beside the run is not read
+    monkeypatch.chdir(tmp_path)
     bind = _bind(tmp_path)
     clip = _clip([("Bip", 3, ((0, 0.5, 0), I4)), ("Hand", 3, ((0, 0, 0), I4))])
     pal, _dur = bake_v4.bake("c", 1, bind=bind, bank={"c": clip})
     assert pal.shape[1] == 2
     with pytest.raises(FileNotFoundError):  # not in the bank: the archive, which is missing
         bake_v4.bake("other", 1, bind=bind, bank=None, naz=str(tmp_path / "no.naz"))
-    for fn in (ce.bake_cache, ce._face_attach):
-        assert "_bank_lookup" not in inspect.getsource(fn)
 
 
 def test_a_cached_bake_records_its_bind_and_clip(tmp_path, monkeypatch):
@@ -425,17 +460,31 @@ def _game_essentials(monkeypatch, root, k_):
 
 def test_jiggle_constants_come_from_the_extract_only(tmp_path, monkeypatch):
     seen = _game_essentials(monkeypatch, tmp_path, 300.0)
-    assert jiggle_d6.load_world_props(None) == jiggle_d6._FILE_DEFAULTS
+    assert jiggle_d6.load_world_props(None) == jiggle_d6.FILE_DEFAULTS
     assert seen == []  # no folder next to the toolkit is read
     W = jiggle_d6.load_world_props(str(tmp_path))
     assert W["breast"]["k"] == 300.0 and len(seen) == 1
     sig = jiggle_d6.cache_signature()
-    assert jiggle_d6.cache_signature(props=dict(jiggle_d6._FILE_DEFAULTS)) == sig
+    assert jiggle_d6.cache_signature(props=dict(jiggle_d6.FILE_DEFAULTS)) == sig
     assert jiggle_d6.cache_signature(props=W) != sig
     assert ce.jiggle_cache_dir("c", None, W) != ce.jiggle_cache_dir("c", None)
     assert ce.characters_options(world=W) != ce.characters_options()
-    src = inspect.getsource(ce.export)
-    assert "load_world_props(extract_out)" in src and "props=world" in src
+
+
+def test_export_jiggles_with_the_constants_of_its_extract(export_env, monkeypatch):
+    import copy
+
+    ex, out, calls = export_env
+    W = copy.deepcopy(jiggle_d6.FILE_DEFAULTS)
+    W["breast"]["k"] = 300.0
+    seen = []
+    monkeypatch.setattr(jiggle_d6, "load_world_props", lambda e: seen.append(e) or W)
+    ce.export(str(ex), str(out), naz="none.naz", only="Heavy", jiggle_model="pinned")
+    assert seen == [str(ex)]
+    assert [k["props"] for k in calls["jiggle_kw"]] == [W]
+    memo = ce.jiggle_cache_dir(str(out / "_bake" / "large"), "pinned", W)
+    assert os.path.isfile(os.path.join(memo, "clip_test.npz"))
+    assert memo != ce.jiggle_cache_dir(str(out / "_bake" / "large"), "pinned")
 
 
 def test_a_game_essentials_fragment_that_cannot_be_read_is_reported(tmp_path, monkeypatch, capsys):
@@ -449,7 +498,7 @@ def test_a_game_essentials_fragment_that_cannot_be_read_is_reported(tmp_path, mo
         raise ValueError("bad header")
 
     monkeypatch.setattr(kapow_json, "load_fragment", bad)
-    assert jiggle_d6.load_world_props(str(tmp_path)) == jiggle_d6._FILE_DEFAULTS
+    assert jiggle_d6.load_world_props(str(tmp_path)) == jiggle_d6.FILE_DEFAULTS
     out = capsys.readouterr().out
     assert out.count("WARNING: GameEssentials.fragment not read (bad header)") == 1
     assert "shipped PhysicsWorld values used" in out
@@ -476,9 +525,27 @@ def test_char_jiggles_with_the_constants_of_its_extract(tmp_path, monkeypatch):
         extract_root=str(tmp_path),
     )
     assert got["props"]["breast"]["k"] == 250.0
-    import watchmen
 
-    assert 'kw["extract_root"] = extract_out_of(frag)' in inspect.getsource(watchmen.main)
+
+@pytest.mark.parametrize("inside", [True, False])
+def test_the_char_command_names_the_extract_a_fragment_lies_in(tmp_path, monkeypatch, inside):
+    import watchmen
+    import watchmenlib
+
+    d = tmp_path / "ex" / "extracted" / "Frags" if inside else tmp_path / "loose"
+    d.mkdir(parents=True)
+    frag = d / "X.fragment.json"
+    frag.write_text("{}")
+    (tmp_path / "g.naz").write_bytes(b"")
+    called = {}
+    monkeypatch.setattr(watchmenlib, "build_variant_glb", lambda f, v, o, **kw: called.update(kw))
+    argv = ["w", "char", str(frag), "V", "o.glb", "binds", "bake", str(tmp_path / "g.naz")]
+    assert watchmen.main(argv + ["--no-meta", "--jiggle-model", "solver"]) == 0
+    assert called["jiggle"] is True and called["jiggle_model"] == "solver"
+    if inside:
+        assert called["extract_root"] == str(tmp_path / "ex")
+    else:
+        assert "extract_root" not in called
 
 
 # ------------------------------------------------------------- M6 folders
@@ -581,7 +648,7 @@ def test_a_sheet_json_that_is_not_written_is_reported(tmp_path, monkeypatch, cap
         raise ValueError("bad sheet")
 
     monkeypatch.setattr(we, "texture_sheet", boom)
-    we._write_sheet_json(b"", tmp_path / "T")
+    we.write_sheet_json(b"", tmp_path / "T")
     said = capsys.readouterr().out
     assert "WARNING: texture T: sheet.json not written (ValueError: bad sheet)" in said
     we._mark_texture_decode(tmp_path / "missing" / "T2", ["layer 1: no data"])
@@ -604,7 +671,7 @@ def _untile_reference(data, we_, he, bpe, alw=None, yoff=0):
     out = bytearray(we_ * he * bpe)
     for y in range(he):
         for x in range(we_):
-            s = we._xg2d(x, y + yoff, alw, bpe) * bpe
+            s = we.xg2d_offset(x, y + yoff, alw, bpe) * bpe
             d = (y * we_ + x) * bpe
             if s + bpe <= len(data):
                 out[d : d + bpe] = data[s : s + bpe]

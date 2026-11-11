@@ -19,15 +19,12 @@ inferred is shown like a fact.
 Synthetic fixtures only (those of the earlier passes are reused)."""
 
 import json
-import os
-import sys
 
 import pytest
 
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wlib"))
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import kapow_fragment as kf
 import kapow_json as kj
+import kapow_props
 import watchmen_extract as wx
 
 import test_formats_v2 as tf
@@ -74,7 +71,7 @@ def test_extract_counts_every_kind_and_names_what_is_not_decoded(tmp_path):
     z = pr.zlib.compress
     extra = [
         # a .grass whose bytes are no property bag, and a kind nothing decodes
-        ("/art/g/Bad.grass", wx._name_hash("grass"), z(b"\x07" * 37), None),
+        ("/art/g/Bad.grass", kapow_props.name_hash("grass"), z(b"\x07" * 37), None),
         ("/art/x/Thing.newkind", 0x12345678, z(b"\x01\x02\x03\x04" * 5), None),
     ]
     ex, log = _extract_log(tmp_path, extra)
@@ -98,7 +95,7 @@ def test_misc_summary_counts_an_asset_stored_in_two_blocks_once(tmp_path, capsys
     d = tmp_path / "files" / "derived_pc" / "levels"
     d.mkdir(parents=True)
     for nm, spelling in (("a", "/L/Way.fragment"), ("b", "/L/way.fragment")):
-        h, s = tf._block([(spelling, wx._name_hash("fragment"), frag, None)])
+        h, s = tf._block([(spelling, kapow_props.name_hash("fragment"), frag, None)])
         (d / (nm + ".block_h_z")).write_bytes(h)
         (d / (nm + ".block_s_z")).write_bytes(s)
     args = [str(tmp_path / "files"), "-o", str(tmp_path / "out"), "--no-files", "--no-text"]
@@ -122,7 +119,7 @@ def glb_on(monkeypatch):
     monkeypatch.setitem(wx._RIG, "on", True)
     monkeypatch.setitem(wx._RIG, "attrs", True)
     assert wx._rig_load()
-    monkeypatch.setattr(wx, "_write_obj_mtl", lambda *a: None)
+    monkeypatch.setattr(wx, "write_obj_mtl", lambda *a: None)
 
 
 def _decode(tmp_path, h, s, **kw):
@@ -150,7 +147,7 @@ def test_model_without_glb_says_why_in_its_sidecar(tmp_path, glb_on, monkeypatch
 
 def test_without_glb_option_the_sidecar_has_no_marker(tmp_path, monkeypatch):
     monkeypatch.setitem(wx._RIG, "on", False)
-    monkeypatch.setattr(wx, "_write_obj_mtl", lambda *a: None)
+    monkeypatch.setattr(wx, "write_obj_mtl", lambda *a: None)
     meta, st, logs = _decode(tmp_path, *pm.build("<", "part2"))
     assert "glb" not in meta and st["glb"] is None
     # a caller that passes no dict finds the same facts in MODEL_STATUS
@@ -177,7 +174,7 @@ def test_scan_decode_that_misses_submeshes_is_marked(tmp_path, glb_on, monkeypat
 
 def test_complete_scan_decode_is_not_marked_partial(tmp_path, monkeypatch):
     monkeypatch.setenv("WATCHMEN_CONSOLE_MODELS", "scan")
-    monkeypatch.setattr(wx, "_write_obj_mtl", lambda *a: None)
+    monkeypatch.setattr(wx, "write_obj_mtl", lambda *a: None)
     meta, st, logs = _decode(tmp_path, *pm.build(">", "part2", console="x360"))
     assert meta["mesh_source"] == "descriptor scan"
     assert "not_decoded" not in meta and "submeshes" not in meta and st["partial"] is None

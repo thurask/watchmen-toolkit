@@ -8,11 +8,6 @@ Music cues         change_on_cue = raw CRC of a cue name (0x423ca1), 0 = at once
                    1 = next cue of any name
 Synthetic fixtures only (the builders of test_audio_v2)."""
 
-import os
-import sys
-
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wlib"))
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import anim_meta as am
 import sound_meta as sm
 import watchmen_extract as wx

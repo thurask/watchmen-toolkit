@@ -6,13 +6,8 @@ Run-time overrides  AIBrainNode values written over the definition (0x4898f6, 0x
                     0x934630, 0x934650)
 Synthetic fixtures only (the builders of test_nav_data)."""
 
-import os
-import sys
-
 import pytest
 
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wlib"))
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import nav_data as nd
 import test_nav_data as tn
 

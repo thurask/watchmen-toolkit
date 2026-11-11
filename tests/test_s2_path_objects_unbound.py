@@ -17,6 +17,7 @@ Synthetic levels only (the level of test_p1_level): no game files.
 
 import level_meta as lm
 import test_p1_level as t1
+from conftest import write_bytes
 
 level = t1.level  # the module's synthetic level: list [door2, null, door1], door3 unlisted
 
@@ -61,10 +62,10 @@ def test_a_level_without_an_ai_world_binds_nothing(tmp_path):
     scene += t1._node(
         t1.LVL, "SceneScope(LoadBlock)", "Bare", t1.SCENE, 1, assetName="/L/Bare.fragment"
     )
-    t1._write(base / "L" / "Bare.scene", t1._fragment(scene))
+    write_bytes(base / "L" / "Bare.scene", t1._fragment(scene))
     lvl = t1._path_object(0x40, "gate", 1, [0.0, 0.0, 0.0], [0.0, 0.0, 1.0])
     lvl += t1._path_object(0x50, "", 2, [5.0, 0.0, 0.0], [5.0, 0.0, 1.0])
-    t1._write(base / "L" / "Bare.fragment", t1._fragment(lvl))
+    write_bytes(base / "L" / "Bare.fragment", t1._fragment(lvl))
     j = lm.build_level(str(base / "L" / "Bare.scene"), "Bare", "%08x" % t1.LVL, None)
     assert j["level"]["ai_world"] is None
     assert [p["bound_at_run_time"] for p in j["path_objects"]] == [False, False]
@@ -78,7 +79,7 @@ def test_a_level_without_path_objects_counts_none(tmp_path):
     scene += t1._node(
         t1.LVL, "SceneScope(LoadBlock)", "Bare", t1.SCENE, 1, assetName="/L/Bare.fragment"
     )
-    t1._write(base / "L" / "Bare.scene", t1._fragment(scene))
-    t1._write(base / "L" / "Bare.fragment", t1._fragment(t1._node(0x30, "Folder", "x", "host")))
+    write_bytes(base / "L" / "Bare.scene", t1._fragment(scene))
+    write_bytes(base / "L" / "Bare.fragment", t1._fragment(t1._node(0x30, "Folder", "x", "host")))
     j = lm.build_level(str(base / "L" / "Bare.scene"), "Bare", "%08x" % t1.LVL, None)
     assert j["path_objects"] == [] and j["counts"]["path_objects_unbound"] == 0

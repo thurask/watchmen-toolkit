@@ -21,10 +21,11 @@ import pytest
 import characters_export as ce
 import jiggle_d6
 import jiggle_pass
+from conftest import joint_origin, rot_vector
 
 LEVER = np.array([0.0, 0.05, 0.1225])  # parent -> bone, in the parent frame (|r| = 0.1323)
 PARENT_ORIGIN = np.array([0.0, 1.0, 0.0])
-PROPS = dict(jiggle_d6._FILE_DEFAULTS)
+PROPS = dict(jiggle_d6.FILE_DEFAULTS)
 
 
 def _bind(tmp_path, name="BreastL", lever=LEVER):
@@ -47,7 +48,7 @@ def _palettes(rotvecs, shift=None):
     P = np.zeros((F, 3, 3, 4))
     P[:, 0, :, :3] = np.eye(3)
     for f in range(F):
-        R = jiggle_d6._rotv2m(np.asarray(rotvecs[f], float))
+        R = jiggle_d6.rotvec_to_mat(np.asarray(rotvecs[f], float))
         t = PARENT_ORIGIN - R @ PARENT_ORIGIN + (shift[f] if shift is not None else 0.0)
         for k in (1, 2):
             P[f, k, :, :3] = R
@@ -55,22 +56,11 @@ def _palettes(rotvecs, shift=None):
     return P
 
 
-def _rotvec(R):
-    a = float(np.arccos(np.clip((np.trace(R) - 1.0) / 2.0, -1.0, 1.0)))
-    if a < 1e-12:
-        return np.zeros(3)
-    return a * np.array([R[2, 1] - R[1, 2], R[0, 2] - R[2, 0], R[1, 0] - R[0, 1]]) / (2 * np.sin(a))
-
-
 def _dev(out, f):
     """Deviation of the jiggle bone from its parent at frame f, parent frame, degrees."""
     Rp = out[f, 1, :, :3].astype(np.float64)
     Rk = out[f, 2, :, :3].astype(np.float64)
-    return np.degrees(_rotvec(Rp.T @ Rk))
-
-
-def _origin(P, k, tb):
-    return np.einsum("fab,b->fa", P[:, k, :, :3].astype(np.float64), tb[k]) + P[:, k, :, 3]
+    return np.degrees(rot_vector(Rp.T @ Rk))
 
 
 def _solver(P, fps, bind, **kw):
@@ -276,7 +266,7 @@ def _anchor_path(n):
     rv[n // 2 :] += [0.0, 0.3, -0.4]
     rv[-n // 5 :] = rv[-n // 5]
     x[-n // 5 :] = x[-n // 5]
-    return x, [jiggle_d6._m2q(jiggle_d6._rotv2m(r).tolist()) for r in rv]
+    return x, [jiggle_d6.mat_to_quat(jiggle_d6.rotvec_to_mat(r).tolist()) for r in rv]
 
 
 @pytest.mark.parametrize("k,d,lever", [(200.0, 0.8, LEVER), (70.0, 0.8, [-0.1008, 0.0, 0.0123])])
@@ -298,7 +288,7 @@ def test_soft_limit_joint_matches_the_frozen_reference(k, d, lever):
         assert np.allclose(sim.wb, ref.wB, atol=1e-7, rtol=0)
         assert np.allclose(sim.xa, ref.xA, atol=1e-12, rtol=0)
         rel = _q2m(ref.qA).T @ _q2m(ref.qB)
-        moved = max(moved, float(np.linalg.norm(_rotvec(rel))))
+        moved = max(moved, float(np.linalg.norm(rot_vector(rel))))
     assert moved > math.radians(5.0)  # the path really exercises the joint
 
 
@@ -306,7 +296,7 @@ def test_soft_row_coefficients_are_the_dll_formulas():
     """0x10227cde / 0x102068b0: gamma = 1/(dt (d + k dt)), erp = k dt/(d + k dt), softness
     scaled by the cube's inertia about its CENTRE (0.1 * 0.8^2 / 6), bias 0.7."""
     sim = jiggle_d6.SoftLimitJoint(200.0, 0.8, LEVER)
-    sim.qb = jiggle_d6._m2q(jiggle_d6._rotv2m(np.array([0.0, 0.0, 0.08])).tolist())
+    sim.qb = jiggle_d6.mat_to_quat(jiggle_d6.rotvec_to_mat(np.array([0.0, 0.0, 0.08])).tolist())
     cone = [r for r in sim._rows() if r[11]]
     assert len(cone) == 1
     m_eff = 0.1 * 0.8 * 0.8 / 6.0
@@ -505,8 +495,8 @@ def test_twist_is_locked_and_the_lever_is_rigid(tmp_path):
     # bone origin stays on the lever about the parent origin of the frame it was read in
     P = _palettes(_step_clip(2, at=at))
     out = _solver(P, 60.0, bind).astype(np.float64)
-    pivot = _origin(P, 1, tb)
-    dist = np.linalg.norm(_origin(out, 2, tb) - pivot, axis=1)
+    pivot = joint_origin(P, 1, tb)
+    dist = np.linalg.norm(joint_origin(out, 2, tb) - pivot, axis=1)
     assert np.allclose(dist, np.linalg.norm(LEVER), atol=2e-4)
 
 
@@ -531,7 +521,7 @@ def test_metre_clamp_on_the_bone_origin(tmp_path):
     rv[5:] = np.radians([0.0, 80.0, 8.0])  # the lever is 0.1225 m off this axis
     P = _palettes(rv)
     out = _solver(P, 60.0, bind).astype(np.float64)
-    off = np.linalg.norm(_origin(out, 2, tb) - _origin(P, 2, tb), axis=1)
+    off = np.linalg.norm(joint_origin(out, 2, tb) - joint_origin(P, 2, tb), axis=1)
     assert off.max() == pytest.approx(PROPS["breast"]["limit"], abs=1e-5)
     assert off[5] == pytest.approx(0.08, abs=1e-5) and off[4] < 1e-6
     # the rotation is slerped by the same ratio: well short of the 80 deg the body lags
@@ -539,7 +529,7 @@ def test_metre_clamp_on_the_bone_origin(tmp_path):
     assert 20.0 < lag < 60.0
     tight = dict(PROPS, breast=dict(PROPS["breast"], limit=0.01))
     out = _solver(P, 60.0, bind, props=tight).astype(np.float64)
-    off = np.linalg.norm(_origin(out, 2, tb) - _origin(P, 2, tb), axis=1)
+    off = np.linalg.norm(joint_origin(out, 2, tb) - joint_origin(P, 2, tb), axis=1)
     assert off.max() == pytest.approx(0.01, abs=1e-5)
     assert np.linalg.norm(_dev(out, 5)) < lag / 4
 
@@ -576,7 +566,7 @@ def test_clip_rate_is_resampled_to_the_60_hz_step(tmp_path):
     # at the engine rate the parent is not interpolated: the 60 fps clip IS the step grid
     sim = jiggle_d6.SoftLimitJoint(200.0, 0.8, LEVER)
     P = clip(60.0)
-    q = [jiggle_d6._m2q(P[f, 1, :, :3].tolist()) for f in range(len(P))]
+    q = [jiggle_d6.mat_to_quat(P[f, 1, :, :3].tolist()) for f in range(len(P))]
     sim.reset(tuple(PARENT_ORIGIN), q[0])
     for f in range(5):
         sim.step(tuple(PARENT_ORIGIN), q[f])

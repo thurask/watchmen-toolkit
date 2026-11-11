@@ -327,7 +327,7 @@ def test_pc_part1_model_is_decoded_header_driven(tmp_path, monkeypatch):
     def fake(path, name, v, n, uv, tris, subs, mats, tex_index, log):
         cap.update(v=list(v), tris=list(tris), subs=list(subs), mats=list(mats))
 
-    monkeypatch.setattr(we, "_write_obj_mtl", fake)
+    monkeypatch.setattr(we, "write_obj_mtl", fake)
     h, s = build("<", "part1")
     assert we.decode_model(h, s, tmp_path / "m.obj") is True
     # LOD 0 only, no shadow hull, materials from the submesh records
@@ -510,7 +510,7 @@ def test_console_model_is_decoded_header_driven(tmp_path, monkeypatch):
     def fake(path, name, v, n, uv, tris, subs, mats, tex_index, log):
         cap.update(v=list(v), tris=list(tris), mats=list(mats))
 
-    monkeypatch.setattr(we, "_write_obj_mtl", fake)
+    monkeypatch.setattr(we, "write_obj_mtl", fake)
     h, s = build(">", "part1", console="x360")
     logs = []
     assert we.decode_model(h, s, tmp_path / "m.obj", log=lambda *a: logs.append(a[0])) is True
@@ -540,7 +540,7 @@ def test_console_colour_is_not_guessed_when_the_model_does_not_show_the_order(
     b = M["buffers"][0]
     at = vg.buffer_vertex_attrs(h, s, ">", b["vb"], b["vertex_count"], b["stride"])
     assert at["color_not_decoded"] is True and at["has_color"] is False  # frame kept
-    monkeypatch.setattr(we, "_write_obj_mtl", lambda *a: None)
+    monkeypatch.setattr(we, "write_obj_mtl", lambda *a: None)
     logs = []
     assert we.decode_model(h, s, tmp_path / "m.obj", log=lambda *a: logs.append(a[0])) is True
     meta = json.loads((tmp_path / "m.model.json").read_text())
@@ -567,7 +567,7 @@ def test_console_character_piece_gets_its_vertex_attributes(console):
 
 
 def test_console_stream_that_does_not_tile_falls_back_to_the_scan_sidecar(tmp_path, monkeypatch):
-    monkeypatch.setattr(we, "_write_obj_mtl", lambda *a: None)
+    monkeypatch.setattr(we, "write_obj_mtl", lambda *a: None)
     h, s = build(">", "part2", console="ps3")
     assert we._header_model_plan(h, s + b"\0", 0, ">") is None
     assert we.decode_model_mesh(h, s + b"\0") is None

@@ -24,14 +24,11 @@ Synthetic fixtures only (those of the feature tests are reused)."""
 import json
 import os
 import struct
-import sys
 import warnings
 
 import numpy as np
 import pytest
 
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wlib"))
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import jiggle_d6
 import level_meta as lm
 import nav_data as nd
@@ -44,6 +41,7 @@ import test_formats_v2 as tf
 import test_level_meta as tl
 import test_nav_data as tn
 import test_text_assets as tt
+from conftest import frag_node, fragment_bytes, write_bytes
 
 nav_level = fs.nav_level  # the fixture: a level `Demo` with a door template instanced twice
 extract = tl.extract  # the fixture: a scene with two load blocks and a nested fragment
@@ -236,9 +234,11 @@ def test_scanned_model_with_more_textures_than_buffers_logs_the_missing_material
     )
     verts = [(float(i), 0.0, float(i % 3)) for i in range(9)]
     monkeypatch.setattr(wx, "_pick_vb", lambda s: (0, 32, True, 9, [0, 1, 2, 3, 4, 5]))
-    monkeypatch.setattr(wx, "_decode_sub", lambda s, off, nv, stride, be, *a: (verts, None, None))
+    monkeypatch.setattr(
+        wx, "decode_mesh_vertices", lambda s, off, nv, stride, be, *a: (verts, None, None)
+    )
     written = {}
-    monkeypatch.setattr(wx, "_write_obj_mtl", lambda *a: written.update(mats=a[7]))
+    monkeypatch.setattr(wx, "write_obj_mtl", lambda *a: written.update(mats=a[7]))
     monkeypatch.setitem(wx._RIG, "on", False)
     lines = []
     out = tmp_path / "Palm_Banana_01.model.obj"
@@ -467,33 +467,37 @@ def _door_level(root, extra_first):
     `extra_first` another fragment is loaded BEFORE the doors, as on a platform
     that has one fragment more."""
     base = root / "extracted"
-    scene = tl._node(fs.SCENE, "SceneNode", "", None)
-    scene += tl._node(fs.SCENES, "Folder", "Scenes", fs.SCENE)
-    scene += tl._node(
+    scene = frag_node(fs.SCENE, "SceneNode", "", None)
+    scene += frag_node(fs.SCENES, "Folder", "Scenes", fs.SCENE)
+    scene += frag_node(
         fs.LVL, "SceneScope(LoadBlock)", "Demo", fs.SCENES, 1, localPos=[0.0, 0.0, 0.0],
         localOrient=tl.ID, assetName="/Levels/Game_Levels_Part2/Demo/Demo.fragment", m_isceneid=9,
     )  # fmt: skip
-    tl._write(base / "Levels" / "Game_Levels_Part2" / "Demo.scene", tl._fragment(scene))
+    write_bytes(base / "Levels" / "Game_Levels_Part2" / "Demo.scene", fragment_bytes(scene))
     door, crate = "/LevelDesign/Door.fragment", "/LevelDesign/Crate.fragment"
     lvl = b""
     if extra_first:
-        lvl += tl._node(
+        lvl += frag_node(
             0x1F, "FragmentNode", "crate", "host", 0, localPos=[1.0, 0.0, 1.0],
             localOrient=tl.ID, assetName=crate,
         )  # fmt: skip
     for nid, nm, order, x in ((fs.HOST_A, "door near", 1, -5.0), (fs.HOST_B, "door far", 2, 40.0)):
-        lvl += tl._node(
+        lvl += frag_node(
             nid, "FragmentNode", nm, "host", order, localPos=[x, 0.0, 2.0],
             localOrient=tl.ID, assetName=door,
         )  # fmt: skip
-    tl._write(base / "Levels" / "Game_Levels_Part2" / "Demo" / "Demo.fragment", tl._fragment(lvl))
-    d = tl._node(
+    write_bytes(
+        base / "Levels" / "Game_Levels_Part2" / "Demo" / "Demo.fragment", fragment_bytes(lvl)
+    )
+    d = frag_node(
         fs.PO, "KynapseDoor(AIStaticPathObjectNode)", "", "host", 0, localPos=[0.0, 0.0, 0.0],
         localOrient=tl.ID,
     )  # fmt: skip
-    tl._write(base / "LevelDesign" / "Door.fragment", tl._fragment(d))
-    c = tl._node(0x70, "ModelNode", "crate", "host", 0, localPos=[0.0, 0.0, 0.0], localOrient=tl.ID)
-    tl._write(base / "LevelDesign" / "Crate.fragment", tl._fragment(c))
+    write_bytes(base / "LevelDesign" / "Door.fragment", fragment_bytes(d))
+    c = frag_node(
+        0x70, "ModelNode", "crate", "host", 0, localPos=[0.0, 0.0, 0.0], localOrient=tl.ID
+    )
+    write_bytes(base / "LevelDesign" / "Crate.fragment", fragment_bytes(c))
     ((scene_path, name, sid, _asset),) = lm.levels(str(root))
     return lm.build_level(scene_path, name, sid, str(root))
 

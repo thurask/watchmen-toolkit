@@ -12,17 +12,13 @@ failing, and the two cache rules.
 
 Synthetic fixtures only."""
 
-import inspect
 import json
 import os
 import struct
-import sys
 
 import numpy as np
 import pytest
 
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wlib"))
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import anim_meta as am
 import bake_v4
 import characters_export as ce
@@ -149,12 +145,58 @@ def test_a_root_without_position_keys_sits_at_zero_not_at_its_bind_position(bind
         bake_v4.bake("c", 1, bind=path, bank={"c": clip}, root_rest="nope")
 
 
-def test_the_face_bakes_keep_their_roots_at_the_bind_position():
+def _face_bake_args(kw):
+    return kw.get("root_rest"), kw.get("twist_align"), kw.get("track_names")
+
+
+def test_the_attached_face_bakes_keep_their_roots_at_the_bind_position(face_env):
+    """A head model's own node list: its roots keep their bind position, no twist
+    alignment, tracks found by name prefix."""
+    e = face_env
+    ce.face_attach("/m/HeadTwin", "Head", e["body"], e["bn"], "Heavy", str(e["ex"]), "out")
+    assert e["baked"] and {_face_bake_args(kw) for kw in e["baked"]} == {("bind", False, "prefix")}
+
+
+def test_the_face_export_bakes_keep_their_roots_at_the_bind_position(faces_env):
     import face_export
 
-    assert 'root_rest="bind"' in inspect.getsource(face_export.export)
-    assert 'root_rest="bind"' in inspect.getsource(ce._face_attach)
-    assert "root_rest" not in inspect.getsource(ce.bake_cache)  # body clips: the engine rule
+    faces_env["clips"].update({"EN1/A": b"a", "EN1/B": b"b", "EN2/C": b"c"})
+    assert face_export.export(str(faces_env["ex"]), str(faces_env["out"])) == 0
+    assert [nm for nm, _kw in faces_env["baked"]] == ["EN1/A", "EN1/B"]  # the head's family
+    assert {_face_bake_args(kw) for _nm, kw in faces_env["baked"]} == {("bind", False, "prefix")}
+
+
+def test_the_body_bakes_take_the_engine_root_rule_and_the_track_lookup_of_the_set(
+    tmp_path, bind, monkeypatch
+):
+    """bake_cache bakes body clips without a root_rest override (the engine rule) and
+    with the set's track lookup (track_names_for) at both rates; the cached file records
+    the twist alignment and the lookup, and a bake made with another lookup is made again."""
+    path, _tb = bind
+    ex, out = tmp_path / "ex", tmp_path / "out"
+    d = ex / "extracted" / "Animation" / "T"
+    d.mkdir(parents=True)
+    clip = _clip([("Bip", 2, [((0, 0.5, 0), I4), ((0, 0.6, 0), I4)])], keys=2)
+    (d / "T_a.animation").write_bytes(clip)
+    monkeypatch.setitem(ce.CLIP_PREFIX, "t", ("T",))
+    real, seen = bake_v4.bake, []
+
+    def spy(nm, up, **kw):
+        seen.append(kw)
+        return real(nm, up, **kw)
+
+    monkeypatch.setattr(bake_v4, "bake", spy)
+    monkeypatch.setattr(ce, "track_names_for", lambda e: "prefix")
+    assert ce.bake_cache("t", path, str(ex), str(out)) == (1, 0)
+    assert seen and all("root_rest" not in kw for kw in seen)
+    assert {kw["track_names"] for kw in seen} == {"prefix"}
+    with np.load(out / "_bake" / "t" / "T_a.npz") as z:
+        assert int(z["twist_align"]) == 1 and str(z["track_names"]) == "prefix"
+    n = len(seen)
+    assert ce.bake_cache("t", path, str(ex), str(out)) == (1, 0) and len(seen) == n  # kept
+    monkeypatch.setattr(ce, "track_names_for", lambda e: "exact")
+    assert ce.bake_cache("t", path, str(ex), str(out)) == (1, 0) and len(seen) > n  # baked again
+    assert {kw["track_names"] for kw in seen[n:]} == {"exact"}
 
 
 def test_a_cached_bake_of_another_pose_rule_is_baked_again(tmp_path, bind, monkeypatch):
@@ -201,7 +243,25 @@ def test_a_jiggle_memo_older_than_its_raw_bake_is_not_read(tmp_path):
     assert not ce.jiggle_memo_is_current(str(memo), str(raw), "c", 30.0)
     os.utime(memo, (t + 10, t + 10))
     assert ce.jiggle_memo_is_current(str(memo), str(raw), "c", 30.0)
-    assert "jiggle_memo_is_current(jf, f, nm, fps)" in inspect.getsource(ce.export)
+
+
+def test_export_solves_a_jiggle_memo_older_than_its_raw_bake_again(export_env):
+    ex, out, calls = export_env
+    glb = out / "Heavy" / "Heavy.glb"
+
+    def run():
+        ce.export(str(ex), str(out), naz="none.naz", only="Heavy", jiggle_model="pinned")
+        glb.unlink()  # so the next run writes the GLB and reads the memo
+
+    run()
+    (memo,) = (out / "_bake").glob("large_j_*/clip_test.npz")
+    raw = out / "_bake" / "large" / "clip_test.npz"
+    run()
+    assert len(calls["jiggle_kw"]) == 1  # a current memo is read
+    t = os.path.getmtime(raw)
+    os.utime(memo, (t - 10, t - 10))
+    run()
+    assert len(calls["jiggle_kw"]) == 2  # an older one is solved again
 
 
 # ------------------------------------------------------------ the clip table
@@ -316,17 +376,29 @@ def test_sound_meta_counts_a_spliced_list_once(tmp_path):
 
 # ---------------------------------------------------------- the contact check
 def test_contact_check_knows_the_part_1_en3_skeleton_and_says_what_is_missing(tmp_path):
-    assert am._ContactCheck._KEY["EN3"] == "small" and ce.CLIP_PREFIX_P1["small"] == ("EN1", "EN3")
-    cc = am._ContactCheck(str(tmp_path))
+    assert am.ContactCheck._KEY["EN3"] == "small" and ce.CLIP_PREFIX_P1["small"] == ("EN1", "EN3")
+    cc = am.ContactCheck(str(tmp_path))
     with pytest.raises(OSError, match="bind_small_file_v1.npz is not in"):
         cc._load(str(tmp_path / "EN3_COM_ATT_x.animation"))
     with pytest.raises(KeyError, match="no skeleton is known for clip prefix XX9"):
         cc._load(str(tmp_path / "XX9_clip.animation"))
 
 
+def test_export_builds_every_bind_before_the_animation_table(export_env, monkeypatch):
+    ex, out, _calls = export_env
+    order = []
+
+    def ensure_all(keys, e, naz):
+        order.append(("binds", sorted(keys)))
+        return {}
+
+    monkeypatch.setattr(ce, "ensure_all_binds", ensure_all)
+    monkeypatch.setattr(ce, "animation_meta", lambda e, o: order.append(("table", None)))
+    ce.export(str(ex), str(out), naz="none.naz")
+    assert order == [("binds", ["large", "small"]), ("table", None)]
+
+
 def test_every_bind_is_built_before_the_animation_table(monkeypatch):
-    src = inspect.getsource(ce.export)
-    assert src.index("ensure_all_binds(") < src.index("meta = animation_meta(extract_out, outdir)")
     built = []
 
     def ensure(key, extract_out, naz):

@@ -339,7 +339,7 @@ def model_tail(mb, order="<"):
     if M is None or phys is None:
         return None
     try:
-        r = _we._Rd(mb, order)
+        r = _we.ByteReader(mb, order)
         r.p = phys["end"]
         animation = r.string() if M.get("has_animation") else None
         channels = []

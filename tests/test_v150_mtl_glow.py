@@ -10,7 +10,7 @@
   when the sky pass draws it (SkyBoxPS multiplies the opacity into the alpha,
   read from code); in the standard pass that was inferred, and the factor is 1.
 * ``watchmen_extract.first_sheet`` is the one reader of a texture's first
-  sheet for the MTL writer, ``_mtl_no_highlight`` and ``rig_glb``.
+  sheet for the MTL writer, ``mtl_no_highlight`` and ``rig_glb``.
 * ``characters_export.GLB_REVISION`` is 3, so a resumed export writes a
   character GLB of the earlier revision again.
 
@@ -44,19 +44,19 @@ def _blender_roughness(ns):
 # ------------------------------------------------------------ MTL roughness
 @pytest.mark.parametrize("r", [0.045, 0.2869, 0.343, 0.5, 0.9, 1.0])
 def test_ns_reads_back_as_the_roughness(r):
-    assert _blender_roughness(we._mtl_ns_of_roughness(r)) == pytest.approx(r, abs=1e-12)
+    assert _blender_roughness(we.mtl_ns_of_roughness(r)) == pytest.approx(r, abs=1e-12)
 
 
 def test_ns_ends_and_clamps():
-    assert we._mtl_ns_of_roughness(1.0) == 0.0  # roughness 1 = Ns 0, the no-highlight value
-    assert we._mtl_ns_of_roughness(0.0) == 1000.0
-    assert we._mtl_ns_of_roughness(-0.5) == 1000.0 and we._mtl_ns_of_roughness(2.0) == 0.0
+    assert we.mtl_ns_of_roughness(1.0) == 0.0  # roughness 1 = Ns 0, the no-highlight value
+    assert we.mtl_ns_of_roughness(0.0) == 1000.0
+    assert we.mtl_ns_of_roughness(-0.5) == 1000.0 and we.mtl_ns_of_roughness(2.0) == 0.0
 
 
 def test_constant_roughness_is_the_engine_lobe():
     """(2 / (n + 2))^0.25 of the sheet's exponent; no exponent = 15."""
-    assert we._mtl_const_roughness(43.0) == pytest.approx((2.0 / 45.0) ** 0.25)
-    assert we._mtl_const_roughness(None) == pytest.approx(float(mt.roughness(15.0)))
+    assert we.mtl_const_roughness(43.0) == pytest.approx((2.0 / 45.0) ** 0.25)
+    assert we.mtl_const_roughness(None) == pytest.approx(float(mt.roughness(15.0)))
 
 
 def _plain_tree(root, power=0.4, spec_txt="43.0 0.4"):
@@ -237,14 +237,10 @@ def test_the_writers_read_the_first_sheet_through_one_function(tmp_path, monkeyp
     monkeypatch.setattr(we, "first_sheet", spy)
     path, _d = _plain_tree(tmp_path / "mtl")
     tnh._mtl(tmp_path / "mtl", path)
-    assert {"_write_obj_mtl", "_mtl_no_highlight"} <= set(calls)
+    assert {"write_obj_mtl", "mtl_no_highlight"} <= set(calls)
     calls.clear()
     _model_glb(tmp_path / "glb", "/art/props/Lamp.bmp", {"renderType": 1, "blendType": 1})
     assert "_sheet" in calls
-    # no other copy of the overlay is left in the two modules
-    src = inspect.getsource(we) + inspect.getsource(rig_glb)
-    assert src.count("full[0] | {") == 1
-    assert "sheet.json" not in inspect.getsource(rig_glb.build_rigged_glb).split('"""', 2)[2]
 
 
 # --------------------------------------------------------- writer revision

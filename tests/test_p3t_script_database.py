@@ -4,13 +4,10 @@ Layout read from the loader 0x47c5f5: two sections of [u32 len][text], each led 
 count; an entry longer than 0x3fe aborts the load.  Synthetic databases only."""
 
 import json
-import os
 import struct
-import sys
 
 import pytest
 
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wlib"))
 import kapow_fragment as kf
 import kapow_props as kp
 import script_database as sd

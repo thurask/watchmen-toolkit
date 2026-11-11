@@ -194,11 +194,11 @@ def test_plain_dict_indexes_still_work():
 def test_character_layers_come_from_the_models_own_folder(tmp_path, order, capsys):
     root = str(_tree(tmp_path / "textures", order))
     for rel in order:
-        lay = char_lib._find_layers(we.texture_ref("/" + rel), [root])
+        lay = char_lib.find_layers(we.texture_ref("/" + rel), [root])
         assert _rgb(lay["diffuse"]) == COLOUR[rel]
     assert capsys.readouterr().err == ""  # nothing ambiguous was looked up
     # a material without a path: deterministic, and it says so
-    assert _rgb(char_lib._find_layers("head", [root])["diffuse"]) == COLOUR[BIKERS]
+    assert _rgb(char_lib.find_layers("head", [root])["diffuse"]) == COLOUR[BIKERS]
     assert "ambiguous" in capsys.readouterr().err
 
 
@@ -234,10 +234,10 @@ def test_upper_case_and_padded_texture_folders_are_found(tmp_path):
     face = we.texture_ref("/art/characters/rorschach/textures/RorschachFaceClean.BMP")
     spots = we.texture_ref("/art/characters/rorschach/textures/rorschachspots01 .bmp")
     assert spots == "rorschachspots01 "  # the name the game uses, trailing blank included
-    assert _rgb(char_lib._find_layers(face, [str(root)])["diffuse"]) == (1, 2, 3)
-    assert _rgb(char_lib._find_layers(spots, [str(root)])["diffuse"]) == (4, 5, 6)
-    assert _rgb(char_lib._find_layers("RorschachFaceClean", [str(root)])["diffuse"]) == (1, 2, 3)
-    assert _rgb(char_lib._find_layers("rorschachspots01", [str(root)])["diffuse"]) == (4, 5, 6)
+    assert _rgb(char_lib.find_layers(face, [str(root)])["diffuse"]) == (1, 2, 3)
+    assert _rgb(char_lib.find_layers(spots, [str(root)])["diffuse"]) == (4, 5, 6)
+    assert _rgb(char_lib.find_layers("RorschachFaceClean", [str(root)])["diffuse"]) == (1, 2, 3)
+    assert _rgb(char_lib.find_layers("rorschachspots01", [str(root)])["diffuse"]) == (4, 5, 6)
 
 
 def test_character_glb_embeds_one_image_per_path(rig, tmp_path):
@@ -270,7 +270,7 @@ def _write_two(tmp_path, mats, idx):
     v = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)] * 2
     subs = [(0, 3, 0, 1, 44), (3, 3, 1, 1, 44)]
     out = tmp_path / "models" / "m.obj"
-    we._write_obj_mtl(out, "m", v, None, None, [(0, 1, 2), (3, 4, 5)], subs, mats, idx, None)
+    we.write_obj_mtl(out, "m", v, None, None, [(0, 1, 2), (3, 4, 5)], subs, mats, idx, None)
     return out.read_text(), out.with_suffix(".mtl").read_text()
 
 

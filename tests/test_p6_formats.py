@@ -12,17 +12,14 @@ Synthetic fixtures only."""
 import json
 import os
 import struct
-import sys
 
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wlib"))
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import kapow_fragment as kf
 import kapow_json as kj
 import kapow_props as kp
 import watchmen_extract as we
 import test_formats_v2 as tf
-import test_level_meta as tl
 import test_p2_audio as ta
+from conftest import frag_node, fragment_bytes, u32s
 
 WLIB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wlib")
 DEFAULT = "THIS IS THE DEFAULT FINGERPRINT KEY, PLEASE CHANGE IT!"
@@ -136,11 +133,11 @@ def test_registered_list_properties_have_their_types():
 
 
 def test_netparticipant_is_one_slot_in_a_fragment():
-    node = tl._node(0x21, "NetworkManager", "", None)
-    node += tl._u(kp.name_hash("localParticipant"), 0xFFFFFFFF)
-    node += tl._u(kp.name_hash("remoteParticipants"), 2, 7, 0xFFFFFFFF)
-    node += tl._u(kp.name_hash("siblingOrder"), 5)  # the walk goes on behind them
-    j = kj.to_json("x.fragment", tl._fragment(node))
+    node = frag_node(0x21, "NetworkManager", "", None)
+    node += u32s(kp.name_hash("localParticipant"), 0xFFFFFFFF)
+    node += u32s(kp.name_hash("remoteParticipants"), 2, 7, 0xFFFFFFFF)
+    node += u32s(kp.name_hash("siblingOrder"), 5)  # the walk goes on behind them
+    j = kj.to_json("x.fragment", fragment_bytes(node))
     (rec,) = [n for n in j["nodes_full"] if not n.get("created")]
     props = {k: (t, v) for k, t, v in rec["props"]}
     assert props["localParticipant"] == ("netparticipant", 0xFFFFFFFF)

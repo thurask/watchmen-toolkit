@@ -12,91 +12,16 @@ Synthetic binary fixtures only: every file below is built in the test."""
 
 import json
 import os
-import struct
-import sys
 import pathlib
 
 import pytest
 
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wlib"))
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 import anim_state_machine as asm
 import kapow_fragment as kf
 import kapow_json as kj
 import kapow_props as kp
 import level_meta as lm
-
-
-def _u(*v):
-    return struct.pack("<%dI" % len(v), *v)
-
-
-def _f(*v):
-    return struct.pack("<%df" % len(v), *v)
-
-
-def _str(s):
-    b = s.encode("latin1") + b"\0"
-    b += b"\0" * (-len(b) % 4)
-    return _u(len(b) // 4) + b
-
-
-def _ent(v):
-    """None -> null, "host" -> tag 2, int -> tag 3, ("up", a, ids) -> tag 4,
-    ("single", ids) -> tag 5."""
-    if v is None:
-        return _u(1)
-    if v == "host":
-        return _u(2)
-    if isinstance(v, int):
-        return _u(3, v)
-    if v[0] == "up":
-        return _u(4, v[1], len(v[2]), *v[2])
-    return _u(5, len(v[1]), *v[1])
-
-
-def _val(v):
-    if isinstance(v, bool):
-        return _u(int(v))
-    if isinstance(v, int):
-        return _u(v & 0xFFFFFFFF)
-    if isinstance(v, float):
-        return _f(v)
-    if isinstance(v, str):
-        return _str(v)
-    if isinstance(v, list) and v and isinstance(v[0], str):
-        return _u(len(v)) + b"".join(_str(s) for s in v)
-    if isinstance(v, list):
-        return _f(*v)
-    raise TypeError(v)
-
-
-ENTITY = ("logicalParent", "m_etarget1", "_eauxaction", "m_etriggerentity", "_ealldeadaction")
-
-
-def _node(nid, typ, name, parent, order=0, **props):
-    """One type record and one instance record.  Entity properties take the _ent
-    forms, everything else is encoded by its Python type."""
-    b = _u(0xFFFFFFFF, nid) + _str(typ) + _u(0xFFFFFFFE, nid)
-    b += _u(kp.name_hash("name")) + _str(name)
-    b += _u(kp.name_hash("logicalParent")) + _ent(parent)
-    b += _u(kp.name_hash("siblingOrder")) + _u(order)
-    for k, v in props.items():
-        b += _u(kp.name_hash(k)) + (_ent(v) if k in ENTITY else _val(v))
-    return b
-
-
-def _fragment(payload, name="", singleton=False, reapplyable=False, version=4):
-    nm = name.encode("latin1") + b"\0"
-    head = _u(version) + bytes([int(singleton), 0]) + _u(len(nm)) + nm
-    head += bytes([int(reapplyable), 0]) + _u(1)
-    return head + _u(len(payload)) + payload
-
-
-def _write(path, data):
-    os.makedirs(os.path.dirname(str(path)), exist_ok=True)
-    with open(str(path), "wb") as fh:
-        fh.write(data)
+from conftest import frag_node, fragment_bytes, u32s, write_bytes
 
 
 def _h(name):
@@ -117,9 +42,9 @@ def extract(tmp_path):
     """extracted/Levels/T/Test.scene with two load blocks and a game-essentials
     scope; the level `Lvl` nests Sub.fragment and refers into GE.fragment."""
     base = tmp_path / "extracted"
-    scene = _node(SCENE, "SceneNode", "", None)
-    scene += _node(SCENES, "Folder", "Scenes", SCENE)
-    scene += _node(
+    scene = frag_node(SCENE, "SceneNode", "", None)
+    scene += frag_node(SCENES, "Folder", "Scenes", SCENE)
+    scene += frag_node(
         LVL,
         "SceneScope(LoadBlock)",
         "Lvl",
@@ -130,19 +55,21 @@ def extract(tmp_path):
         assetName="/levels/t/lvl.fragment",  # the file is Levels/T/Lvl.fragment
         m_isceneid=9,
     )
-    scene += _node(
+    scene += frag_node(
         OTHER, "SceneScope(LoadBlock)", "Other", SCENES, 2, assetName="/Levels/T/Other.fragment"
     )
-    scene += _node(
+    scene += frag_node(
         GE, "SceneScope(FragmentNode)", "GameEssentials", SCENE, 5, assetName="/TNT/GE.fragment"
     )
-    _write(base / "Levels" / "T" / "Test.scene", _fragment(scene))
+    write_bytes(base / "Levels" / "T" / "Test.scene", fragment_bytes(scene))
 
-    ge = _node(DB, "Folder", "Db", "host") + _node(TARGET, "PivotNode", "Level 005", DB)
-    _write(base / "TNT" / "GE.fragment", _fragment(ge, singleton=True))  # named by its file
+    ge = frag_node(DB, "Folder", "Db", "host") + frag_node(TARGET, "PivotNode", "Level 005", DB)
+    write_bytes(
+        base / "TNT" / "GE.fragment", fragment_bytes(ge, singleton=True)
+    )  # named by its file
 
-    lvl = _node(GRP, "CharacterGroup(Folder)", "guards", "host", 0, _ealldeadaction=TOG)
-    lvl += _node(
+    lvl = frag_node(GRP, "CharacterGroup(Folder)", "guards", "host", 0, _ealldeadaction=TOG)
+    lvl += frag_node(
         ROOT,
         "CharacterRoot(PivotNode)",
         "{gimp}",
@@ -154,7 +81,7 @@ def extract(tmp_path):
         m_istateofmind=1,
         _tstartactivated=False,
     )
-    lvl += _node(
+    lvl += frag_node(
         BOX,
         "CollisionBoxNode",
         "Hall_TRIGGER",
@@ -166,14 +93,16 @@ def extract(tmp_path):
         height=4.0,
         depth=6.0,
     )
-    lvl += _node(CON, "TriggerConditionCollision(Node)", "con", BOX, 0, m_itrueon=1, m_iactivator=1)
-    lvl += _node(
+    lvl += frag_node(
+        CON, "TriggerConditionCollision(Node)", "con", BOX, 0, m_itrueon=1, m_iactivator=1
+    )
+    lvl += frag_node(
         DELAY, "TriggerActionDelay(Node)", "d", CON, 0, m_ndelaynumber0=0.5, m_ndelaynumber1=1.25
     )
-    lvl += _node(
+    lvl += frag_node(
         ACT0, "TriggerActionCharacter(Node)", "a0", DELAY, 0, m_iactiontype=5, m_etarget1=GRP
     )
-    lvl += _node(
+    lvl += frag_node(
         ACT1,
         "TriggerActionGeneral(Node)",
         "a1",
@@ -183,7 +112,7 @@ def extract(tmp_path):
         m_etarget1=("single", [_h("GE"), TARGET]),
         _eauxaction=AUX,
     )
-    lvl += _node(
+    lvl += frag_node(
         ACT2,
         "TriggerActionGeneral(Node)",
         "a2",
@@ -192,8 +121,10 @@ def extract(tmp_path):
         m_iactiontype=0,
         m_etarget1=("single", [_h("NotLoaded"), 0x77]),
     )
-    lvl += _node(CP, "TriggerActionCheckpoint(Node)", "CheckPoint02", CON, 1, _icheckpointid=910)
-    lvl += _node(
+    lvl += frag_node(
+        CP, "TriggerActionCheckpoint(Node)", "CheckPoint02", CON, 1, _icheckpointid=910
+    )
+    lvl += frag_node(
         TELE,
         "TriggerActionCharacter(PivotNode)",
         "tele",
@@ -204,9 +135,9 @@ def extract(tmp_path):
         m_iactiontype=0,
         m_itargettype=2,
     )
-    lvl += _node(TOG, "TriggerConditionToggle(Node)", "tog", "host", 2)
-    lvl += _node(AUX, "TriggerActionBase(Node)", "shared", "host", 3)
-    lvl += _node(
+    lvl += frag_node(TOG, "TriggerConditionToggle(Node)", "tog", "host", 2)
+    lvl += frag_node(AUX, "TriggerActionBase(Node)", "shared", "host", 3)
+    lvl += frag_node(
         SUB,
         "FragmentNode",
         "sub",
@@ -217,10 +148,12 @@ def extract(tmp_path):
         assetName="/Levels/T/Sub.fragment",
     )
     # a node with the id of Sub's model, placed in the level itself
-    lvl += _node(S_MODEL, "PivotNode", "level pivot", "host", 5)
-    _write(base / "Levels" / "T" / "Lvl.fragment", _fragment(lvl, name="Lvl_Main", singleton=True))
+    lvl += frag_node(S_MODEL, "PivotNode", "level pivot", "host", 5)
+    write_bytes(
+        base / "Levels" / "T" / "Lvl.fragment", fragment_bytes(lvl, name="Lvl_Main", singleton=True)
+    )
 
-    sub = _node(
+    sub = frag_node(
         S_MODEL,
         "Model",
         "crate",
@@ -231,14 +164,14 @@ def extract(tmp_path):
         modelNames=["/art/props/crate.model"],
     )
     # tag 3: the model of this instance; tag 4 a = 2: one host further up, the level
-    sub += _node(S_ACT, "TriggerActionGeneral(Node)", "own", "host", 1, m_etarget1=S_MODEL)
-    sub += _node(
+    sub += frag_node(S_ACT, "TriggerActionGeneral(Node)", "own", "host", 1, m_etarget1=S_MODEL)
+    sub += frag_node(
         S_UP, "TriggerActionGeneral(Node)", "up", "host", 2, m_etarget1=("up", 2, [S_MODEL])
     )
-    _write(base / "Levels" / "T" / "Sub.fragment", _fragment(sub, reapplyable=True))
+    write_bytes(base / "Levels" / "T" / "Sub.fragment", fragment_bytes(sub, reapplyable=True))
 
-    other = _node(0x60, "CharacterRoot(PivotNode)", "elsewhere", "host", 0, _icharactertype=33)
-    _write(base / "Levels" / "T" / "Other.fragment", _fragment(other))
+    other = frag_node(0x60, "CharacterRoot(PivotNode)", "elsewhere", "host", 0, _icharactertype=33)
+    write_bytes(base / "Levels" / "T" / "Other.fragment", fragment_bytes(other))
     return tmp_path
 
 
@@ -254,7 +187,9 @@ def _by(nodes, nid):
 
 
 def test_header_fields_are_parsed_and_exported():
-    data = _fragment(_node(1, "Folder", "f", "host"), name="Bordello_Enemies", singleton=True)
+    data = fragment_bytes(
+        frag_node(1, "Folder", "f", "host"), name="Bordello_Enemies", singleton=True
+    )
     h = kf.parse_header(data)
     assert h["version"] == 4 and h["singleton"] is True and h["name"] == "Bordello_Enemies"
     assert h["reapplyable"] is False and h["typed"] is False and h["chunks"] == 1
@@ -262,21 +197,24 @@ def test_header_fields_are_parsed_and_exported():
     j = kj.to_json("x.fragment", data)
     assert j["lossless"] and j["header"]["name"] == "Bordello_Enemies"
     assert j["header"]["singleton"] is True and "size" not in j["header"]
-    r = kj.to_json("y.fragment", _fragment(_node(1, "Folder", "f", "host"), reapplyable=True))
+    r = kj.to_json(
+        "y.fragment", fragment_bytes(frag_node(1, "Folder", "f", "host"), reapplyable=True)
+    )
     assert r["header"]["reapplyable"] is True and r["header"]["name"] == ""
 
 
 def test_parse_header_rejects_what_is_not_a_header():
     assert kf.parse_header(b"\x00" * 40) is None  # version 0
-    assert kf.parse_header(_u(4) + bytes([7, 0]) + _u(1) + b"\0" + bytes(6)) is None  # flag 7
+    assert kf.parse_header(u32s(4) + bytes([7, 0]) + u32s(1) + b"\0" + bytes(6)) is None  # flag 7
     assert kf.parse_header(b"\x04") is None
 
 
 def test_leading_native_type_record_is_read_not_skipped():
     """A scene opens with the bare native record "SceneNode": the old scan started
     at the first "Class(Native)" record and lost every node in front of it."""
-    data = _fragment(
-        _node(SCENE, "SceneNode", "", None) + _node(LVL, "SceneScope(LoadBlock)", "L", SCENE)
+    data = fragment_bytes(
+        frag_node(SCENE, "SceneNode", "", None)
+        + frag_node(LVL, "SceneScope(LoadBlock)", "L", SCENE)
     )
     j = kj.to_json("t.scene", data)
     types = {n["id"]: n["type"] for n in j["nodes_full"]}
@@ -572,8 +510,8 @@ def _save(title, records):
     t = (title + "\0").encode("utf-16-le")
     body = b""
     for ent, prop, typ, words in records:
-        body += _u(ent, kp.name_hash(prop), kp.name_hash(typ), len(words), *words)
-    return _u(5) + b"KPWF" + b"\0" + _u(2) + _u(len(title) + 1) + t + _u(len(body)) + body
+        body += u32s(ent, kp.name_hash(prop), kp.name_hash(typ), len(words), *words)
+    return u32s(5) + b"KPWF" + b"\0" + u32s(2) + u32s(len(title) + 1) + t + u32s(len(body)) + body
 
 
 def test_save_file_records():
@@ -608,9 +546,9 @@ def test_savemeta_command(tmp_path, capsys):
     import watchmen
 
     src = tmp_path / "PROGRESS.kpw"
-    _write(src, _save("User Settings", [(1, "m_tsubtitles", "truth", [0])]))
+    write_bytes(src, _save("User Settings", [(1, "m_tsubtitles", "truth", [0])]))
     assert watchmen.main(["watchmen", "savemeta", str(src)]) == 0
     j = json.loads(pathlib.Path(str(src) + ".json").read_text())
     assert j["title"] == "User Settings" and j["records"][0]["value"] is False
-    _write(tmp_path / "bad.kpw", b"not a save")
+    write_bytes(tmp_path / "bad.kpw", b"not a save")
     assert watchmen.main(["watchmen", "savemeta", str(tmp_path / "bad.kpw")]) == 2

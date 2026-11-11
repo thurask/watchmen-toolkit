@@ -6,17 +6,15 @@ complete outfit; the extractor's per-name record is the union of their model
 lists, which is what the character GLBs used to show."""
 
 import os
-import sys
 
 import numpy as np
 import pytest
 
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wlib"))
 import face_rule as fr
 import parts_rule as pr
 import variant_glb as vg
 
-from conftest import parse_glb
+from conftest import parse_glb, rig_part
 from test_face_rule import Frag, model
 
 HEAVY = [  # (models of the member, in slot order; '' = empty slot)
@@ -42,9 +40,9 @@ def heavies(tmp_path):
         )
     f.add("CharacterHeadModel", "Solo", coll, m_iheadmodeltype=3, modelNames=[model("Body")])
     f.write(tmp_path, "Heavies")
-    fr._HEADS.clear()
+    fr.HEADS.clear()
     yield str(tmp_path)
-    fr._HEADS.clear()
+    fr.HEADS.clear()
 
 
 def test_members_are_the_same_named_collection_nodes_in_list_order(heavies):
@@ -184,10 +182,6 @@ def test_clip_weapon_use_from_criteria_and_weapon_blends():
 
 
 # ---------------------------------------------------------- the GLB writer
-def _part(rig, dx, name):
-    return (rig.V + np.float32(dx), rig.SI, rig.SW, rig.T, rig.UV, name)
-
-
 def _write(tmp_path, rig, name, **kw):
     out = tmp_path / name
     vg.write_glb(rig.parts, rig.manifest, str(out), str(rig.bind_npz), **kw)
@@ -196,10 +190,10 @@ def _write(tmp_path, rig, name, **kw):
 
 def test_alternatives_are_kept_outside_the_scene(tmp_path, rig):
     alt = [
-        ("ALT Afro", [_part(rig, 1.0, "hair_afro")]),
-        ("ALT Hair_Long", [_part(rig, 2.0, "hair_long")]),
+        ("ALT Afro", [rig_part(rig, 1.0, "hair_afro")]),
+        ("ALT Hair_Long", [rig_part(rig, 2.0, "hair_long")]),
     ]
-    wpn = [("WPN_Bat", [_part(rig, 3.0, "bat")])]
+    wpn = [("WPN_Bat", [rig_part(rig, 3.0, "bat")])]
     rec = {
         "mode": "game",
         "alternatives": [
@@ -244,7 +238,7 @@ def test_a_weapon_named_as_shown_stays_in_the_scene(tmp_path, rig, monkeypatch, 
     """The shown weapon is a scene root (hierarchy: skinned meshes at the scene
     root) or a child of `root` (flat, the 1.4.0 layout); the other one is hidden."""
     monkeypatch.setenv("WATCHMEN_RIG", rig_mode)
-    wpn = [("WPN_Whip", [_part(rig, 3.0, "whip")]), ("WPN_Bat", [_part(rig, 4.0, "bat")])]
+    wpn = [("WPN_Whip", [rig_part(rig, 3.0, "whip")]), ("WPN_Bat", [rig_part(rig, 4.0, "bat")])]
     rec = {"mode": "game", "alternatives": [], "weapons": {"shown": ["WPN_Whip"]}}
     j = _write(tmp_path, rig, "w.glb", attachments=wpn, parts_record=rec).j
     names = [n["name"] for n in j["nodes"]]
@@ -262,7 +256,7 @@ def test_a_weapon_named_as_shown_stays_in_the_scene(tmp_path, rig, monkeypatch, 
 def test_without_a_parts_record_nothing_is_hidden_and_the_file_is_the_old_one(tmp_path, rig):
     """--parts all: attachments under the root, no `alternatives` node, no parts
     extras -- byte for byte what the writer produced before."""
-    wpn = [("WPN_Bat", [_part(rig, 3.0, "bat")])]
+    wpn = [("WPN_Bat", [rig_part(rig, 3.0, "bat")])]
     a = tmp_path / "a.glb"
     b = tmp_path / "b.glb"
     vg.write_glb(rig.parts, rig.manifest, str(a), str(rig.bind_npz), attachments=wpn)

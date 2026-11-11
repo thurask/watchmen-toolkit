@@ -18,13 +18,9 @@ Synthetic fixtures only."""
 import json
 import pathlib
 import os
-import sys
 
 import pytest
 
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wlib"))
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import canonical_names as cn
 import nav_data as nd
 import particle_meta as pm
@@ -468,13 +464,13 @@ def test_decode_model_puts_the_stored_name_into_the_model_json(tmp_path):
 
 def test_mark_stored_name_keeps_the_sheet(tmp_path):
     (tmp_path / "sheet.json").write_text('{"twoSided": true}')
-    wx._mark_stored_name(tmp_path, "/art/x/wall.bmp")
+    wx.mark_stored_name(tmp_path, "/art/x/wall.bmp")
     assert wx.read_sheet_json(tmp_path) == {"twoSided": True, "stored_name": "/art/x/wall.bmp"}
     # no sheet, no sidecar: two archives must not differ in the files of a folder
     other = tmp_path / "t"
     other.mkdir()
-    wx._mark_stored_name(other, "/art/x/wall.bmp")
-    wx._mark_stored_name(tmp_path, None)
+    wx.mark_stored_name(other, "/art/x/wall.bmp")
+    wx.mark_stored_name(tmp_path, None)
     assert not (other / "sheet.json").exists()
     assert wx.read_sheet_json(tmp_path)["stored_name"] == "/art/x/wall.bmp"
 

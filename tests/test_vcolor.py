@@ -22,6 +22,7 @@ import pytest
 import rig_glb
 import test_formats_v2 as tf
 import variant_glb as vg
+import kapow_props
 import watchmen_extract as we
 from conftest import parse_glb
 
@@ -43,17 +44,17 @@ def test_pc_ati2_keeps_the_y_block_first():
     # Direct3D 9 ATI2: first block = Y (green), second = X (red).  1.3.0 wrote the
     # first block to the PNG's red channel.
     layer = _bc4_flat(200) + _bc4_flat(60)  # first block 200, second block 60
-    img = we._decode_one_layer(layer, 9, 4, 4)
+    img = we.decode_one_layer(layer, 9, 4, 4)
     assert img[..., 0].tolist() == [[60] * 4] * 4  # X = second block
     assert img[..., 1].tolist() == [[200] * 4] * 4  # Y = first block
     # the X360 format (enum 10) is X-first already and stays as it was
-    x360 = we._decode_one_layer(layer, 10, 4, 4)
+    x360 = we.decode_one_layer(layer, 10, 4, 4)
     assert x360[0, 0, 0] == 200 and x360[0, 0, 1] == 60
     assert we.ati2_xy(("first", "second")) == ("second", "first")
 
 
 def test_normal_z_is_rebuilt_from_the_swapped_pair():
-    img = we._decode_one_layer(_bc4_flat(255) + _bc4_flat(128), 9, 4, 4)
+    img = we.decode_one_layer(_bc4_flat(255) + _bc4_flat(128), 9, 4, 4)
     x, y = img[0, 0, 0] / 255 * 2 - 1, img[0, 0, 1] / 255 * 2 - 1
     assert abs(y - 1.0) < 1e-6 and abs(x) < 0.01
     assert img[0, 0, 2] <= 129  # z = sqrt(1 - x^2 - y^2) ~ 0 -> 0.5 encoded
@@ -66,7 +67,9 @@ def test_normal_z_is_rebuilt_from_the_swapped_pair():
 
 def _prop(salt, name, typ, value, order="<"):
     raw = struct.pack(order + "f", value) if typ == "number" else struct.pack(order + "I", value)
-    head = struct.pack(order + "IIII", salt, we._name_hash(name), we._name_hash(typ), 1)
+    head = struct.pack(
+        order + "IIII", salt, kapow_props.name_hash(name), kapow_props.name_hash(typ), 1
+    )
     return head + raw
 
 
@@ -104,11 +107,11 @@ def test_texture_sheet_reads_the_first_sheet_only():
 
 
 def test_sheet_json_round_trip(tmp_path):
-    we._write_sheet_json(_sheet_header(), tmp_path)
+    we.write_sheet_json(_sheet_header(), tmp_path)
     d = we.read_sheet_json(tmp_path)
     assert d["twoSided"] is True and d["renderType"] == 1
     assert we.read_sheet_json(tmp_path / "missing") == {}
-    we._write_sheet_json(b"\x00" * 64, tmp_path / "x")  # no sheet: nothing written, no error
+    we.write_sheet_json(b"\x00" * 64, tmp_path / "x")  # no sheet: nothing written, no error
     assert not (tmp_path / "x").exists()
 
 

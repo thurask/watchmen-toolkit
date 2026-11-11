@@ -716,7 +716,7 @@ def test_dxt3_block_decodes_its_explicit_alpha():
         y, x = divmod(i, 4)
         assert rgba[y, x].tolist() == [grey[i % 4]] * 3 + [17 * i], i
     # a layer of enum 6 goes through it (1.4.0 decoded it as DXT5)
-    assert np.array_equal(we._decode_one_layer(blk, 6, 4, 4), rgba)
+    assert np.array_equal(we.decode_one_layer(blk, 6, 4, 4), rgba)
     assert we.FOURCC["DXT3"] == b"DXT3"
 
 
@@ -767,9 +767,9 @@ def test_bc5_blocks_and_the_pc_channel_order():
     assert (a == 200).all() and (b == 30).all()
     X, Y = we.ati2_xy((a, b))  # PC ATI2 keeps Y first
     assert (X == 30).all() and (Y == 200).all()
-    rgb = we._decode_one_layer(first + second, 9, 4, 4)  # PC enum 9: swapped
+    rgb = we.decode_one_layer(first + second, 9, 4, 4)  # PC enum 9: swapped
     assert rgb[0, 0, :2].tolist() == [30, 200]
-    rgb = we._decode_one_layer(first + second, 10, 4, 4)  # X360 enum 10: file order
+    rgb = we.decode_one_layer(first + second, 10, 4, 4)  # X360 enum 10: file order
     assert rgb[0, 0, :2].tolist() == [200, 30]
     assert we.decode_bc5_base(first, 4, 4) is None  # too short
 

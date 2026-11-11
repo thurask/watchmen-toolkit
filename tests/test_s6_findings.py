@@ -14,13 +14,9 @@ Synthetic fixtures only."""
 import json
 import struct
 
-import os
-import sys
 
 import pytest
 
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wlib"))
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import anim_meta as am
 import anim_state_machine as asm
 import combat_meta as cm

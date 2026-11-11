@@ -25,6 +25,7 @@ import jiggle_d6
 import jiggle_pass
 import parse_model_nodes as pmn
 import skeleton_records as sr
+from conftest import joint_origin, rot_vector
 
 # ---------------------------------------------------------------------------
 # jiggle helpers
@@ -51,7 +52,7 @@ def _bind(tmp_path, with_tloc=True, name="BreastL"):
 
 
 def _rot(axis, ang):
-    return jiggle_d6._rotv2m(np.asarray(axis, float) * ang)
+    return jiggle_d6.rotvec_to_mat(np.asarray(axis, float) * ang)
 
 
 def _palettes(angles, axis, pivot=PARENT_ORIGIN, shift=None):
@@ -69,19 +70,8 @@ def _palettes(angles, axis, pivot=PARENT_ORIGIN, shift=None):
     return P
 
 
-def _rotvec(R):
-    a = float(np.arccos(np.clip((np.trace(R) - 1.0) / 2.0, -1.0, 1.0)))
-    if a < 1e-12:
-        return np.zeros(3)
-    return a * np.array([R[2, 1] - R[1, 2], R[0, 2] - R[2, 0], R[1, 0] - R[0, 1]]) / (2 * np.sin(a))
-
-
-def _origin(P, k, tb):
-    return np.einsum("fab,b->fa", P[:, k, :, :3].astype(np.float64), tb[k]) + P[:, k, :, 3]
-
-
 def _props(**groups):
-    props = dict(jiggle_d6._FILE_DEFAULTS)
+    props = dict(jiggle_d6.FILE_DEFAULTS)
     for g, kv in groups.items():
         props[g] = dict(props[g], **kv)
     return props
@@ -123,13 +113,13 @@ def test_pinned_model_keeps_the_old_numbers(tmp_path):
     bind, tb = _bind(tmp_path)
     P = _palettes(np.zeros(120), [0, 0, 1])
     out = jiggle_d6.apply_jiggle(P, 60.0, bind, model="pinned").astype(np.float64)
-    sag = np.linalg.norm(_rotvec(out[-1, 2, :, :3] @ P[-1, 2, :, :3].T))
-    K, _D = jiggle_d6.swing_constants("engine", "breast", jiggle_d6._FILE_DEFAULTS, "pinned")
+    sag = np.linalg.norm(rot_vector(out[-1, 2, :, :3] @ P[-1, 2, :, :3].T))
+    K, _D = jiggle_d6.swing_constants("engine", "breast", jiggle_d6.FILE_DEFAULTS, "pinned")
     assert K == pytest.approx(166.327, abs=1e-3)
     r = tb[2]
     expect = np.linalg.norm(np.cross(r, [0.0, -14.82, 0.0])) / K  # static balance of r x g
     assert sag == pytest.approx(expect, rel=0.05)
-    assert np.allclose(_origin(out, 2, tb), _origin(P, 2, tb), atol=1e-6)  # origin pinned
+    assert np.allclose(joint_origin(out, 2, tb), joint_origin(P, 2, tb), atol=1e-6)  # origin pinned
 
 
 def test_jiggle_pass_forwards_the_model(tmp_path):
@@ -161,8 +151,8 @@ def test_body_swings_about_the_parent_origin_on_the_parent_bone_lever(tmp_path):
     bind, tb = _bind(tmp_path)
     P = _palettes(SWING, [0, 0, 1])
     out = jiggle_d6.apply_jiggle(P, 60.0, bind, model="pivot", latency=0.0).astype(np.float64)
-    org = _origin(out, 2, tb)
-    moved = np.linalg.norm(org - _origin(P, 2, tb), axis=1)
+    org = joint_origin(out, 2, tb)
+    moved = np.linalg.norm(org - joint_origin(P, 2, tb), axis=1)
     assert moved.max() > 2e-3, "position write-back missing: the bone origin never moved"
     dist = np.linalg.norm(org - PARENT_ORIGIN, axis=1)
     free = moved < 0.079  # frames the metre clamp did not touch
@@ -176,10 +166,10 @@ def test_rotation_and_position_are_written_back_together(tmp_path):
     bind, tb = _bind(tmp_path)
     P = _palettes(SWING, [0, 0, 1])
     out = jiggle_d6.apply_jiggle(P, 60.0, bind, model="pivot", latency=0.0).astype(np.float64)
-    org = _origin(out, 2, tb)
+    org = joint_origin(out, 2, tb)
     for f in (10, 25, 40):
         D = out[f, 2, :, :3] @ P[f, 2, :, :3].T  # world deviation rotation
-        if np.linalg.norm(org[f] - _origin(P, 2, tb)[f]) > 0.079:
+        if np.linalg.norm(org[f] - joint_origin(P, 2, tb)[f]) > 0.079:
             continue
         lever_w = P[f, 1, :, :3] @ LEVER
         assert np.allclose(org[f] - PARENT_ORIGIN, D @ lever_w, atol=1e-5)
@@ -202,10 +192,10 @@ def test_clamp_is_a_bone_origin_distance_in_metres(tmp_path):
     P = _palettes(3.0 * SWING, [0, 0, 1])  # violent: far beyond the limit
     props = _props(breast=dict(limit=0.02))
     out = jiggle_d6.apply_jiggle(P, 60.0, bind, model="pivot", props=props).astype(np.float64)
-    disp = np.linalg.norm(_origin(out, 2, tb) - _origin(P, 2, tb), axis=1)
+    disp = np.linalg.norm(joint_origin(out, 2, tb) - joint_origin(P, 2, tb), axis=1)
     assert disp.max() == pytest.approx(0.02, abs=1e-5)
     assert disp.max() <= 0.02 + 1e-5
-    ang = [np.linalg.norm(_rotvec(out[f, 2, :, :3] @ P[f, 2, :, :3].T)) for f in range(len(P))]
+    ang = [np.linalg.norm(rot_vector(out[f, 2, :, :3] @ P[f, 2, :, :3].T)) for f in range(len(P))]
     # a 0.02 m chord on the 0.1118 m lever is ~10.3 deg; the old angle clamp was 1 deg
     assert max(ang) > math.radians(5.0)
     assert max(ang) < math.radians(12.0)
@@ -218,7 +208,9 @@ def test_twist_about_the_parent_x_axis_is_locked(tmp_path):
     for axis, moves in (([1, 0, 0], False), ([0, 0, 1], True)):
         P = _palettes(SWING, axis)
         out = jiggle_d6.apply_jiggle(P, 60.0, bind, model="pivot", latency=0.0).astype(np.float64)
-        dev = max(np.linalg.norm(_rotvec(out[f, 2, :, :3] @ P[f, 2, :, :3].T)) for f in range(90))
+        dev = max(
+            np.linalg.norm(rot_vector(out[f, 2, :, :3] @ P[f, 2, :, :3].T)) for f in range(90)
+        )
         assert (dev > 1e-3) == moves, (axis, dev)
 
 
@@ -232,7 +224,7 @@ def test_linear_acceleration_couples_through_the_cube_inertia(tmp_path):
     P = _palettes(np.zeros(F), [0, 0, 1], shift=shift)
     props = _props(breast=dict(limit=10.0))
     out = jiggle_d6.apply_jiggle(P, fps, bind, model="pivot", latency=0.0, props=props)
-    dev = _rotvec(out[F - 10, 2, :, :3].astype(np.float64) @ P[F - 10, 2, :, :3].T)
+    dev = rot_vector(out[F - 10, 2, :, :3].astype(np.float64) @ P[F - 10, 2, :, :3].T)
     K, _D = jiggle_d6.swing_constants("capture", "breast", props)
     icm = jiggle_d6.BODY_MASS * jiggle_d6.BODY_SIZE**2 / 6.0
     G = jiggle_d6.BODY_MASS / (icm + jiggle_d6.BODY_MASS * float(LEVER @ LEVER))
@@ -251,17 +243,17 @@ def test_body_trails_the_parent_by_one_physics_frame(tmp_path):
     P = _palettes(w * np.arange(60) / 60.0, [1, 0, 0])
     props = _props(breast=dict(limit=10.0))
     out = jiggle_d6.apply_jiggle(P, 60.0, bind, model="pivot", props=props).astype(np.float64)
-    dev = _rotvec(out[30, 2, :, :3] @ P[30, 2, :, :3].T)
+    dev = rot_vector(out[30, 2, :, :3] @ P[30, 2, :, :3].T)
     assert np.allclose(dev, [-w / 60.0, 0, 0], atol=1e-6)
     off = jiggle_d6.apply_jiggle(P, 60.0, bind, model="pivot", props=props, latency=0.0)
     assert np.allclose(off[30], P[30], atol=1e-6)
     half = jiggle_d6.apply_jiggle(P, 60.0, bind, model="pivot", props=props, latency=1 / 120.0)
-    dev = _rotvec(half[30, 2, :, :3].astype(np.float64) @ P[30, 2, :, :3].T)
+    dev = rot_vector(half[30, 2, :, :3].astype(np.float64) @ P[30, 2, :, :3].T)
     assert np.allclose(dev, [-w / 120.0, 0, 0], atol=1e-6)
 
 
 def test_swing_constants_per_model_and_mode():
-    W = jiggle_d6._FILE_DEFAULTS
+    W = jiggle_d6.FILE_DEFAULTS
     k, d = W["breast"]["k"], W["breast"]["d"]
     # pivot/engine: PhysX substep 1/rate_hz (FUN_004f4d20) + angular damping 1.0 (0x4fe311)
     Ke, De = jiggle_d6.solver_soften(k, d, dts=1.0 / 60.0)
@@ -297,8 +289,8 @@ def test_pivot_tail_frames_do_not_extrapolate_on_fast_clips(tmp_path):
     P = _palettes(0.6 * np.sin(np.arange(F) / fps * 2 * math.pi * 3.0), [0, 0, 1])
     out = jiggle_d6.apply_jiggle(P, fps, bind, model="pivot").astype(np.float64)
     assert np.isfinite(out).all()
-    disp = np.linalg.norm(_origin(out, 2, tb) - _origin(P, 2, tb), axis=1)
-    assert disp.max() <= jiggle_d6._FILE_DEFAULTS["breast"]["limit"] + 1e-5
+    disp = np.linalg.norm(joint_origin(out, 2, tb) - joint_origin(P, 2, tb), axis=1)
+    assert disp.max() <= jiggle_d6.FILE_DEFAULTS["breast"]["limit"] + 1e-5
     assert disp.max() > 1e-3
 
 

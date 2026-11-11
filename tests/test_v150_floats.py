@@ -14,6 +14,7 @@ import f32json
 import kapow_fragment as kf
 import kapow_json
 import kapow_props as kp
+from conftest import frag_node, fragment_bytes
 
 F = struct.Struct("<f")
 
@@ -77,9 +78,10 @@ def _parse_doc(monkeypatch, data, mode):
 def _props_fragment(pos, orient):
     """A typed fragment (test_level_meta's builders): one node with localPos /
     localOrient."""
-    import test_level_meta as tlm
 
-    return tlm._fragment(tlm._node(0x20, "Folder", "Thing", None, localPos=pos, localOrient=orient))
+    return fragment_bytes(
+        frag_node(0x20, "Folder", "Thing", None, localPos=pos, localOrient=orient)
+    )
 
 
 def _leaves(o):

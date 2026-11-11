@@ -158,7 +158,7 @@ Nothing else occurs.
 
 | field | finding | evidence |
 |---|---|---|
-| Position | raw `float32 × 3`. **No quantisation, scale or bias in any format.** The two vec3 in the MeshBuffer header are the AABB minimum and maximum corners (`_mr_meshbuffer`, FUN_004336ec), not dequantisation terms. | read from code |
+| Position | raw `float32 × 3`. **No quantisation, scale or bias in any format.** The two vec3 in the MeshBuffer header are the AABB minimum and maximum corners (`read_meshbuffer`, FUN_004336ec), not dequantisation terms. | read from code |
 | Normal | `half × 3`; 4th half is never written by the fmt 5/6 writers and is zeroed for fmt 9/10 | read from code; validated: 4th half = 0 on 13,521 sampled vertices, \|N\| = 1.000 |
 | COLOR0 @20 | D3DCOLOR `A<<24 \| R<<16 \| G<<8 \| B` = `ftol(c × 255.0)` (constant at 0x9e6ce8); memory order **B, G, R, A**. Defaults to 1.0 when the mesh has no colours. | read from code |
 | UV @24 | two raw half floats. **No scale, no bias, no V flip** in the exe. One UV set only in fmt 5/6. | read from code; observed range −1.24…1.92 (tiling) |
@@ -251,7 +251,7 @@ whose producer was not traced). The cluster ranges `a, b` are index positions (f
 1. **Buffers are located from the header**: `parse_model_header()` + `model_stream_layout()` (the port of
    `parse_model()` / `model_stream_layout()` from `formats_ref_parsers.py`), which must consume the stream exactly.
    The descriptor scan (`find_descriptors` pattern match, then a byte-by-byte search for a "sane" VB offset with
-   `_vb_ok` / `_ib_ok`) remains only as a logged fallback for a model whose header path does not apply.
+   `vb_ok` / `ib_ok`) remains only as a logged fallback for a model whose header path does not apply.
 2. The primitive type (`ix`) is honoured: a strip is decoded as a strip (`index_triangles`), so the 12 `ix == 0`
    submeshes (e.g. `Palm_Banana_01`) are not dropped.
 3. Render buffers are format 5 / 6; fmt 9/10 shadow hulls and the extra buffer are accounted for in the layout
@@ -350,7 +350,7 @@ Desc (29 bytes): u32 width · u32 height · u32 formatEnum · u32 x · u32 type 
   `LockRect(face, level)`; the lock helper indexes its table `[face × mipCount + level]` with D3D faces 0..5,
   face-major). The code that copies stream bytes into it was not found.
 
-**Toolkit:** `watchmen_extract.parse_texture_frames()` / `parse_texture_header()` and `_chain_bytes_exact()` (the port
+**Toolkit:** `watchmen_extract.parse_texture_frames()` / `parse_texture_header()` and `chain_bytes_exact()` (the port
 of `parse_texture()` + `tex_chain_bytes()`) replace the stride walk and stream-shape oracle; layers are labelled by
 slot (`TEXTURE_LAYER_SLOTS`, `CUBE_FACE_ORDER`).
 

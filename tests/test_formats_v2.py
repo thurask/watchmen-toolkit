@@ -211,7 +211,7 @@ def test_texture_frames_slots_and_linear_row_padding():
     assert (slots[1]["fmt"], slots[1]["aw"], slots[1]["mip"]) == ("ATI2", 8, 2)
     # DXT1 8x8 x4 mips = 32+8+8+8 ; ATI2 x2 = 64+16 ; L8 rows padded to 4: 64+16+8+4
     assert [d["chain"] for d in slots if d] == [56, 80, 92]
-    assert we._chain_bytes(3, 8, 8, 4) == 85  # the unpadded count is 7 bytes short
+    assert we.chain_bytes(3, 8, 8, 4) == 85  # the unpadded count is 7 bytes short
     plan = we.plan_texture_layers(hdr, 56 + 80 + 92)
     assert plan["kind"] == "single" and plan.get("exact") and len(plan["layers"]) == 3
     labels = [we.texture_layer_label(plan["layers"], j) for j in range(3)]
@@ -357,7 +357,7 @@ def obj_capture(monkeypatch):
     def fake(path, name, v, n, uv, tris, subs, mats, tex_index, log):
         cap.update(v=list(v), n=n, uv=uv, tris=list(tris), subs=list(subs), mats=list(mats))
 
-    monkeypatch.setattr(we, "_write_obj_mtl", fake)
+    monkeypatch.setattr(we, "write_obj_mtl", fake)
     return cap
 
 

@@ -20,10 +20,11 @@ import pytest
 import characters_export as ce
 import jiggle_d6
 import jiggle_pass
+from conftest import rot_vector
 
 LEVER = np.array([0.0, 0.05, 0.1225])
 PARENT_ORIGIN = np.array([0.0, 1.0, 0.0])
-PROPS = dict(jiggle_d6._FILE_DEFAULTS)
+PROPS = dict(jiggle_d6.FILE_DEFAULTS)
 
 
 def _bind(tmp_path, name="BreastL"):
@@ -46,7 +47,7 @@ def _palettes(rotvecs, shift=None):
     P = np.zeros((F, 3, 3, 4))
     P[:, 0, :, :3] = np.eye(3)
     for f in range(F):
-        R = jiggle_d6._rotv2m(np.asarray(rotvecs[f], float))
+        R = jiggle_d6.rotvec_to_mat(np.asarray(rotvecs[f], float))
         t = PARENT_ORIGIN - R @ PARENT_ORIGIN + (shift[f] if shift is not None else 0.0)
         for k in (1, 2):
             P[f, k, :, :3] = R
@@ -54,18 +55,11 @@ def _palettes(rotvecs, shift=None):
     return P
 
 
-def _rotvec(R):
-    a = float(np.arccos(np.clip((np.trace(R) - 1.0) / 2.0, -1.0, 1.0)))
-    if a < 1e-12:
-        return np.zeros(3)
-    return a * np.array([R[2, 1] - R[1, 2], R[0, 2] - R[2, 0], R[1, 0] - R[0, 1]]) / (2 * np.sin(a))
-
-
 def _dev(out, f):
     """Deviation of the jiggle bone from its parent at frame f, parent frame, degrees."""
     Rp = out[f, 1, :, :3].astype(np.float64)
     Rk = out[f, 2, :, :3].astype(np.float64)
-    return np.degrees(_rotvec(Rp.T @ Rk))
+    return np.degrees(rot_vector(Rp.T @ Rk))
 
 
 def _solver(P, fps, bind, **kw):
@@ -316,7 +310,7 @@ def test_open_loop_last_frame_is_one_step_short_of_frame_0(tmp_path):
 def test_loop_frames_detects_the_repeated_last_frame():
     def frames(P):
         c = np.einsum("fab,b->fa", P[:, 1, :, :3], PARENT_ORIGIN) + P[:, 1, :, 3]
-        q = [jiggle_d6._m2q(P[f, 1, :, :3].tolist()) for f in range(len(P))]
+        q = [jiggle_d6.mat_to_quat(P[f, 1, :, :3].tolist()) for f in range(len(P))]
         return jiggle_d6._loop_frames(c, q)
 
     assert frames(_cycle(40)) == 40  # 41 frames, the last repeats frame 0
@@ -472,13 +466,20 @@ def test_jiggle_pass_forwards_the_loop_flag(tmp_path):
     assert not np.allclose(a, b, atol=1e-4)
 
 
-def test_export_passes_each_clip_its_loop_flag():
-    """characters_export.export bakes with loop=clip_loops(meta, clip name)."""
-    import inspect
+def test_export_passes_each_clip_its_loop_flag(export_env, monkeypatch):
+    """characters_export.export jiggles each clip with the loop flag the animation
+    table gives it (clip_loops) and with the jiggle model of the run."""
+    ex, out, calls = export_env
+    asked = []
 
-    src = inspect.getsource(ce.export)
-    assert "loop=clip_loops(meta, nm)" in src
-    assert "model=jiggle_model" in src
+    def loops(meta, nm):
+        asked.append(nm)
+        return nm == "clip_test"
+
+    monkeypatch.setattr(ce, "clip_loops", loops)
+    ce.export(str(ex), str(out), naz="none.naz", only="Heavy", jiggle_model="pivot")
+    assert "clip_test" in asked
+    assert [(k["model"], k["loop"]) for k in calls["jiggle_kw"]] == [("pivot", True)]
 
 
 def test_bake_policy_is_part_of_the_solver_cache_signature(monkeypatch):

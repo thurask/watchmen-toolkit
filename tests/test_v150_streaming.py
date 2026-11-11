@@ -276,8 +276,8 @@ def test_a_zlib_bomb_is_refused_fast_with_bounded_memory(monkeypatch):
     assert len(bomb) < 2 << 20
     monkeypatch.setenv("WATCHMEN_MAX_INFLATE", str(4 << 20))
     for f in (
-        lambda: we._maybe_inflate(bomb, "Texture"),
-        lambda: we._maybe_inflate(bomb),  # sniffed
+        lambda: we.maybe_inflate(bomb, "Texture"),
+        lambda: we.maybe_inflate(bomb),  # sniffed
         lambda: we.inflate_standalone(b"\0" * 8 + bomb),
         lambda: we.inflate(bomb),
     ):
@@ -321,9 +321,9 @@ def test_inflate_equals_zlib_below_the_ceiling():
         with pytest.raises(zlib.error) as ref:
             zlib.decompress(broken)
         assert str(mine.value) == str(ref.value)
-    # _maybe_inflate keeps reporting the zlib text and returning the blob
+    # maybe_inflate keeps reporting the zlib text and returning the blob
     msgs = []
-    assert we._maybe_inflate(b"\x78\x9cbad", "Texture", msgs.append) == b"\x78\x9cbad"
+    assert we.maybe_inflate(b"\x78\x9cbad", "Texture", msgs.append) == b"\x78\x9cbad"
     assert msgs == [str(pytest.raises(zlib.error, zlib.decompress, b"\x78\x9cbad").value)]
 
 

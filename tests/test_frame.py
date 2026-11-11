@@ -15,14 +15,10 @@ import json
 import pathlib
 import math
 import os
-import sys
 
 import numpy as np
 import pytest
 
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wlib"))
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import anim_meta as am
 import characters_export as ce
 import face_rule
@@ -746,7 +742,7 @@ def test_meta_frame_conversion(rig, monkeypatch):
     meta = _pair_meta(rig)
     meta["format"] = am.FORMAT
     meta["conventions"] = am.CONVENTIONS
-    meta["fx"] = {"camera": {"cut_placement": dict(fx_meta._CUT_PLACEMENT)}}
+    meta["fx"] = {"camera": {"cut_placement": dict(fx_meta.CUT_PLACEMENT)}}
     meta["classes"]["Body"]["states"][0]["impact"] = {"position": [0.5, 1.2, 0.3]}
     shared = meta["clips"]["clip_test"]["game_pivot"]
     meta["clips"]["alias"] = {"game_pivot": shared}  # one record under two names: once only
@@ -764,7 +760,7 @@ def test_meta_frame_conversion(rig, monkeypatch):
     assert t["clips"]["clip_test"]["events"] == before["clips"]["clip_test"]["events"]
     assert t["conventions"] is am.CONVENTIONS_TRUE
     assert "x = -engine x" in t["fx"]["camera"]["cut_placement"]["coordinates"]
-    assert t["fx"]["camera"]["cut_placement"]["angle"] == fx_meta._CUT_PLACEMENT["angle"]
+    assert t["fx"]["camera"]["cut_placement"]["angle"] == fx_meta.CUT_PLACEMENT["angle"]
     assert am.to_frame(t) is t
     back = am.to_frame(t, "mirrored")
     assert "coordinate_frame" not in back and back == before
@@ -887,7 +883,7 @@ def test_cut_camera_in_the_true_frame_is_the_reflected_camera():
     assert side["position"] == pytest.approx((np.array(a) + line / 2 + 2.0 * v).tolist(), abs=1e-5)
     with pytest.raises(ValueError):
         fx_meta.cut_camera(cut, actor, target, frame="engine")
-    assert fx_meta.cut_placement("mirrored") == fx_meta._CUT_PLACEMENT
+    assert fx_meta.cut_placement("mirrored") == fx_meta.CUT_PLACEMENT
     assert "frame='true'" in fx_meta.cut_placement("true")["coordinates"]
 
 

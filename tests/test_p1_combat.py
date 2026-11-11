@@ -17,6 +17,7 @@ import engine_enums as ee
 import test_combat_meta
 from test_anim_meta import Frag, write_clip
 from test_combat_meta import _action, _write
+from conftest import state_named
 
 combat_extract = test_combat_meta.extract
 
@@ -355,8 +356,8 @@ def test_ai_defs_carry_the_effective_damage_modifier_with_its_source(meta):
 
 
 def test_per_state_damage_numbers_do_not_change(meta, plain):
-    s = test_combat_meta._state(meta, "Enemy04", "Light_A")["combat"]
-    assert s == test_combat_meta._state(plain, "Enemy04", "Light_A")["combat"]
+    s = state_named(meta, "Enemy04", "Light_A")["combat"]
+    assert s == state_named(plain, "Enemy04", "Light_A")["combat"]
     assert [(v["modifier"], v["damage"]) for v in s["damage"][0]["variants"]] == [
         (1.5, 7.5),
         (2.0, 10.0),

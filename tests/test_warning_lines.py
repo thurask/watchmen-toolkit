@@ -16,11 +16,12 @@ import face_export
 import fx_meta
 import gen_data
 import text_assets as ta
+import kapow_props
 import watchmen_extract as wx
 
 import test_formats_v2 as tf
 
-TEXT_HASH = wx._name_hash("textRes")
+TEXT_HASH = kapow_props.name_hash("textRes")
 
 
 @pytest.fixture
@@ -52,7 +53,7 @@ def test_kapow_json_import_failure_names_each_asset_left_raw(tmp_path, monkeypat
     import test_text_assets as tt
 
     files = tt.loose_tree(tmp_path)
-    h, s = tf._block([("/x/a.sequence", wx._name_hash("Sequence"), b"\x00" * 16, None)])
+    h, s = tf._block([("/x/a.sequence", kapow_props.name_hash("Sequence"), b"\x00" * 16, None)])
     lv = files / "derived_pc" / "levels"
     (lv / "seq.block_h_z").write_bytes(h)
     (lv / "seq.block_s_z").write_bytes(s)
@@ -88,12 +89,12 @@ def test_prop_walk_names_a_bag_longer_than_its_cap(run_log):
     cap = wx._PROP_WALK_CAP
     start = 4 + len(b"Sound") + 4
     # at the cap exactly: nothing to say
-    assert wx._prop_walk(_bag(cap)) == (start + cap * 20, 20)
+    assert wx.prop_walk(_bag(cap)) == (start + cap * 20, 20)
     assert not _warnings(run_log)
     # past it: the same offset as before, and one line per distinct header
     long_bag = _bag(cap + 6)
-    assert wx._prop_walk(long_bag) == (start + cap * 20, 20)
-    wx._prop_walk(long_bag)
+    assert wx.prop_walk(long_bag) == (start + cap * 20, 20)
+    wx.prop_walk(long_bag)
     got = _warnings(run_log)
     assert len(got) == 1 and "Sound header" in got[0] and "more than %d" % cap in got[0]
 
@@ -151,7 +152,7 @@ def test_registered_names_missing_is_quiet_damaged_is_named(tmp_path, capsys):
     assert gen_data.load_registered_names(str(bad))["names"] == {}
     assert "WARNING:" in capsys.readouterr().err
     wrong = tmp_path / "wrong.json"
-    h = "%08X" % wx._name_hash("m_good")
+    h = "%08X" % kapow_props.name_hash("m_good")
     wrong.write_text(
         json.dumps({"names": {h: {"m_good": ["A"], "m_bad": ["A"]}}}), encoding="utf-8"
     )

@@ -4,22 +4,18 @@
     layout        the small stored layout is recognised by its own numbers; any
                   other set of 72 UVs is left alone
     transform     each strip is scaled and moved: uv' = scale * uv + shift
-    decoders      _decode_sub (PC and console vertex layout), decode_model_mesh
+    decoders      decode_mesh_vertices (PC and console vertex layout), decode_model_mesh
     files         OBJ `vt`, the .model.json note, asset.extras of a character GLB
     switch        WATCHMEN_NO_SYNTH=1 writes the stored UVs and no note
 
 Synthetic fixtures only: four blocks of 18 UVs inside the stored box."""
 
 import json
-import os
 import struct
-import sys
 
 import numpy as np
 import pytest
 
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wlib"))
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import variant_glb as vg
 import watchmen_extract as we
 
@@ -131,22 +127,22 @@ def test_decode_sub_restores_on_both_vertex_layouts(be, monkeypatch):
     buf, stride = (_console_buffer(uv), 44) if be else (_pc_buffer(uv), 56)
     assert len(buf) == NV * stride
     noted = []
-    _v, _n, got = we._decode_sub(buf, 0, NV, stride, be, noted)
+    _v, _n, got = we.decode_mesh_vertices(buf, 0, NV, stride, be, noted)
     assert noted == ["eyelash_uvs"]
     assert got == we.lash_restored_uvs(_half(uv))
-    assert we._decode_sub(buf, 0, NV, stride, be)[2] == got  # the list is optional
+    assert we.decode_mesh_vertices(buf, 0, NV, stride, be)[2] == got  # the list is optional
     monkeypatch.setenv("WATCHMEN_NO_SYNTH", "1")
     noted = []
-    assert we._decode_sub(buf, 0, NV, stride, be, noted)[2] == _half(uv) and noted == []
+    assert we.decode_mesh_vertices(buf, 0, NV, stride, be, noted)[2] == _half(uv) and noted == []
 
 
 def test_decode_sub_leaves_every_other_buffer_alone():
     uv = [(0.01 * i, 0.5) for i in range(NV)]
     noted = []
-    assert we._decode_sub(_pc_buffer(uv), 0, NV, 56, False, noted)[2] == _half(uv)
+    assert we.decode_mesh_vertices(_pc_buffer(uv), 0, NV, 56, False, noted)[2] == _half(uv)
     assert noted == []
     short = _stored()[:40]
-    assert we._decode_sub(_pc_buffer(short), 0, 40, 56)[2] == _half(short)
+    assert we.decode_mesh_vertices(_pc_buffer(short), 0, 40, 56)[2] == _half(short)
 
 
 @pytest.fixture

@@ -14,6 +14,7 @@ import pytest
 import anim_meta as am
 import engine_enums as ee
 import kapow_props
+from conftest import state_named
 
 try:  # the module is new: every test fails (not errors at import) on the base tree
     import fx_meta as fx
@@ -341,10 +342,6 @@ def meta(fx_extract):
     return am.build(str(fx_extract))
 
 
-def _state(meta, cls, name):
-    return next(s for s in meta["classes"][cls]["states"] if s["name"] == name)
-
-
 # ---------------------------------------------------------- the dispatch rule
 def test_hit_position_follows_is_upper_damage_pose():
     f = need()
@@ -435,7 +432,7 @@ def test_cut_camera_matches_the_engine_constants():
 
 # ------------------------------------------------------------ event payloads
 def test_events_carry_their_payload_and_name_the_stale_slots(meta):
-    st = _state(meta, "Rorschach", "Finish_move_A")
+    st = state_named(meta, "Rorschach", "Finish_move_A")
     cuts = [e for e in st["events"] if e["name"] == "CAMERA_CUT"]
     first = cuts[0]
     assert first["payload"]["m_nvalue02"] == 1.5 and first["payload"]["m_nvalue10"] == 180.0
@@ -491,7 +488,7 @@ def test_existing_content_is_unchanged_apart_from_added_keys(fx_extract, monkeyp
 
 # ------------------------------------------------------------------ state fx
 def test_state_fx_uses_the_times_of_the_event_records(meta):
-    st = _state(meta, "Rorschach", "Finish_move_A")
+    st = state_named(meta, "Rorschach", "Finish_move_A")
     sfx = st["fx"]
     assert [c["playpos"] for c in sfx["camera_cuts"]] == [0.2, 0.5, 0.6]
     c0, c1, c2 = sfx["camera_cuts"]
@@ -544,11 +541,11 @@ def test_state_fx_uses_the_times_of_the_event_records(meta):
             "blend_from_multiplier": 1.0,
         }
     ]
-    assert "fx" not in _state(meta, "Rorschach", "Run")
+    assert "fx" not in state_named(meta, "Rorschach", "Run")
 
 
 def test_impact_effects_entries_and_the_extra_effect(meta):
-    sfx = _state(meta, "Rorschach", "Finish_move_A")["fx"]
+    sfx = state_named(meta, "Rorschach", "Finish_move_A")["fx"]
     a, b = sfx["impact_effects"]
     assert (a["damage_pose"], a["damage_pose_name"], a["hit_position"]) == (
         5,
@@ -797,15 +794,8 @@ def test_fxmeta_sidecar_and_command(meta, fx_extract, tmp_path, capsys):
     assert p["pair"] == 0 and len(p["camera_cuts"]) == 3 and p["camera_return"]["time_s"] == 1.4
     # without an anim_meta: the tables only
     assert "states" not in f.build(str(fx_extract))
-    import sys
-    from pathlib import Path
+    import watchmen
 
-    root = Path(__file__).resolve().parent.parent
-    sys.path.insert(0, str(root))
-    try:
-        import watchmen
-    finally:
-        sys.path.remove(str(root))
     out = tmp_path / "fx.json"
     watchmen.main(["watchmen.py", "fxmeta", str(fx_extract), str(out)])
     assert "fx.json" in capsys.readouterr().out

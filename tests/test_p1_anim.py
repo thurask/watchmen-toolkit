@@ -16,14 +16,11 @@ the executable in the review round of 2026-10-05 (addresses in the modules):
 """
 
 import math
-import os
-import sys
 import types
 
 import numpy as np
 import pytest
 
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wlib"))
 import anim_meta as am
 import anim_state_machine as asm
 import face_rule as fr
@@ -477,7 +474,7 @@ def test_contact_check_turns_each_body_with_its_game_pivot(tmp_path, monkeypatch
         return pal, 1.0
 
     monkeypatch.setattr(bake_v4, "bake", bake)
-    cc = am._ContactCheck(str(tmp_path))
+    cc = am.ContactCheck(str(tmp_path))
     W, _eff = cc._load(str(tmp_path / "RSH_turned.animation"))
     # body joints = Bip and the hand: GamePivot + R(GamePivot) * joint
     assert W[0, 0] == pytest.approx([5.0, 1.0, 0.0])
@@ -527,11 +524,11 @@ def test_not_established_lists_the_open_camera_points():
     assert not any("runs in real or in game time" in t for t in text)
     # settled: the transition clock is the script timepassed global (cut_placement.transition)
     assert not any("useRealtime" in t for t in text)
-    assert "0xe14304" in fx._CUT_PLACEMENT["transition"]
+    assert "0xe14304" in fx.CUT_PLACEMENT["transition"]
     # settled from code: nothing moves the root in normal or paired play; only the game check is left
     assert not any("root node follows the capsule" in t for t in text)
     assert any("vertical reference (the root) is on the floor" in t for t in text)
-    assert any("0x47da30" in v for v in fx._CUT_PLACEMENT.values() if isinstance(v, str))
+    assert any("0x47da30" in v for v in fx.CUT_PLACEMENT.values() if isinstance(v, str))
     assert any("first cut of a session blends" in t for t in text)
 
 

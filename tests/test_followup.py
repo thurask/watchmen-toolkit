@@ -16,7 +16,6 @@ import sys
 
 import pytest
 
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wlib"))
 import anim_meta as am
 import anim_state_machine as asm
 import engine_enums as ee
@@ -350,7 +349,7 @@ def test_event_timing_is_one_rule_for_both_modules():
     s = state(None, "S")
     event(s, ee.ident("ANIMATION_EVENT", "IMPACT"), asm.EV_PLAY_POS, 0.0)
     event(s, ee.ident("ANIMATION_EVENT", "IMPACT"), asm.EV_PLAY_POS, 0.5)
-    second, first = am._events(s, duration=2.0, basis="clip duration")  # firing order
+    second, first = am.state_event_records(s, duration=2.0, basis="clip duration")  # firing order
     assert first["fires_first_pass"] is False and "fires_first_pass" not in second
     assert first["play_time_s"] is None  # non-looping: never
     assert second["time_s"] == 1.0
@@ -625,7 +624,7 @@ def test_event_times_follow_the_state_speed():
     s = _speed_state(None, "Victim", 4.0, 1.1)
     event(s, 28, asm.EV_TOTAL_PLAY_TIME, 0.2)
     event(s, 19, asm.EV_PLAY_POS, 0.5)
-    goto, leave = am._events(s, duration=4.0, basis="clip duration", speed=1.1)
+    goto, leave = am.state_event_records(s, duration=4.0, basis="clip duration", speed=1.1)
     # 0.2 s of play at 1.1x = 0.22 s into the clip
     assert (goto["play_time_s"], goto["time_s"], goto["playpos"]) == (0.2, 0.22, 0.055)
     assert goto["playpos_basis"] == "seconds * speed / clip duration"
@@ -765,7 +764,7 @@ def test_exported_event_times_agree_with_the_interpreter(start, speed, loop):
 def test_events_for_another_entry_position_are_marked_as_given():
     s = _started_state(0.5, False)
     seen = _fire_times(s, start=0.1)  # e.g. an "Override Start PlayPos" transition
-    ev = {e["event_id"]: e for e in am._events(s, duration=4.0, speed=1.0, start=0.1)}
+    ev = {e["event_id"]: e for e in am.state_event_records(s, duration=4.0, speed=1.0, start=0.1)}
     assert ev[20]["start_basis"] == "given" and ev[20]["start_playpos"] == 0.1
     assert ev[20]["play_time_s"] == pytest.approx(2.6) == pytest.approx(seen["late"][0], abs=0.011)
     assert ev[21]["play_time_s"] == pytest.approx(0.8) == pytest.approx(seen["early"][0], abs=0.011)
@@ -963,14 +962,14 @@ def test_toc_old_attribute_names_can_be_written_too():
 def test_option_values_are_range_checked():
     import argparse
 
-    assert we._model_lod_arg("all") == "all" and we._model_lod_arg("2") == 2
+    assert we.model_lod_arg("all") == "all" and we.model_lod_arg("2") == 2
     for bad in ("-1", "x", "1.5"):
         with pytest.raises(argparse.ArgumentTypeError):
-            we._model_lod_arg(bad)
-    assert we._language_arg("5") == 5
+            we.model_lod_arg(bad)
+    assert we.language_arg("5") == 5
     for bad in ("6", "-1", "xx"):
         with pytest.raises(argparse.ArgumentTypeError):
-            we._language_arg(bad)
+            we.language_arg(bad)
     h, s = _skinned_model()
     M = we.parse_model_header(h)
     with pytest.raises(ValueError, match="LOD"):

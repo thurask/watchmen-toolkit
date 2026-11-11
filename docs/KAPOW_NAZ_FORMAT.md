@@ -314,7 +314,7 @@ Whether a blob (header *or* stream) is zlib-compressed is decided by the **asset
 its bytes: `0x5480fe` = config `useCompressedAssets` (default 1) **and** the type's
 compressible flag, which every type has except **`mediastream`** (0x554a2e clears it). A
 compressed blob is read through zlib inflate bounded by the directory size (0x437546).
-`_maybe_inflate(blob, type_name)` follows the type and reports a blob that should inflate and
+`maybe_inflate(blob, type_name)` follows the type and reports a blob that should inflate and
 does not (`extract_block(..., report=...)`, `Toc.compressed`, `Toc.inflate_failed`); only a blob
 of an unknown type is sniffed. Four PC Part 2 blocks: **2,161 header blobs inflate, 7
 `mediastream` headers are raw, 444 of 444 stream blobs inflate, 0 failures.**
@@ -1347,7 +1347,7 @@ on it (−1 when none does), the last page carries the end position and the EOS 
 one page per audio packet (27 + 1 bytes of page header per packet of about 100 bytes) the
 files are 11.6 % smaller in all; measured on the 53 track files of PC Part 2's 13 streams,
 ffmpeg decodes the same samples (sha1 of the PCM) with the same duration (ffprobe). The block
-flags that give the granule positions are read from the setup header (`_vorbis_blockflags`);
+flags that give the granule positions are read from the setup header (`vorbis_blockflags`);
 a setup header that does not follow the Vorbis I layout raises ValueError (also under
 `python -O`), and the file then gets 1,024 samples per packet.
 

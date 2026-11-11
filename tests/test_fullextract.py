@@ -1,38 +1,23 @@
 """Found on the full `extract` of the Part 2 PC archive (2026-10-04)."""
 
 import json
-import os
-import struct
-import sys
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(os.path.join(HERE, "..", "wlib"))
+import kapow_fragment as kf
+import kapow_json as kj
+import kapow_props as kp
+import text_assets as ta
 
-import kapow_fragment as kf  # noqa: E402
-import kapow_json as kj  # noqa: E402
-import kapow_props as kp  # noqa: E402
-import text_assets as ta  # noqa: E402
-
-import test_text_assets as tt  # noqa: E402
-
-
-def _u(*v):
-    return struct.pack("<%dI" % len(v), *v)
-
-
-def _str(s):
-    b = s.encode("latin1") + b"\0"
-    b += b"\0" * (-len(b) % 4)
-    return _u(len(b) // 4) + b
+import test_text_assets as tt
+from conftest import kstr, u32s
 
 
 def _fragment(payload):
-    head = _u(4) + bytes([0, 0]) + _u(1) + b"\0" + bytes([0, 0]) + _u(1)
-    return head + _u(len(payload)) + payload
+    head = u32s(4) + bytes([0, 0]) + u32s(1) + b"\0" + bytes([0, 0]) + u32s(1)
+    return head + u32s(len(payload)) + payload
 
 
 def _inst(nid, name):
-    return _u(0xFFFFFFFE, nid) + _u(kp.name_hash("name")) + _str(name)
+    return u32s(0xFFFFFFFE, nid) + u32s(kp.name_hash("name")) + kstr(name)
 
 
 def test_type_records_at_the_head_keep_their_created_entries():
@@ -42,7 +27,7 @@ def test_type_records_at_the_head_keep_their_created_entries():
     in 266 of the 906 Part 2 PC fragment JSONs, against 1.3.0 and docs/FRAGMENT_FORMAT.md."""
     ids = (0x5BC7CB2F, 0xDDF8F80C, 0x11223344)
     payload = b"".join(
-        _u(0xFFFFFFFF, i) + _str(t) for i, t in zip(ids, ("Model", "SubPivot", "SubPivot"))
+        u32s(0xFFFFFFFF, i) + kstr(t) for i, t in zip(ids, ("Model", "SubPivot", "SubPivot"))
     )
     payload += b"".join(_inst(i, "n%d" % k) for k, i in enumerate(ids))
     data = _fragment(payload)
@@ -65,8 +50,8 @@ def test_type_records_at_the_head_keep_their_created_entries():
 def test_bare_records_in_front_of_a_class_record_still_go_to_the_schema_only():
     """Unchanged: with a "Class(Native)" record in the head, the bare native records in
     front of it are schema entries (1.3.0 skipped them) and add nothing to `inst`."""
-    payload = _u(0xFFFFFFFF, 0x10) + _str("SceneNode")
-    payload += _u(0xFFFFFFFF, 0x12) + _str("SceneScope(LoadBlock)")
+    payload = u32s(0xFFFFFFFF, 0x10) + kstr("SceneNode")
+    payload += u32s(0xFFFFFFFF, 0x12) + kstr("SceneScope(LoadBlock)")
     payload += _inst(0x10, "") + _inst(0x12, "L")
     r = kf.parse(_fragment(payload))
     assert r["schema"] == [("00000010", "SceneNode"), ("00000012", "SceneScope(LoadBlock)")]

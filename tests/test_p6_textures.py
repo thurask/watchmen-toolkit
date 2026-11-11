@@ -89,10 +89,10 @@ def test_pc_carve_writes_the_slot_names(tmp_path):
     assert we.carve_texture(bytes(8 + 16), hdr, tmp_path / "floor", lambda *a: None)
     assert _names(tmp_path / "floor") == ["0_diffuse_4x4_DXT1.png", "1_height_4x4_L8.png"]
     # a height map is not a specular-power map: the lookups by label do not find it
-    assert we._find_layer(tmp_path / "floor", "specSize") is None
-    assert we._find_layer(tmp_path / "floor", "height") is not None
-    assert we._find_layer(tmp_path / "neon", "specMap") is None
-    assert we._find_layer(tmp_path / "neon", "glow") is not None
+    assert we.find_layer(tmp_path / "floor", "specSize") is None
+    assert we.find_layer(tmp_path / "floor", "height") is not None
+    assert we.find_layer(tmp_path / "neon", "specMap") is None
+    assert we.find_layer(tmp_path / "neon", "glow") is not None
 
 
 # ---------------------------------------------------------------------------
@@ -159,7 +159,7 @@ def test_a_block_that_does_not_read_leaves_the_frames_standing():
 
 def test_sheet_json_carries_the_animation_and_the_frame_times(tmp_path):
     tail = struct.pack("<I", 3) + _cycle([(k, k, 65, 65, k) for k in range(3)])
-    we._write_sheet_json(_animated(tail), tmp_path)
+    we.write_sheet_json(_animated(tail), tmp_path)
     d = json.loads((tmp_path / "sheet.json").read_text())
     assert d["frame_ms"] == [65, 65, 65] and d["animation"]["serial"] == 3
     assert d["twoSided"] is True and "cubeFaceOrder" not in d
@@ -167,7 +167,7 @@ def test_sheet_json_carries_the_animation_and_the_frame_times(tmp_path):
     out = tmp_path / "r"
     out.mkdir()
     tail = struct.pack("<I", 3) + _cycle([(0, 2, 30, 90, 0)])
-    we._write_sheet_json(_animated(tail), out)
+    we.write_sheet_json(_animated(tail), out)
     d = json.loads((out / "sheet.json").read_text())
     assert "frame_ms" not in d and d["animation"]["cycle"]["items"][0]["frame_max"] == 2
 
@@ -179,12 +179,12 @@ def test_cube_sheet_json_states_the_face_order(tmp_path):
     assert we.CUBE_FACE_ORDER == ("+X", "-X", "+Y", "-Y", "+Z", "-Z")
     hdr = tf._tex_header([({0: tf._tex_desc(4, 4, 5, 1, typ=2)}, "/data/c_cubemap.bmp")])
     hdr += tv._prop(0x1DA7D3DD, "renderType", "integer", 0) + b"\0" * 24
-    we._write_sheet_json(hdr, tmp_path)
+    we.write_sheet_json(hdr, tmp_path)
     d = json.loads((tmp_path / "sheet.json").read_text())
     assert d["cubeFaceOrder"] == ["+X", "-X", "+Y", "-Y", "+Z", "-Z"]
     flat = tf._tex_header([({0: _dxt1()}, "/data/a.bmp")])
     flat += tv._prop(0x1DA7D3DD, "renderType", "integer", 0) + b"\0" * 24
     out = tmp_path / "flat"
     out.mkdir()
-    we._write_sheet_json(flat, out)
+    we.write_sheet_json(flat, out)
     assert "cubeFaceOrder" not in json.loads((out / "sheet.json").read_text())

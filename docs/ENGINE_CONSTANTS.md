@@ -1532,7 +1532,7 @@ The default export bakes the face track the game's face classes produce. `--face
 writes the older synthesis instead: `wlib/face_synth.py` `blend_pal` (per-bone slerp between
 static pose palettes), `blink_anim` (open->0.07s close->0.07s hold->0.10s open, loopable
 4s), `talk_anim` (4Hz syllable bursts × phrase envelope, seeded, loop-clean),
-`category_pose` (body-clip name -> shipped pose name); `_face_attach` appends 'FACE SYNTH
+`category_pose` (body-clip name -> shipped pose name); `face_attach` appends 'FACE SYNTH
 Blink' / 'FACE SYNTH Talk' (shipped poses only: blink = BS2 family only, males / NTO ship no
 eyes-closed pose); every body animation's face channels = category pose (ATT / WPN / counter
 -> Attack1 | Shout | Biting, DMG -> DamageL/R/Stomach, dead -> Dead1/2, dance / flirt ->
@@ -1645,7 +1645,7 @@ rest 1, deleted ones 0 (`CharacterLodCtrl.StateActive` 0x66bb68).
   90deg + 0.40m (the cowl is authored in model space, not body space), 0.34m/122deg off the body
   root; Twilight Lady's Bip01 0.29m/123deg, weightless. 273 skirt-base verts carry
   Bip01 weight.
-- Toolkit choice (deliberate fidelity improvement over the engine): in `_face_attach`, face-rig
+- Toolkit choice (deliberate fidelity improvement over the engine): in `face_attach`, face-rig
   slots not under Head whose names exist in the body bind (NAME_MAP Bip01 -> Bip) are
   re-slotted to per-body-slot proxy joints (the weight-transfer mechanism; `proxy_slots`
   returned unconditionally), gated by alignment — only bones whose bind agrees with the body
@@ -1668,7 +1668,7 @@ rest 1, deleted ones 0 (`CharacterLodCtrl.StateActive` 0x66bb68).
   0.15s/30 anims, face attach 0.85s, `_icp_refine` 0.45s, load_parts vertex decode 0.5s,
   weight-transfer python loop ~1s on the worst head; the wall clock is file I/O and repeated
   per-variant work (`char_lib._texdir` is an os.walk index, 2.2s -> ~0.2s per process;
-  `char_lib._find_layers` is memoized per (mat, roots, flip), so the normal-map green-flip
+  `char_lib.find_layers` is memoized per (mat, roots, flip), so the normal-map green-flip
   re-encode is paid once, find_textures repeat 0.00s).
 
 ## 9. Jiggle (CharacterAddonCtrl + PhysX NxD6Joint)

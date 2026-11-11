@@ -21,17 +21,17 @@ import numpy as np
 from PIL import Image
 
 import watchmen
+import kapow_props
 import watchmen_extract as we
 import test_audio_v2 as ta
 import test_formats_v2 as tf
 import test_fullextract as tfe
 import test_p1_formats as tp1
-import test_p2_console_chars as tc
 import test_p2_part1 as tpp
 import test_p3_part1_model as tm
 import test_v120_regressions as tv
 import test_v150_audio as tva
-from conftest import build_clip_header, parse_glb
+from conftest import build_clip_header, class_name_record, parse_glb
 
 RED, GREEN, BLUE = 0xF800, 0x07E0, 0x001F
 
@@ -62,7 +62,7 @@ class _Block:
             sb = zlib.compress(stream)
             pair = (len(self.own), len(sb))
             self.own += sb
-        self.entries.append((name, we._name_hash(tname), zlib.compress(header), pair))
+        self.entries.append((name, kapow_props.name_hash(tname), zlib.compress(header), pair))
 
     def halves(self):
         return tpp._block(self.entries), self.own
@@ -80,7 +80,7 @@ def _archive(tmp_path):
     # a skinned body model (leg bones in its node table; scan path: no exact layout)
     joints = [(i % 5, 0, 0, 0) for i in range(8)]
     mh, ms = tv.skinned_model("<", joints)
-    b.add("/art/chars/Body.model", "modelRes", tc._cls("<") + mh, ms)
+    b.add("/art/chars/Body.model", "modelRes", class_name_record("<") + mh, ms)
     # a rigid model in the exact Part 2 header layout (static GLB with its vertex attributes)
     sh, ss = tm.build("<", "part2")
     b.add("/art/props/Crate.model", "modelRes", sh, ss)
@@ -158,7 +158,7 @@ def test_extract_every_asset_kind(tmp_path, capsys):
     with wave.open(str(out / "audio" / "sounds" / "sfx" / "Hit.wav"), "rb") as w:
         assert w.getnframes() == 52
         got = w.readframes(52)
-    assert got == we._adpcm_mono(tva._block(0, 16, 10, 5, [1, 2] * 25), 32)[:52].tobytes()
+    assert got == we.adpcm_mono(tva._block(0, 16, 10, 5, [1, 2] * 25), 32)[:52].tobytes()
     info = json.loads((out / "audio" / "sound_info.json").read_text())
     assert {"sounds/sfx/Beep.wav", "sounds/sfx/Hit.wav"} <= set(info["sounds"])
 

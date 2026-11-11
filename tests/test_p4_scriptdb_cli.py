@@ -3,10 +3,7 @@ lookup of a key that could be a hash or a name.  Synthetic database files only."
 
 import json
 import os
-import sys
 
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wlib"))
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 import kapow_props as kp
 import script_database as sd
 import watchmen

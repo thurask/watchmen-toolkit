@@ -6,15 +6,11 @@
    console set, whose log line named the real cause.  Marker and log now agree.
 """
 
-import os
-import sys
-
 import numpy as np
 
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wlib"))
 
-import characters_export as ce  # noqa: E402
-import variant_glb as vg  # noqa: E402
+import characters_export as ce
+import variant_glb as vg
 
 
 def _part(n, attrs):

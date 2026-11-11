@@ -11,13 +11,10 @@ was lost, and a `localPos` whose value starts a new chunk was read one word earl
 Synthetic fixtures only: every fragment below is built in the test, in both byte
 orders and with the chunk boundaries the test needs."""
 
-import os
 import struct
-import sys
 
 import pytest
 
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wlib"))
 import anim_state_machine as asm
 import kapow_fragment as kf
 import kapow_json as kj

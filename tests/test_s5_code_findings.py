@@ -11,14 +11,9 @@ fragments   the typed stream framing
 sound       one-track streams, local default packages, music one-shots
 Synthetic fixtures only."""
 
-import os
-import sys
-
 import numpy as np
 import pytest
 
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wlib"))
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import anim_meta as am
 import anim_state_machine as asm
 import bake_v4
@@ -34,6 +29,17 @@ import sound_meta as sm
 import test_level_meta as tl
 import test_p4_level_terrain as tt
 import watchmen_extract as we
+from conftest import (
+    entity_ref,
+    f32s,
+    frag_node,
+    fragment_bytes,
+    kstr,
+    model_named,
+    rotation_angle_deg,
+    u32s,
+    write_bytes,
+)
 
 ID = [0.0, 0.0, 0.0, 1.0]
 
@@ -188,10 +194,6 @@ def _twist_bind(tmp_path):
     return str(p)
 
 
-def _angle_deg(R):
-    return float(np.degrees(np.arccos(np.clip((np.trace(R) - 1) / 2, -1, 1))))
-
-
 def test_a_track_binds_to_the_bone_of_the_same_name_only(tmp_path):
     import test_p6_anim as tpa
 
@@ -203,9 +205,9 @@ def test_a_track_binds_to_the_bone_of_the_same_name_only(tmp_path):
     exact, _ = bake_v4.bake("c", 1, track_names="exact", **kw)
     assert bake_v4.bake("c", 1, **kw)[0] == pytest.approx(exact)  # the default
     # binds are identity, so a palette rotation is the bone's world (= local) rotation
-    assert _angle_deg(exact[0, 2, :, :3]) == pytest.approx(0.0, abs=1e-3)
+    assert rotation_angle_deg(exact[0, 2, :, :3]) == pytest.approx(0.0, abs=1e-3)
     prefix, _ = bake_v4.bake("c", 1, track_names="prefix", **kw)
-    assert _angle_deg(prefix[0, 2, :, :3]) == pytest.approx(40.0, abs=0.01)
+    assert rotation_angle_deg(prefix[0, 2, :, :3]) == pytest.approx(40.0, abs=0.01)
     with pytest.raises(ValueError, match="track_names"):
         bake_v4.bake("c", 1, track_names="index", **kw)
 
@@ -221,14 +223,14 @@ def test_the_twist_pass_runs_by_default_in_the_engine_gauge_only(tmp_path):
     on, _ = bake_v4.bake("c", 1, **kw)
     off, _ = bake_v4.bake("c", 1, twist_align=False, **kw)
     # Arm's X axis is turned 30 degrees; the twist bone follows it only with the pass
-    assert _angle_deg(off[0, 2, :, :3]) == pytest.approx(0.0, abs=1e-3)
-    assert _angle_deg(on[0, 2, :, :3]) == pytest.approx(30.0, abs=0.01)
+    assert rotation_angle_deg(off[0, 2, :, :3]) == pytest.approx(0.0, abs=1e-3)
+    assert rotation_angle_deg(on[0, 2, :, :3]) == pytest.approx(30.0, abs=0.01)
     assert on[0, 2, :, 0] == pytest.approx(on[0, 1, :, 0], abs=1e-4)
     assert on[0, 3, :, :3] == pytest.approx(on[0, 2, :, :3], abs=1e-6)  # the child follows
     try:
         # conj=False: the default leaves the pass out; asking for it is an error
         plain, _ = bake_v4.bake("c", 1, conj=False, **kw)
-        assert _angle_deg(plain[0, 2, :, :3]) == pytest.approx(0.0, abs=1e-3)
+        assert rotation_angle_deg(plain[0, 2, :, :3]) == pytest.approx(0.0, abs=1e-3)
         with pytest.raises(ValueError, match="twist_align"):
             bake_v4.bake("c", 1, conj=False, twist_align=True, **kw)
     finally:
@@ -236,24 +238,31 @@ def test_the_twist_pass_runs_by_default_in_the_engine_gauge_only(tmp_path):
 
 
 def test_the_character_export_binds_tracks_by_exact_name_in_both_parts(tmp_path):
-    import inspect
-
     assert ce.track_names_for(str(tmp_path)) == "exact"
     d = tmp_path / "extracted" / "TNT" / "Production" / "Fragments" / "Enemy"
     d.mkdir(parents=True)
     (d / "Biker.fragment").write_bytes(b"")
     assert ce._is_part1(str(tmp_path))
     assert ce.track_names_for(str(tmp_path)) == "exact"  # Part 1: the same engine lookup
-    src = inspect.getsource(ce.bake_cache)
-    assert src.count("track_names=_tn") == 2 and "twist_align=np.int32(1)" in src
-    assert "bake_is_current(dst, clips[nm], _tn, _bsha)" in src
-    import char_lib
-    import face_export
+    # bake_cache and the two face bakers: test_p6_anim (the bakes' keyword arguments)
 
-    assert "track_names_for(extract_out)" in inspect.getsource(char_lib.build_all)
-    for fn in (face_export.export, ce._face_attach):
-        s = inspect.getsource(fn)
-        assert "twist_align=False" in s and 'track_names="prefix"' in s
+
+def test_the_character_libraries_bake_with_the_track_lookup_of_the_set(tmp_path, monkeypatch):
+    import char_lib
+
+    ex = tmp_path / "ex"
+    (ex / "extracted" / "m").mkdir(parents=True)
+    (ex / "extracted" / "m" / "Body.model").write_bytes(b"")
+    spec = {"bind": "large", "models": ["m/Body"], "clips": ["EN1_a"]}
+    monkeypatch.setattr(char_lib, "LIBS", {"Test": spec, "Gone": dict(spec, models=["m/X"])})
+    monkeypatch.setattr(ce, "track_names_for", lambda e: "prefix" if e == str(ex) else None)
+    seen = []
+    monkeypatch.setattr(
+        char_lib, "build_lib", lambda bind, models, clips, out, **kw: seen.append((bind, kw))
+    )
+    done = char_lib.build_all(str(ex), {"large": "b.npz"}, str(tmp_path / "out"))
+    assert done == [str(tmp_path / "out" / "CHAR_Test_LIB.glb")]
+    assert [(b, kw["track_names"]) for b, kw in seen] == [("b.npz", "prefix")]
 
 
 def test_a_cached_bake_of_the_other_track_lookup_is_not_current(tmp_path):
@@ -333,7 +342,7 @@ def test_a_bake_outside_the_export_uses_the_exact_lookup_in_either_part(tmp_path
         monkeypatch.setattr(bake_v4, "bake", real)
         assert got["track_names"] == rule and got["bank"] == {"c": clip}
         off, _ = real("c", 1, bind=bind, bank={"c": clip}, twist_align=False, track_names=rule)
-        assert _angle_deg(off[0, 2, :, :3]) == pytest.approx(angle, abs=0.01)
+        assert rotation_angle_deg(off[0, 2, :, :3]) == pytest.approx(angle, abs=0.01)
     # a clip from a bank names no set; an explicit rule is passed on
     assert wl.bake_track_names("c", bank={"c": clip}, naz=naz) == ("exact", None)
     assert wl.bake_track_names("c", naz=str(tmp_path / "missing.naz")) == ("exact", None)
@@ -343,9 +352,8 @@ def test_a_bake_outside_the_export_uses_the_exact_lookup_in_either_part(tmp_path
 
 
 def test_the_contact_check_bakes_with_the_track_lookup_of_the_set(tmp_path, monkeypatch):
-    import inspect
 
-    assert am._ContactCheck(str(tmp_path)).track_names == "exact"
+    assert am.ContactCheck(str(tmp_path)).track_names == "exact"
     np.savez(
         str(tmp_path / "bind_rsh_file_v1.npz"),
         names=np.array(["GamePivot"]),
@@ -360,11 +368,26 @@ def test_the_contact_check_bakes_with_the_track_lookup_of_the_set(tmp_path, monk
 
     monkeypatch.setattr(bake_v4, "bake", bake)
     for rule in ("exact", "prefix"):
-        am._ContactCheck(str(tmp_path), rule)._load(str(tmp_path / "RSH_a.animation"))
+        am.ContactCheck(str(tmp_path), rule)._load(str(tmp_path / "RSH_a.animation"))
     assert seen == ["exact", "prefix"]
-    assert "_ContactCheck(binds, characters_export.track_names_for(extract_out))" in (
-        inspect.getsource(am._build)
-    )
+
+
+def test_the_animation_table_builds_its_contact_check_with_the_lookup_of_the_set(
+    tmp_path, monkeypatch
+):
+    (tmp_path / "extracted").mkdir()
+    made = []
+
+    class Check:
+        def __init__(self, *a):
+            made.append(a)
+
+    monkeypatch.setattr(am, "ContactCheck", Check)
+    monkeypatch.setattr(ce, "track_names_for", lambda e: "prefix" if e == str(tmp_path) else None)
+    am.build(str(tmp_path))
+    assert made == []  # no binds: no check
+    am.build(str(tmp_path), binds=str(tmp_path / "binds"))
+    assert made == [(str(tmp_path / "binds"), "prefix")]
 
 
 # ------------------------------------------------------------------ level fixture
@@ -378,21 +401,21 @@ CKP = 0x7A
 
 
 def _n(nid, typ, name, parent, order=0, ents=None, lists=None, **props):
-    """tl._node with entity (`ents`) and entity-list (`lists`) properties."""
-    b = tl._node(nid, typ, name, parent, order, **props)
+    """frag_node with entity (`ents`) and entity-list (`lists`) properties."""
+    b = frag_node(nid, typ, name, parent, order, **props)
     for k, v in (ents or {}).items():
-        b += tl._u(kp.name_hash(k)) + tl._ent(v)
+        b += u32s(kp.name_hash(k)) + entity_ref(v)
     for k, v in (lists or {}).items():
-        b += tl._u(kp.name_hash(k)) + tl._u(len(v)) + b"".join(tl._ent(x) for x in v)
+        b += u32s(kp.name_hash(k)) + u32s(len(v)) + b"".join(entity_ref(x) for x in v)
     return b
 
 
 @pytest.fixture(scope="module")
 def level(tmp_path_factory):
     base = tmp_path_factory.mktemp("s5level") / "extracted"
-    scene = tl._node(SCENE, "SceneNode", "", None)
-    scene += tl._node(LVL, "SceneScope(LoadBlock)", "Lvl", SCENE, 1, assetName="/L/Lvl.fragment")
-    tl._write(base / "L" / "Lvl.scene", tl._fragment(scene))
+    scene = frag_node(SCENE, "SceneNode", "", None)
+    scene += frag_node(LVL, "SceneScope(LoadBlock)", "Lvl", SCENE, 1, assetName="/L/Lvl.fragment")
+    write_bytes(base / "L" / "Lvl.scene", fragment_bytes(scene))
     f = _n(WPC, "WaypointController(Node)", "wpc", "host", 0, ents={"m_estart": W0, "m_eend": W4},
            m_nmaxdistance=30.0)  # fmt: skip
     way = lambda nid, order, for_all, excl, **kw: _n(
@@ -473,12 +496,12 @@ def level(tmp_path_factory):
             localOrient=ID)  # fmt: skip
     f += _n(VOL0, "CollisionBoxNode", "nosheet", "host", 19, localPos=[0.0] * 3, localOrient=ID,
             width=1.0, height=1.0, depth=1.0, physicsType=1)  # fmt: skip
-    f += tl._u(kp.name_hash("pivotSheet_Id")) + tl._u(0, 0)  # a stored id 0 (biginteger)
+    f += u32s(kp.name_hash("pivotSheet_Id")) + u32s(0, 0)  # a stored id 0 (biginteger)
     f += _n(LINKP, "PivotNode", "group", "host", 20, localPos=[0.0, 36.0, 0.0], localOrient=ID)
     f += _n(LINKED, "PivotNode", "flee", LINKP, 0, localPos=[1.0, -33.0, 2.0], localOrient=ID,
             parentLink=1)  # fmt: skip
     f += model(0x70, "fleeprop", LINKED, 0)
-    tl._write(base / "L" / "Lvl.fragment", tl._fragment(f, name="Lvl_Main", singleton=True))
+    write_bytes(base / "L" / "Lvl.fragment", fragment_bytes(f, name="Lvl_Main", singleton=True))
     return lm.build_level(str(base / "L" / "Lvl.scene"), "Lvl", "%08x" % LVL, None)
 
 
@@ -498,10 +521,6 @@ def _node(level, nid):
 
 def _edges(level, kind):
     return [e for e in level["graph"]["edges"] if e["kind"] == kind]
-
-
-def _m(level, name):
-    return next(r for r in level["models"] if r["name"] == name)
 
 
 # ------------------------------------------------------------------ waypoints
@@ -570,9 +589,9 @@ def test_a_cube_node_names_the_visibility_groups_that_switch_it(tmp_path):
     for a culling group that shows it (0x7054b8 -> 0x48f69a, read by 0x48e028); one below
     no group is a candidate for every culling group; a plain PVSRootNode keeps its flag."""
     base = tmp_path / "extracted"
-    scene = tl._node(SCENE, "SceneNode", "", None)
-    scene += tl._node(LVL, "SceneScope(LoadBlock)", "Lvl", SCENE, 1, assetName="/L/Lvl.fragment")
-    tl._write(base / "L" / "Lvl.scene", tl._fragment(scene))
+    scene = frag_node(SCENE, "SceneNode", "", None)
+    scene += frag_node(LVL, "SceneScope(LoadBlock)", "Lvl", SCENE, 1, assetName="/L/Lvl.fragment")
+    write_bytes(base / "L" / "Lvl.scene", fragment_bytes(scene))
     room, other, c_room, c_other, c_free, g1, g2, box = range(0x80, 0x88)
     plain, c_plain, m_room, m_free, m_other = range(0x88, 0x8D)
     f = _n(room, "CullingVisibilityGroup(PVSRootNode)", "room", "host", 0)
@@ -597,7 +616,7 @@ def test_a_cube_node_names_the_visibility_groups_that_switch_it(tmp_path):
     f += _n(plain, "PVSRootNode", "plain", "host", 5, Visible=False)
     f += cube(c_plain, "under_plain", plain, 0, 4.0)
     f += model(m_free, "crate", "host", 6, 4.0)
-    tl._write(base / "L" / "Lvl.fragment", tl._fragment(f, name="Lvl_Main", singleton=True))
+    write_bytes(base / "L" / "Lvl.fragment", fragment_bytes(f, name="Lvl_Main", singleton=True))
     j = lm.build_level(str(base / "L" / "Lvl.scene"), "Lvl", "%08x" % LVL, None)
     u = lambda nid: "1:%08x" % nid
     by = {c["name"]: c for c in j["cube_maps"]}
@@ -672,16 +691,16 @@ def test_a_checkpoint_naming_a_stream_block_is_listed_on_the_block(level):
 
 # ------------------------------------------------------------------ models
 def test_swinging_prop_carries_its_motion(level):
-    mo = _m(level, "lamp")["motion"]
+    mo = model_named(level, "lamp")["motion"]
     assert mo["kind"] == "hit_swing" and mo["rest"] == "stored placement"
     assert (mo["amplitude"], mo["frequency_hz"], mo["falloff"]) == (pytest.approx(0.12), 2.0, 1.5)
     assert mo["amplitude_z"] == pytest.approx(0.05) and mo["quarantine_s"] == 0.5
     assert "2^(-falloff_k*t)" in mo["formula"] and "0x874b7a" in mo["evidence"]
-    assert "motion" not in _m(level, "switch")
+    assert "motion" not in model_named(level, "switch")
 
 
 def test_visibility_follows_pvs_roots_only(level):
-    shown, culled = _m(level, "shown"), _m(level, "culled")
+    shown, culled = model_named(level, "shown"), model_named(level, "culled")
     # an invisible Folder does not hide its children; an invisible PVSRootNode does (0x48e028)
     assert shown["visible"] and shown["visible_effective"] is True and shown["pvs_root"] is None
     assert culled["visible"] is True and culled["visible_effective"] is False
@@ -691,10 +710,10 @@ def test_visibility_follows_pvs_roots_only(level):
 
 
 def test_lod_override_and_part_overrides(level):
-    sw = _m(level, "switch")
+    sw = model_named(level, "switch")
     assert sw["lod_override"] == 1 and sw["lod_factor"] == 0.5
     assert sw["include_in_reflections"] is True and sw["include_in_ao"] is False
-    plain = _m(level, "shown")
+    plain = model_named(level, "shown")
     assert plain["lod_override"] == -1 and plain["lod_factor"] == 1.0
     assert plain["include_in_reflections"] is False and plain["include_in_ao"] is True
     assert plain["part_overrides"] == []
@@ -722,7 +741,7 @@ def test_lod_override_and_part_overrides(level):
 
 
 def test_parent_link_1_composes_with_its_parent(level):
-    prop = _m(level, "fleeprop")
+    prop = model_named(level, "fleeprop")
     assert prop["world"]["pos"] == [2.0, 3.0, 2.0]  # group y 36 + flee point y -33
     assert level["counts"]["parent_link_1"] == 1
 
@@ -899,8 +918,8 @@ def test_terrain_says_how_it_is_drawn(tmp_path, monkeypatch):
     (moved,) = j["files"]["terrain"]
     assert moved["drawn_with"] == "identity" and moved["world_is_identity"] is False
     assert "0x49c3be" in j["files"]["terrain_rule"] and "0x49c3be" in j["evidence"]["files"]
-    assert lm._is_identity({"pos": [0, 0, 0], "quat": [0, 0, 0, -1]}) is True
-    assert lm._is_identity(None) is None
+    assert lm.is_identity({"pos": [0, 0, 0], "quat": [0, 0, 0, -1]}) is True
+    assert lm.is_identity(None) is None
 
 
 # ------------------------------------------------------------------ models: strips, cloth
@@ -955,17 +974,17 @@ def test_cloth_world_fixes_depend_on_the_buffer_format():
 def test_a_typed_stream_is_read_with_its_type_and_length_words():
     def prop(name, value, words=None, typehash=0x1234):
         words = len(value) // 4 if words is None else words
-        return tl._u(kp.name_hash(name), typehash, words) + value
+        return u32s(kp.name_hash(name), typehash, words) + value
 
     nid = 0x77
-    body = tl._u(0xFFFFFFFF, nid) + tl._str("Folder") + tl._u(0xFFFFFFFE, nid)
-    body += prop("name", tl._str("room"))
-    body += prop("siblingOrder", tl._u(3))
-    body += tl._u(0xDEADBEEF, 0x99, 2) + tl._u(7, 8)  # an unknown key: two words by the frame
-    body += prop("localPos", tl._f(1.0, 2.0, 3.0))
+    body = u32s(0xFFFFFFFF, nid) + kstr("Folder") + u32s(0xFFFFFFFE, nid)
+    body += prop("name", kstr("room"))
+    body += prop("siblingOrder", u32s(3))
+    body += u32s(0xDEADBEEF, 0x99, 2) + u32s(7, 8)  # an unknown key: two words by the frame
+    body += prop("localPos", f32s(1.0, 2.0, 3.0))
     nm = b"\0"
-    head = tl._u(4) + bytes([0, 0]) + tl._u(len(nm)) + nm + bytes([0, 1]) + tl._u(1)
-    data = head + tl._u(len(body)) + body
+    head = u32s(4) + bytes([0, 0]) + u32s(len(nm)) + nm + bytes([0, 1]) + u32s(1)
+    data = head + u32s(len(body)) + body
     assert kf.parse_header(data)["typed"] is True
     r = kf.parse(data)
     assert r["ok"] and r["end"] == r["size"]
@@ -975,7 +994,7 @@ def test_a_typed_stream_is_read_with_its_type_and_length_words():
     assert got["localPos"] == [1.0, 2.0, 3.0] and got["key_deadbeef"] == [7, 8]
     assert [t for k, t, _v in inst["props"] if k == "key_deadbeef"] == ["words?"]
     # the same bytes without the header flag do not read as an untyped stream
-    plain = head[:-5] + bytes([0]) + head[-4:] + tl._u(len(body)) + body
+    plain = head[:-5] + bytes([0]) + head[-4:] + u32s(len(body)) + body
     assert kf.parse_header(plain)["typed"] is False
     untyped = [x for x in kf.parse(plain)["inst"] if not x["created"]]
     assert {k: v for k, _t, v in untyped[0]["props"]}.get("siblingOrder") != 3

@@ -10,13 +10,9 @@ read the alpha.  A SRCALPHA / ONE glow of the standard pass keeps factor 1
 Synthetic fixtures only."""
 
 import json
-import os
-import sys
 
 import pytest
 
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wlib"))
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import watchmen_extract as we
 
 from conftest import parse_glb

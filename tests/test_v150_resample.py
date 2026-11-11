@@ -8,6 +8,7 @@ import pytest
 import bake_v4
 import test_p6_anim as tpa
 import test_s5_code_findings as ts5
+from conftest import rotation_angle_deg
 
 ID = (0.0, 0.0, 0.0, 1.0)
 
@@ -15,10 +16,6 @@ ID = (0.0, 0.0, 0.0, 1.0)
 def _qy(deg):
     h = np.radians(deg) / 2
     return (0.0, float(np.sin(h)), 0.0, float(np.cos(h)))
-
-
-def _angle_deg(R):
-    return float(np.degrees(np.arccos(np.clip((np.trace(R) - 1) / 2, -1, 1))))
 
 
 def _old_index_rule(x, n):
@@ -55,7 +52,7 @@ def _arm_angles(tmp_path, clip, capsys):
     bind = ts5._twist_bind(tmp_path)
     pal, _dur = bake_v4.bake("c", 1, bind=bind, bank={"c": clip}, twist_align=False)
     err = capsys.readouterr().err
-    return np.array([_angle_deg(pal[f, 1, :, :3]) for f in range(len(pal))]), err
+    return np.array([rotation_angle_deg(pal[f, 1, :, :3]) for f in range(len(pal))]), err
 
 
 def test_a_two_key_track_in_a_thirty_key_clip_ramps(tmp_path, capsys):

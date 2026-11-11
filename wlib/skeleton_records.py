@@ -136,14 +136,14 @@ def parse_volume_lists(mb, p, order="<", limit=None):
         p += 4 * ni
         s = {"class": "MeshParticleData", "tris": tris, "verts": verts, "indices": indices}
         s["weight_sum"] = float(sum(t["area_weight"] for t in tris))
-        s["weight_is_area"] = _weight_is_area(tris, verts, indices)
+        s["weight_is_area"] = weight_is_area(tris, verts, indices)
         # the stored constant 1.0 on every triangle, whatever its area
         s["weight_is_unit"] = bool(tris) and all(t["area_weight"] == 1.0 for t in tris)
         surfaces.append(s)
     return lists, surfaces, p
 
 
-def _weight_is_area(tris, verts, indices):
+def weight_is_area(tris, verts, indices):
     """True when every triangle's weight equals its geometric area (rtol 5e-3,
     atol 1e-5: the console copies of five Part 1 models store areas 0.10-0.16 %
     off; triangle i = indices 3i..3i+2), False when one does not, None when the
@@ -159,6 +159,9 @@ def _weight_is_area(tris, verts, indices):
     if not np.isfinite(w).all() or not np.isfinite(area).all():
         return False
     return bool(np.allclose(w, area, rtol=5e-3, atol=1e-5))
+
+
+_weight_is_area = weight_is_area  # the private spelling, kept for existing callers
 
 
 #: vertex formats a MeshBuffer may name (watchmen_extract.VERTEX_STRIDES has 11)

@@ -190,10 +190,10 @@ def test_surface_keys_class_and_area_weight(order):
 def test_weight_is_area_tolerance_and_unpaired_meshes():
     tris = lambda *w: [dict(area_weight=x) for x in w]
     v, i = np.array(QUAD, np.float32), np.array(QUAD_IDX, np.uint32)
-    assert sr._weight_is_area(tris(1.0005, 0.9995), v, i) is True  # rtol 1e-3
-    assert sr._weight_is_area(tris(1.01, 1.0), v, i) is False
-    assert sr._weight_is_area(tris(1.0), v, i) is None  # one record, two triangles
-    assert sr._weight_is_area([], v, i) is None
+    assert sr.weight_is_area(tris(1.0005, 0.9995), v, i) is True  # rtol 1e-3
+    assert sr.weight_is_area(tris(1.01, 1.0), v, i) is False
+    assert sr.weight_is_area(tris(1.0), v, i) is None  # one record, two triangles
+    assert sr.weight_is_area([], v, i) is None
 
 
 def _mesh_region(surfaces=(), submesh=True, groups=1, hulls=0, occluder=False):
@@ -331,29 +331,29 @@ def test_blobs_inflate_by_asset_type_not_by_their_first_byte():
     packed = zlib.compress(b"PAYLOAD" * 9)
     assert packed[0] == 0x78
     # mediastream is the one raw type (0x554a2e): its bytes are never inflated
-    assert we._maybe_inflate(packed, "mediastream") == packed
+    assert we.maybe_inflate(packed, "mediastream") == packed
     assert we.asset_compressed("mediastream") is False
     # every other type is zlib whatever the first byte is
     co = zlib.compressobj(6, zlib.DEFLATED, 12)
     small_window = co.compress(b"PAYLOAD" * 9) + co.flush()
     assert small_window[0] != 0x78
-    assert we._maybe_inflate(small_window, "sound") == b"PAYLOAD" * 9
-    assert we._maybe_inflate(small_window, "ModelEffects(ModelRes)") == b"PAYLOAD" * 9
+    assert we.maybe_inflate(small_window, "sound") == b"PAYLOAD" * 9
+    assert we.maybe_inflate(small_window, "ModelEffects(ModelRes)") == b"PAYLOAD" * 9
     assert we.asset_compressed("TextureEffects(Texture)") is True
     # unknown type: sniffed, as before
-    assert we._maybe_inflate(packed) == b"PAYLOAD" * 9
-    assert we._maybe_inflate(small_window) == small_window
-    assert we._maybe_inflate(b"RAW") == b"RAW" and we.asset_compressed("") is None
+    assert we.maybe_inflate(packed) == b"PAYLOAD" * 9
+    assert we.maybe_inflate(small_window) == small_window
+    assert we.maybe_inflate(b"RAW") == b"RAW" and we.asset_compressed("") is None
 
 
 def test_a_blob_that_should_inflate_and_does_not_is_reported():
     got = []
-    assert we._maybe_inflate(b"\x78\x9cgarbage", "Texture", got.append) == b"\x78\x9cgarbage"
+    assert we.maybe_inflate(b"\x78\x9cgarbage", "Texture", got.append) == b"\x78\x9cgarbage"
     assert len(got) == 1
     h, s = tf._block(
         [
             ("/a.bmp", tf._TEX, b"NOT-ZLIB", zlib.compress(b"stream")),
-            ("/m.wav", we._name_hash("mediastream"), b"RAWHDR", None),
+            ("/m.wav", kapow_props.name_hash("mediastream"), b"RAWHDR", None),
         ]
     )
     msgs = []
@@ -482,7 +482,7 @@ def test_engine_language_codes():
 
 
 def test_language_option_takes_names_and_codes():
-    arg = we._language_arg
+    arg = we.language_arg
     assert arg("german") == arg("3") == arg("de") == arg("GERMAN") == 3
     assert arg("english") == arg("uk") == arg("en") == arg("0") == 0
     assert arg("danish") == arg("dk") == arg("da") == 5
@@ -564,7 +564,7 @@ def movie_extract(tmp_path):
     cut.append(cut[0])
     other = [ta.build_textres([("00:00:000->00:01:000", s)]) for s in LANGS]
     other.append(other[0])
-    text_hash = we._name_hash("textRes")
+    text_hash = kapow_props.name_hash("textRes")
     h, s_ = tf._block(
         [("/main.bmp", tf._TEX, b"MAIN", None)],
         [

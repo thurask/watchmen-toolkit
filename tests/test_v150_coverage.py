@@ -3,11 +3,11 @@
     characters_export.export   the orchestration of `watchmen characters`: binds,
                                resumable bakes, jiggle memos, head selection, the
                                GLB and its options record, the resumed run
-    characters_export._face_attach       face bind alignment, the name-proxy ride
+    characters_export.face_attach       face bind alignment, the name-proxy ride
                                and the weight transfer onto the static head
     characters_export._brown_hair_layers the brown-tinted hair layer of a
                                synthetic variant
-    watchmen_extract._rsx_unswizzle      against a reference RSX swizzle
+    watchmen_extract.rsx_unswizzle      against a reference RSX swizzle
     watchmen_extract._carve_texture_legacy  the coherence-search carve
     watchmen_extract.carve_texture_console  a PS3 L8 and an X360 DXT1 texture with
                                known pixels, the early returns
@@ -32,65 +32,6 @@ from conftest import parse_glb
 # ---------------------------------------------------------------------------
 # characters_export.export
 # ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def export_env(tmp_path, monkeypatch, rig):
-    """A minimal extract: one character with two models on the rig fixture's
-    bind, one baked clip; a second character whose bakes are still pending.
-    The archive-reading steps (discover, binds, bakes) are replaced; everything
-    from the cached bake to the written GLB runs as in a real export."""
-    ex = tmp_path / "ex"
-    (ex / "extracted").mkdir(parents=True)
-    out = tmp_path / "chars"
-    calls = {"bake": [], "faces": [], "load_parts": []}
-
-    monkeypatch.setattr(
-        ce,
-        "discover",
-        lambda e: {
-            "Heavy": {"Heavy": ("large", ["/m/Heavy_Body", "/m/Heavy_Hair"])},
-            "Thug": {"Thug_A": ("small", ["/m/Thug_Body"])},
-        },
-    )
-    monkeypatch.setattr(ce, "bind_mismatches", lambda e: {"large": "other bone list than X.model"})
-    monkeypatch.setattr(ce, "ensure_all_binds", lambda keys, e, naz: {"small": "no skeleton"})
-    monkeypatch.setattr(ce, "ensure_bind", lambda key, e, naz: str(rig.bind_npz))
-    monkeypatch.setattr(ce, "animation_meta", lambda e, o: None)
-
-    def bake_cache(key, bind, e, o, budget=None):
-        calls["bake"].append(key)
-        if key == "small":
-            return 0, 2  # two clips still to bake
-        cdir = os.path.join(o, "_bake", key)
-        os.makedirs(cdir, exist_ok=True)
-        f = os.path.join(cdir, "clip_test.npz")
-        if not os.path.exists(f):
-            np.savez(f, pal=rig.palette, dur=np.float32(0.2), fps=np.float32(rig.fps))
-            open(os.path.join(cdir, "torn.tmp.npz"), "wb").close()  # a killed run's leftover
-        return 1, 0
-
-    monkeypatch.setattr(ce, "bake_cache", bake_cache)
-    import char_lib
-    import jiggle_d6
-
-    def load_parts(models, bn, sheets=None):
-        calls["load_parts"].append([os.path.basename(m) for m in models])
-        return [
-            (rig.V + np.float32(i), rig.SI, rig.SW, rig.T, rig.UV, "mat_" + os.path.basename(m))
-            for i, m in enumerate(models)
-        ]
-
-    monkeypatch.setattr(char_lib, "load_parts", load_parts)
-    jig = []
-
-    def apply_jiggle(pal, fps, bind, model=None, loop=False, props=None):
-        jig.append(model)
-        return np.asarray(pal, np.float32) * np.float32(1.0)
-
-    monkeypatch.setattr(jiggle_d6, "apply_jiggle", apply_jiggle)
-    calls["jiggle"] = jig
-    return ex, out, calls
 
 
 def test_export_writes_the_glb_and_resumes(export_env, capsys):
@@ -137,7 +78,7 @@ def test_export_picks_the_head_to_rig(export_env, monkeypatch, capsys):
         seen.append((cname, os.path.basename(model_base), bone, align_ref))
         return None
 
-    monkeypatch.setattr(ce, "_face_attach", face_attach)
+    monkeypatch.setattr(ce, "face_attach", face_attach)
     monkeypatch.setattr(
         ce, "_model_index", lambda e: {"Heavy_FaceTwin": "/m/Heavy_FaceTwin", "Extra": "/m/Extra"}
     )
@@ -195,7 +136,7 @@ def test_export_outfits_synthetic_hair_and_restored_textures(export_env, monkeyp
         lambda parts, roots: {str(p[5]): {"alphaMask": False} for p in parts},
     )
     monkeypatch.setattr(
-        char_lib, "_find_layers", lambda mat, roots: {"diffuse": png} if mat == "Repl" else None
+        char_lib, "find_layers", lambda mat, roots: {"diffuse": png} if mat == "Repl" else None
     )
     ce.export(str(ex), str(out), naz="none.naz")
     log = capsys.readouterr().out
@@ -214,112 +155,13 @@ def test_export_outfits_synthetic_hair_and_restored_textures(export_env, monkeyp
 
 
 # ---------------------------------------------------------------------------
-# characters_export._face_attach
+# characters_export.face_attach
 # ---------------------------------------------------------------------------
-
-
-def _bind_npz(path, names, R, t, par):
-    np.savez(
-        str(path),
-        Rb=np.asarray(R, float),
-        tb=np.asarray(t, float),
-        names=np.array(names),
-        par=np.array(par),
-    )
-    return str(path)
-
-
-def _rz(deg):
-    a = np.radians(deg)
-    return np.array([[np.cos(a), -np.sin(a), 0], [np.sin(a), np.cos(a), 0], [0, 0, 1.0]])
-
-
-@pytest.fixture
-def face_env(tmp_path, monkeypatch):
-    """Body bind: Bip, Spine2, Neck, Head.  Face bind of the head model: Head,
-    Jaw (below Head), Neck (aligned with the body's Neck) and Bip01 (0.5 m off
-    the body's Bip: a misaligned match)."""
-    ex = tmp_path / "ex"
-    ex.mkdir()
-    body_names = ["Bip", "Spine2", "Neck", "Head"]
-    Rb = [np.eye(3), np.eye(3), np.eye(3), _rz(30)]
-    tb = [[0, 1.0, 0], [0, 1.3, 0], [0, 1.5, 0], [0, 1.6, 0]]
-    body = _bind_npz(tmp_path / "body.npz", body_names, Rb, tb, [-1, 0, 1, 2])
-    face_names = ["Bip01", "Neck", "Head", "Jaw"]
-    # the face model's frame: its Head at the origin, rotated by -10 deg
-    Rh = _rz(-10)
-    M = np.asarray(Rb[3]) @ Rh.T
-    tf = [[0, 0.5, 0], [0, -0.1, 0], [0, 0, 0], [0, -0.05, 0.04]]
-    Rf = [np.eye(3), np.eye(3), Rh, Rh]
-    # Neck: aligned under the global head transform M,t (t maps face Head -> body Head)
-    t = np.asarray(tb[3]) - M @ np.asarray(tf[2])
-    Rf[1] = M.T @ np.asarray(Rb[2])
-    tf[1] = list(M.T @ (np.asarray(tb[2]) - t))
-    import build_bind_file as bbf
-    import bake_v4
-    import char_lib
-    import face_export
-    import parse_model_nodes
-
-    def build(model, template, dst):
-        _bind_npz(dst, face_names, Rf, tf, [-1, 0, 1, 2])
-        return dst
-
-    monkeypatch.setattr(bbf, "build", build)
-    monkeypatch.setattr(ce, "_read_bytes", lambda p: b"")
-    monkeypatch.setattr(
-        parse_model_nodes,
-        "parse",
-        lambda b: (["", "x"], np.ones((2, 3)), np.tile([0, 0, 0, 1.0], (2, 1)), np.array([5, 0])),
-    )
-    V = np.array([[0, 0.02, 0.0], [0, -0.05, 0.04], [0, 0.45, 0], [0, -0.1, 0.01]], np.float32)
-    # vertex k: all weight on face joint k (Bip01, Neck, Head, Jaw)
-    SI = np.array([[0, 0, 0, 0], [1, 0, 0, 0], [2, 0, 0, 0], [3, 0, 0, 0]][::-1], np.uint16)
-    SW = np.array([[1, 0, 0, 0]] * 4, np.float32)
-    T = np.array([[0, 1, 2], [1, 2, 3]], np.uint32)
-    UV = np.zeros((4, 2), np.float32)
-    face_part = (V, SI, SW, T, UV, "face_mat")
-    ref_V = (V.astype(float) @ M.T + t).astype(np.float32)
-    ref_part = (
-        ref_V,
-        np.array([[3, 2, 0, 0]] * 4, np.uint16),
-        np.array([[0.75, 0.25, 0, 0]] * 4, np.float32),
-        T,
-        UV,
-        "head_mat",
-    )
-
-    def load_parts(models, bn, sheets=None):
-        return [ref_part] if models == ["/m/StaticHead"] else [face_part]
-
-    monkeypatch.setattr(char_lib, "load_parts", load_parts)
-    monkeypatch.setattr(face_export, "head_family", lambda head: "Fam")
-    clips = {
-        "Fam/MouthClosed_EyesOpen": b"a",
-        "Fam/MouthClosed_EyesClosed": b"b",
-        "Fam/MouthTalk_EyesAnger": b"c",
-        "Other/X": b"d",
-    }
-    monkeypatch.setattr(face_export, "face_clips", lambda e: clips)
-    monkeypatch.setattr(bake_v4, "_load_bind", lambda p: None)
-    poses = {
-        "Fam/MouthClosed_EyesOpen": 0.0,
-        "Fam/MouthClosed_EyesClosed": 1.0,
-        "Fam/MouthTalk_EyesAnger": 2.0,
-    }
-
-    def bake(nm, up, bank=None, **kw):
-        if nm not in poses:
-            raise ValueError("no such clip")
-        return np.full((1, 4, 3, 4), poses[nm], np.float32), 1.0
-
-    monkeypatch.setattr(bake_v4, "bake", bake)
-    return dict(ex=ex, body=body, bn=body_names, M=M, t=t)
 
 
 def test_face_attach_aligns_and_rides_the_name_proxies(face_env, capsys):
     e = face_env
-    face = ce._face_attach("/m/HeadTwin", "Head", e["body"], e["bn"], "Heavy", str(e["ex"]), "out")
+    face = ce.face_attach("/m/HeadTwin", "Head", e["body"], e["bn"], "Heavy", str(e["ex"]), "out")
     log = capsys.readouterr().out
     assert os.path.exists(face["bind"]) and face["attach_idx"] == 3 and face["family"] == "Fam"
     assert np.allclose(face["M"], e["M"]) and np.allclose(face["t"], e["t"])
@@ -346,7 +188,7 @@ def test_face_attach_aligns_and_rides_the_name_proxies(face_env, capsys):
 
 def test_face_attach_transfers_the_static_heads_weights(face_env, capsys):
     e = face_env
-    face = ce._face_attach(
+    face = ce.face_attach(
         "/m/HeadTwin",
         "Head",
         e["body"],
@@ -392,7 +234,7 @@ def test_brown_hair_layers(monkeypatch):
         "hair_mat": {"diffuse": _png(hair, "RGBA"), "normal": b"N", "specSize": b"S"},
         "tint_mat": {"diffuse": _png(tint, "RGB")},
     }
-    monkeypatch.setattr(char_lib, "_find_layers", lambda mat, roots: dict(layers.get(mat) or {}))
+    monkeypatch.setattr(char_lib, "find_layers", lambda mat, roots: dict(layers.get(mat) or {}))
     out = ce._brown_hair_layers(["t"], "hair_mat", "tint_mat")
     assert out["normal"] == b"N" and out["specSize"] == b"S" and out["alphaMask"] is True
     im = np.asarray(Image.open(io.BytesIO(out["diffuse"])))
@@ -417,7 +259,7 @@ def test_brown_hair_layers(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# watchmen_extract._rsx_unswizzle
+# watchmen_extract.rsx_unswizzle
 # ---------------------------------------------------------------------------
 
 
@@ -466,12 +308,12 @@ def test_rsx_unswizzle_inverts_the_reference_swizzle(w, h, unit):
     rng = np.random.default_rng(w * 100 + h * 10 + unit)
     linear = rng.integers(0, 256, w * h * unit, dtype=np.uint8).tobytes()
     sw = _swizzle(linear, w, h, unit)
-    assert we._rsx_unswizzle(sw + b"\xee" * 16, w, h, unit) == linear  # chain bytes ignored
+    assert we.rsx_unswizzle(sw + b"\xee" * 16, w, h, unit) == linear  # chain bytes ignored
 
 
 def test_rsx_unswizzle_leaves_what_it_cannot_untile():
-    assert we._rsx_unswizzle(b"x" * 12, 3, 4) == b"x" * 12  # not a power of two
-    assert we._rsx_unswizzle(b"x" * 8, 4, 4) == b"x" * 8  # too short
+    assert we.rsx_unswizzle(b"x" * 12, 3, 4) == b"x" * 12  # not a power of two
+    assert we.rsx_unswizzle(b"x" * 8, 4, 4) == b"x" * 8  # too short
 
 
 # ---------------------------------------------------------------------------

@@ -10,14 +10,10 @@
 """
 
 import math
-import os
-import sys
 
 import numpy as np
 import pytest
 
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wlib"))
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import anim_meta as am
 import frame
 import variant_glb as vg
@@ -155,7 +151,7 @@ def test_obj_normals_are_reflected_in_the_true_frame(tmp_path, monkeypatch):
 
     def write(mode):
         out = tmp_path / mode / "q.obj"
-        we._write_obj_mtl(out, "q", v, n, uv, tris, [(0, 4, 0, 2, 56)], ["m"], {}, lambda *a: None)
+        we.write_obj_mtl(out, "q", v, n, uv, tris, [(0, 4, 0, 2, 56)], ["m"], {}, lambda *a: None)
         return tfr._obj(out)
 
     (vm, nm, fm, _hm), (vt, nt, ft, _ht) = tfr.both(monkeypatch, write)

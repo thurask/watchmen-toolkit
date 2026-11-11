@@ -13,13 +13,10 @@ Synthetic fixtures only.  They mirror what was read on the six exported sets
 """
 
 import json
-import os
 import struct
-import sys
 
 import pytest
 
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wlib"))
 import sound_meta as sm
 import test_audio_v2 as au
 import test_text_assets as tt

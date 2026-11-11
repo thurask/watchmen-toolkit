@@ -6,14 +6,12 @@ parents places it.  Bordello's node has localPos (0, -24, 76) under a fragment h
 Synthetic binary fixtures only."""
 
 import os
-import sys
 
 import pytest
 
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wlib"))
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import level_meta as lm
 import test_level_meta as tl
+from conftest import frag_node, fragment_bytes, write_bytes
 
 ASSET = "/Levels/T/Art/Terrain/T_01/T_01.terrain"
 HOUSE, FOLDER, TERRAIN, PLAIN = 0x70, 0x71, 0x72, 0x73
@@ -21,9 +19,9 @@ HOUSE, FOLDER, TERRAIN, PLAIN = 0x70, 0x71, 0x72, 0x73
 
 def _level(tmp_path, level_pos, level_quat, frame):
     base = tmp_path / "extracted"
-    scene = tl._node(tl.SCENE, "SceneNode", "", None)
-    scene += tl._node(tl.SCENES, "Folder", "Scenes", tl.SCENE)
-    scene += tl._node(
+    scene = frag_node(tl.SCENE, "SceneNode", "", None)
+    scene += frag_node(tl.SCENES, "Folder", "Scenes", tl.SCENE)
+    scene += frag_node(
         tl.LVL,
         "SceneScope(LoadBlock)",
         "Lvl",
@@ -33,12 +31,12 @@ def _level(tmp_path, level_pos, level_quat, frame):
         localOrient=level_quat,
         assetName="/Levels/T/Lvl.fragment",
     )
-    tl._write(base / "Levels" / "T" / "Test.scene", tl._fragment(scene))
-    lvl = tl._node(
+    write_bytes(base / "Levels" / "T" / "Test.scene", fragment_bytes(scene))
+    lvl = frag_node(
         HOUSE, "PivotNode", "house", "host", 0, localPos=[0.0, 24.0, -76.0], localOrient=tl.ID
     )
-    lvl += tl._node(FOLDER, "Folder", "Terrain", HOUSE, 0)
-    lvl += tl._node(
+    lvl += frag_node(FOLDER, "Folder", "Terrain", HOUSE, 0)
+    lvl += frag_node(
         TERRAIN,
         "TerrainNode",
         "",
@@ -54,8 +52,8 @@ def _level(tmp_path, level_pos, level_quat, frame):
         heightInUserSectors=8,
         textureTiling=2,
     )
-    lvl += tl._node(PLAIN, "PivotNode", "no terrain", "host", 1, localPos=[1.0, 0.0, 0.0])
-    tl._write(base / "Levels" / "T" / "Lvl.fragment", tl._fragment(lvl))
+    lvl += frag_node(PLAIN, "PivotNode", "no terrain", "host", 1, localPos=[1.0, 0.0, 0.0])
+    write_bytes(base / "Levels" / "T" / "Lvl.fragment", fragment_bytes(lvl))
     os.environ["WATCHMEN_FRAME"] = frame
     (found,) = lm.levels(str(tmp_path))
     return lm.build_level(found[0], found[1], found[2], str(tmp_path))
@@ -105,14 +103,14 @@ def test_terrain_gltf_follows_the_frame_of_the_file(tmp_path, frames, frame):
 
 def test_level_without_a_terrain_has_an_empty_list(tmp_path, frames):
     base = tmp_path / "extracted"
-    scene = tl._node(tl.SCENE, "SceneNode", "", None)
-    scene += tl._node(tl.SCENES, "Folder", "Scenes", tl.SCENE)
-    scene += tl._node(
+    scene = frag_node(tl.SCENE, "SceneNode", "", None)
+    scene += frag_node(tl.SCENES, "Folder", "Scenes", tl.SCENE)
+    scene += frag_node(
         tl.LVL, "SceneScope(LoadBlock)", "Lvl", tl.SCENES, 1, assetName="/Levels/T/Lvl.fragment"
     )
-    tl._write(base / "Levels" / "T" / "Test.scene", tl._fragment(scene))
-    lvl = tl._node(PLAIN, "PivotNode", "p", "host", 0, localPos=[1.0, 0.0, 0.0])
-    tl._write(base / "Levels" / "T" / "Lvl.fragment", tl._fragment(lvl))
+    write_bytes(base / "Levels" / "T" / "Test.scene", fragment_bytes(scene))
+    lvl = frag_node(PLAIN, "PivotNode", "p", "host", 0, localPos=[1.0, 0.0, 0.0])
+    write_bytes(base / "Levels" / "T" / "Lvl.fragment", fragment_bytes(lvl))
     (found,) = lm.levels(str(tmp_path))
     j = lm.build_level(found[0], found[1], found[2], str(tmp_path))
     assert j["files"]["terrain"] == [] and j["files"]["loose"] == []

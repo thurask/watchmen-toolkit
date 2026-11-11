@@ -15,18 +15,16 @@ overtook, where they live in code.
 import json
 import os
 import re
-import sys
 
 import pytest
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(os.path.join(HERE, "..", "wlib"))
+import anim_state_machine as asm
+import kapow_json as kj
+import terrain_asset as ta
+import test_p3_raw_formats as p3
+import watchmen_extract as we
 
-import anim_state_machine as asm  # noqa: E402
-import kapow_json as kj  # noqa: E402
-import terrain_asset as ta  # noqa: E402
-import test_p3_raw_formats as p3  # noqa: E402
-import watchmen_extract as we  # noqa: E402
+HERE = os.path.dirname(os.path.abspath(__file__))
 
 KEY = "stream.format_stride on consoles"
 

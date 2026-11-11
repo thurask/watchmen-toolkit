@@ -6,18 +6,15 @@ so the jacket is one node per outfit; shoes and hands are the same everywhere an
 stay in the main mesh."""
 
 import json
-import os
-import sys
 
 import numpy as np
 
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wlib"))
 import characters_export as ce
 import kapow_json
 import parts_rule as pr
 import variant_glb as vg
 
-from conftest import parse_glb
+from conftest import parse_glb, rig_part
 
 MEMBERS = [
     {"index": 1, "models": ["Jacket", "Shoes", "Hair_Side", "Head1"]},
@@ -71,16 +68,12 @@ def test_outfit_record_maps_each_outfit_to_its_nodes_and_sheets():
     assert "siblingOrder" in rec["order_basis"] and "OUTFIT <k>" in rec["outfit_rule"]
 
 
-def _part(rig, dx, name):
-    return (rig.V + np.float32(dx), rig.SI, rig.SW, rig.T, rig.UV, name)
-
-
 def test_outfit_nodes_shown_in_scene_hidden_outside_and_sharing_their_vertex_data(tmp_path, rig):
-    jacket = lambda mat: [_part(rig, 1.0, mat)]
+    jacket = lambda mat: [rig_part(rig, 1.0, mat)]
     outfit = [
         ("OUTFIT 1 Jacket", jacket("outfit"), True),
         ("OUTFIT 2 Jacket", jacket("outfit_3"), False),
-        ("OUTFIT 2 Afro", [_part(rig, 2.0, "afro")], False),
+        ("OUTFIT 2 Afro", [rig_part(rig, 2.0, "afro")], False),
     ]
     rec = {
         "mode": "game",

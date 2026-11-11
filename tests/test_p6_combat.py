@@ -6,18 +6,16 @@ Synthetic fixtures only (the combat feature's extract, extended)."""
 
 import json
 import os
-import sys
 
 import pytest
 
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wlib"))
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import anim_meta as am
 import combat_meta as cm
 import engine_enums as ee
 
 import test_combat_meta as tc
 from test_anim_meta import Frag
+from conftest import state_named
 
 extract = tc.extract
 
@@ -299,11 +297,11 @@ def test_impact_effects_events_that_deal_damage_are_listed(meta):
 
 
 def test_a_bull_move_state_points_to_its_rule(meta):
-    shock = tc._state(meta, "Special", "Shock")
+    shock = state_named(meta, "Special", "Shock")
     assert shock["special_handling"]["name"] == "BULL_MOVE"
     assert shock["combat"]["special_handling_rule"] == "BULL_MOVE"
     assert "BULL_MOVE" in meta["combat"]["rules"]["special_handling"]
-    other = tc._state(meta, "Rorschach", "Chain_A")
+    other = state_named(meta, "Rorschach", "Chain_A")
     assert "special_handling_rule" not in other["combat"]
 
 

@@ -13,14 +13,11 @@ the pass 2 tests are reused)."""
 import json
 import os
 import struct
-import sys
 import zlib
 
 import numpy as np
 import pytest
 
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wlib"))
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import font_asset as fa
 import kapow_json as kj
 import kapow_props as kp
@@ -828,7 +825,7 @@ def _block_parts():
     streams = [z(_terrain_stream()), z(bytes([1, 2, 3, 0, 4, 5, 6, 0])), z(_detail_stream())]
     offs = [0, len(streams[0]), len(streams[0]) + len(streams[1])]
     pair = lambda i: (offs[i], len(streams[i]))
-    h = we._name_hash
+    h = kp.name_hash
     entries = [
         ("/art/Fonts/Small.font", h("font"), z(fa.build(_font_doc(), _PIX)), None),
         ("/Levels/Game.scene", h("fragment"), z(_scene()), None),

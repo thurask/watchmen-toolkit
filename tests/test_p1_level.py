@@ -14,42 +14,24 @@ Groups          CharacterGroup.initialize_local 0x668a0e / initialize_external 0
 Cube maps       nearest CubeMapNode 0x4d1299
 Synthetic binary fixtures only: every file below is built in the test."""
 
-import os
-import struct
-import sys
-
 import pytest
 
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wlib"))
 import kapow_fragment as kf
 import kapow_props as kp
 import level_meta as lm
 import nav_data as nd
-
-
-def _u(*v):
-    return struct.pack("<%dI" % len(v), *v)
-
-
-def _f(*v):
-    return struct.pack("<%df" % len(v), *v)
-
-
-def _str(s):
-    b = s.encode("latin1") + b"\0"
-    b += b"\0" * (-len(b) % 4)
-    return _u(len(b) // 4) + b
+from conftest import f32s, kstr, u32s, write_bytes
 
 
 def _ent(v):
     """None -> null, "host" -> tag 2, int -> tag 3, ("single", ids) -> tag 5."""
     if v is None:
-        return _u(1)
+        return u32s(1)
     if v == "host":
-        return _u(2)
+        return u32s(2)
     if isinstance(v, int):
-        return _u(3, v)
-    return _u(5, len(v[1]), *v[1])
+        return u32s(3, v)
+    return u32s(5, len(v[1]), *v[1])
 
 
 def _val(key, v):
@@ -57,40 +39,34 @@ def _val(key, v):
     if typ == "Entity":
         return _ent(v)
     if typ == "list(Entity)":
-        return _u(len(v)) + b"".join(_ent(x) for x in v)
+        return u32s(len(v)) + b"".join(_ent(x) for x in v)
     if isinstance(v, bool):
-        return _u(int(v))
+        return u32s(int(v))
     if isinstance(v, int):
-        return _u(v & 0xFFFFFFFF)
+        return u32s(v & 0xFFFFFFFF)
     if isinstance(v, float):
-        return _f(v)
+        return f32s(v)
     if isinstance(v, str):
-        return _str(v)
+        return kstr(v)
     if isinstance(v, list) and v and isinstance(v[0], str):
-        return _u(len(v)) + b"".join(_str(s) for s in v)
-    return _f(*v)
+        return u32s(len(v)) + b"".join(kstr(s) for s in v)
+    return f32s(*v)
 
 
 def _node(nid, typ, name, parent, order=0, **props):
-    b = _u(0xFFFFFFFF, nid) + _str(typ) + _u(0xFFFFFFFE, nid)
-    b += _u(kp.name_hash("name")) + _str(name)
-    b += _u(kp.name_hash("logicalParent")) + _ent(parent)
-    b += _u(kp.name_hash("siblingOrder")) + _u(order)
+    b = u32s(0xFFFFFFFF, nid) + kstr(typ) + u32s(0xFFFFFFFE, nid)
+    b += u32s(kp.name_hash("name")) + kstr(name)
+    b += u32s(kp.name_hash("logicalParent")) + _ent(parent)
+    b += u32s(kp.name_hash("siblingOrder")) + u32s(order)
     for k, v in props.items():
-        b += _u(kp.name_hash(k)) + _val(k, v)
+        b += u32s(kp.name_hash(k)) + _val(k, v)
     return b
 
 
 def _fragment(payload, name="", singleton=False):
     nm = name.encode("latin1") + b"\0"
-    head = _u(4) + bytes([int(singleton), 0]) + _u(len(nm)) + nm + bytes([0, 0]) + _u(1)
-    return head + _u(len(payload)) + payload
-
-
-def _write(path, data):
-    os.makedirs(os.path.dirname(str(path)), exist_ok=True)
-    with open(str(path), "wb") as fh:
-        fh.write(data)
+    head = u32s(4) + bytes([int(singleton), 0]) + u32s(len(nm)) + nm + bytes([0, 0]) + u32s(1)
+    return head + u32s(len(payload)) + payload
 
 
 ID = [0.0, 0.0, 0.0, 1.0]
@@ -146,7 +122,7 @@ def level(tmp_path_factory):
     scene += _node(
         GE, "SceneScope(FragmentNode)", "GameEssentials", SCENE, 5, assetName="/TNT/GE.fragment"
     )
-    _write(base / "Levels" / "T" / "Test.scene", _fragment(scene))
+    write_bytes(base / "Levels" / "T" / "Test.scene", _fragment(scene))
 
     ge = _node(DB, "Folder", "Db", "host")
     ge += _node(
@@ -210,7 +186,7 @@ def level(tmp_path_factory):
         subtitleSlot=None,
         m_econtinuelink=None,
     )
-    _write(base / "TNT" / "GE.fragment", _fragment(ge, singleton=True))
+    write_bytes(base / "TNT" / "GE.fragment", _fragment(ge, singleton=True))
 
     lvl = _node(DEFS, "Folder", "Defs", "host", 0)
     lvl += _node(
@@ -348,7 +324,9 @@ def level(tmp_path_factory):
     lvl += _path_object(PO1, "door1", 14, [0.0, 0.0, 0.0], [0.0, 0.0, 1.0])
     lvl += _path_object(PO2, "door2", 15, [10.0, 0.0, 0.0], [10.0, 0.0, 1.0])
     lvl += _path_object(PO3, "door3", 16, [20.0, 0.0, 0.0], [20.0, 0.0, 1.0])
-    _write(base / "Levels" / "T" / "Lvl.fragment", _fragment(lvl, name="Lvl_Main", singleton=True))
+    write_bytes(
+        base / "Levels" / "T" / "Lvl.fragment", _fragment(lvl, name="Lvl_Main", singleton=True)
+    )
 
     sc = str(base / "Levels" / "T" / "Test.scene")
     return lm.build_level(sc, "Lvl", "%08x" % LVL, None)
@@ -671,8 +649,8 @@ def test_a_level_without_an_ai_world(tmp_path):
     base = tmp_path / "extracted"
     scene = _node(SCENE, "SceneNode", "", None)
     scene += _node(LVL, "SceneScope(LoadBlock)", "Bare", SCENE, 1, assetName="/L/Bare.fragment")
-    _write(base / "L" / "Bare.scene", _fragment(scene))
-    _write(base / "L" / "Bare.fragment", _fragment(_node(0x30, "Folder", "x", "host")))
+    write_bytes(base / "L" / "Bare.scene", _fragment(scene))
+    write_bytes(base / "L" / "Bare.fragment", _fragment(_node(0x30, "Folder", "x", "host")))
     j = lm.build_level(str(base / "L" / "Bare.scene"), "Bare", "%08x" % LVL, None)
     assert j["level"]["ai_world"] is None and j["path_objects"] == []
     assert j["combat_presets"] == {"start": None, "presets": [], "switches": []}

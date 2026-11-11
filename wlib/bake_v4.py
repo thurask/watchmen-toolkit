@@ -122,7 +122,7 @@ def _name_scan(h, order, start=NAME_SCAN_START):
     return None
 
 
-def _detect_clip_order(h, start=NAME_SCAN_START):
+def detect_clip_order(h, start=NAME_SCAN_START):
     """'<' PC / '>' X360+PS3.  Console .animation clips are big-endian; pick the
     order whose length-prefixed track-name scan lands on a real name first."""
     for order in ("<", ">"):
@@ -131,12 +131,15 @@ def _detect_clip_order(h, start=NAME_SCAN_START):
     return "<"
 
 
+_detect_clip_order = detect_clip_order  # the private spelling, kept for existing callers
+
+
 def scan_start_matters(h):
     """Does clip `h` (its first 400 bytes are enough) read differently when the name scan
     starts at byte 0 instead of at NAME_SCAN_START?  A cached bake without `scan` of
     such a clip is stale (characters_export.bake_is_current)."""
-    old = _detect_clip_order(h, 0)
-    new = _detect_clip_order(h)
+    old = detect_clip_order(h, 0)
+    new = detect_clip_order(h)
     return (old, _name_scan(h, old, 0)) != (new, _name_scan(h, new))
 
 
@@ -146,7 +149,7 @@ def walk(h, order=None, types=None):
     {track name: track type 0..3}: a one-key keyed track has the shape of a constant, and
     only the type says whether the engine adds the rest pose to it."""
     if order is None:
-        order = _detect_clip_order(h)
+        order = detect_clip_order(h)
     f4 = np.dtype(order + "f4")
     i2 = np.dtype(order + "i2")
     o = _name_scan(h, order)
@@ -328,7 +331,7 @@ def bake(
         clip = archive_clip(clipname, _naz)
     if clip is None:
         raise KeyError("clip %r not found (not in the bank and not in the naz)" % clipname)
-    _ord = _detect_clip_order(clip)
+    _ord = detect_clip_order(clip)
     try:
         hdr = np.frombuffer(clip[:8], np.dtype(_ord + "f4"))
         ttype = {}

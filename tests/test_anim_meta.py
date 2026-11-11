@@ -386,15 +386,15 @@ def test_event_names_cover_both_caption_styles_and_uncaptioned_events():
 
     a, b, c = ev("{event IMPACT at pos 0.3}", 4), ev("{PLAY_POS [0.33]: IMPACT}", 4), ev("", 4)
     d, e = ev("", 99), ev("{event_speedup", 9)
-    assert am._event_label(a) == am._event_label(b) == "IMPACT"
-    assert am._event_label(c) is None and am._event_label(e) is None
+    assert am.event_label(a) == am.event_label(b) == "IMPACT"
+    assert am.event_label(c) is None and am.event_label(e) is None
     st = asm.Node("s", asm.CLS_STATE, "s")
     st.children = [a, b, c, d, e]
     names = am.learn_event_names([a, b, c, d, e])
     assert names == {4: "IMPACT"}
     # format 2: the record's name is the exe's for a registered id (9 = SOUND);
     # an id the exe does not register falls back to the caption, then EVENT_n
-    assert sorted(x["name"] for x in am._events(st, names)) == [
+    assert sorted(x["name"] for x in am.state_event_records(st, names)) == [
         "EVENT_99",
         "IMPACT",
         "IMPACT",

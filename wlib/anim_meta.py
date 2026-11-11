@@ -350,7 +350,7 @@ def _main_clip(state):
     return sl[-1] if sl else None
 
 
-def _event_label(e):
+def event_label(e):
     """The ANIMATION_EVENT name written in an event node's caption, or None.
 
     Two caption styles ship: "{event KILL_ANIMATION_PARTNER at pos 0.7}" and
@@ -366,13 +366,16 @@ def _event_label(e):
     return nm if nm and nm.isupper() else None
 
 
+_event_label = event_label  # the private spelling, kept for existing callers
+
+
 def learn_event_names(nodes):
     """{event id: name} from every captioned event (majority vote per id), so
     uncaptioned events of the same id get their name too."""
     votes = {}
     for n in nodes:
         if n.cls == asm.CLS_EVENT:
-            nm = _event_label(n)
+            nm = event_label(n)
             if nm is not None:
                 d = votes.setdefault(n.p("m_ianimationevent"), {})
                 d[nm] = d.get(nm, 0) + 1
@@ -385,7 +388,7 @@ def event_name_check(nodes):
     votes = {}
     for n in nodes:
         if n.cls == asm.CLS_EVENT:
-            nm = _event_label(n)
+            nm = event_label(n)
             if nm is not None:
                 d = votes.setdefault(n.p("m_ianimationevent"), {})
                 d[nm] = d.get(nm, 0) + 1
@@ -421,7 +424,7 @@ def _event_sort_key(x):
     return (order, 0.0 if t is None else t, x["name"])
 
 
-def _events(state, names=None, duration=None, basis=None, speed=None, start=None):
+def state_event_records(state, names=None, duration=None, basis=None, speed=None, start=None):
     """Event records of a state.  duration: seconds of the state's clip (None =
     unknown); basis: how that duration was obtained; speed: the state's rate
     factor (state_speed; None = 1); start: the play position the state is
@@ -439,7 +442,7 @@ def _events(state, names=None, duration=None, basis=None, speed=None, start=None
     loop = bool(state.p("m_tislooping"))
     for e in asm.state_events(state):
         eid = e.p("m_ianimationevent")
-        cap = _event_label(e)
+        cap = event_label(e)
         nm = ee.name("ANIMATION_EVENT", eid) or cap or (names or {}).get(eid) or "EVENT_%s" % eid
         trig = asm.event_trigger(e)
         raw = round(asm.event_at(e), 4)
@@ -490,6 +493,9 @@ def _events(state, names=None, duration=None, basis=None, speed=None, start=None
         out.append(rec)
     out.sort(key=_event_sort_key)
     return out
+
+
+_events = state_event_records  # the private spelling, kept for existing callers
 
 
 # ANIMATION_EVENT ids whose arguments name a sound (CharacterRootLogic
@@ -692,7 +698,7 @@ def state_record(s, event_names=None, fact=None):
             {w for c in crit for w in _WEAPON_LABELS if w in c and "NOT " + w not in c}
         ),
         "start_basis": "state_default",
-        "events": _events(s, event_names, dur, basis, speed),
+        "events": state_event_records(s, event_names, dur, basis, speed),
     }
     if speed_basis and speed_basis != "slot speedFactor":
         rec["speed_basis"] = speed_basis
@@ -814,7 +820,7 @@ def clip_facts(path):
 
     with open(path, "rb") as fh:
         h = fh.read()
-    order = bake_v4._detect_clip_order(h)
+    order = bake_v4.detect_clip_order(h)
     try:
         rate, dur, _z, keys, scale = struct.unpack_from(order + "2f3I", h, 0)
         tr = bake_v4.walk(h, order)
@@ -1368,7 +1374,7 @@ def _build(extract_out, binds, log, frame):
     if binds:
         import characters_export
 
-        contact = _ContactCheck(binds, characters_export.track_names_for(extract_out))
+        contact = ContactCheck(binds, characters_export.track_names_for(extract_out))
     pairs = []
     for cn, recs in sorted(states.items()):
         mtype = classes[cn]["chartype"]
@@ -2234,7 +2240,7 @@ def clip_extras(meta, name, fps=None, frames=None):
     return out
 
 
-class _ContactCheck:
+class ContactCheck:
     """Optional geometric cross-check of a pair's placement: bake both halves,
     put them in the shared scene, and measure how close they actually get.
     `track_names` is bake_v4.bake's track lookup; build() passes the rule of the
@@ -2336,6 +2342,9 @@ class _ContactCheck:
             "closest_m": round(float(np.percentile(d, 10)), 3),
             "closest_playpos": round(k / max(F - 1, 1), 3),
         }
+
+
+_ContactCheck = ContactCheck  # the private spelling, kept for existing callers
 
 
 # ---------------------------------------------------------------------- CLI

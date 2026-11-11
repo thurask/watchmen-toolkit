@@ -1,17 +1,15 @@
 """One copy each of two helpers that several modules carried.
 
 `wutil.find_ci` is the asset lookup without regard to letter case behind
-`anim_state_machine._find_ci`, `particle_meta._lookup`, `FxDB.asset_path` and
+`anim_state_machine._find_ci`, `particle_meta.find_asset`, `FxDB.asset_path` and
 `characters_export._asset_file`. `variant_glb.write_glb` makes a material in one place
 for the body, attachment and face primitives.
 """
 
 import os
-import sys
 
 import pytest
 
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wlib"))
 import anim_state_machine as asm
 import characters_export as ce
 import fx_meta
@@ -76,7 +74,7 @@ def test_the_module_lookups_are_find_ci(tmp_path):
 
     for asset in ("/art/effects/blood02.BMP", "/tnt/a.fragment", "/nothing/here.bmp"):
         assert asm._find_ci(ex, asset) == wutil.find_ci(ex, asset, json_twin=True)
-        assert pm._lookup(ex, asset) == wutil.find_ci(ex, asset)
+        assert pm.find_asset(ex, asset) == wutil.find_ci(ex, asset)
         assert fx_meta.FxDB.asset_path(_F(), asset) == wutil.find_ci(ex, asset)
     got = ce._asset_file(str(tmp_path), ["art", "EFFECTS", "blood02.bmp"])
     want = os.path.join(ex, "Art", "Effects", "Blood02.bmp")

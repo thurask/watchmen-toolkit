@@ -9,14 +9,10 @@ Ragdoll values  CharacterVisual.command_update_ragdoll 0x6bc3e2 (anim_meta conve
 Synthetic fixtures only (the builders of test_ragdoll_rig)."""
 
 import math
-import os
 import struct
-import sys
 
 import pytest
 
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wlib"))
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import anim_meta as am
 import ragdoll_rig as rr
 import test_ragdoll_rig as tr

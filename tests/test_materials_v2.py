@@ -17,10 +17,10 @@ import numpy as np
 import pytest
 
 import char_lib
-import characters_export as ce
 import materials as mt
 import rig_glb
 import variant_glb as vg
+import kapow_props
 import watchmen_extract as we
 import test_formats_v2 as tf
 import test_texture_sheets as ts
@@ -29,15 +29,7 @@ from conftest import parse_glb
 Image = pytest.importorskip("PIL.Image")
 
 
-@pytest.fixture(autouse=True)
-def _fresh(monkeypatch):
-    monkeypatch.delenv("WATCHMEN_MATERIALS", raising=False)
-    monkeypatch.delenv("WATCHMEN_MATERIAL_OPTS", raising=False)
-    for c in (char_lib._TEXIDX, char_lib._LAYERCACHE, ce._FRAG_NODES, ce._TEX_SHEETS):
-        c.clear()
-    yield
-    for c in (char_lib._TEXIDX, char_lib._LAYERCACHE, ce._FRAG_NODES, ce._TEX_SHEETS):
-        c.clear()
+pytestmark = pytest.mark.usefixtures("material_caches")
 
 
 def _img(data):
@@ -398,7 +390,9 @@ def _lod_header(values):
     h, s = tf._lod_model()
     bag = b""
     for name, v in values:
-        bag += struct.pack("<IIII", 0xCD64AC11, we._name_hash(name), we._name_hash("number"), 1)
+        bag += struct.pack(
+            "<IIII", 0xCD64AC11, kapow_props.name_hash(name), kapow_props.name_hash("number"), 1
+        )
         bag += struct.pack("<f", v)
     start = h.index(b"\xcd" * 8)
     n = 4 * 91

@@ -19,12 +19,9 @@ Synthetic fixtures only (those of the feature tests are reused)."""
 import copy
 import json
 import os
-import sys
 
 import pytest
 
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wlib"))
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import anim_meta as am
 import characters_export as ce
 import combat_meta as cm
@@ -43,6 +40,7 @@ import test_particle_asset as tp
 import test_text_assets as tt
 import test_combat_meta
 import test_fx_meta
+from conftest import frag_node, fragment_bytes, write_bytes
 
 # the fixtures of the two feature tests, under names of this module
 combat_extract = test_combat_meta.extract
@@ -314,11 +312,20 @@ def test_grade_nodes_say_whose_they_are():
 def test_damage_rule_names_the_taser_not_a_sharp_extra_effect(fx_extract):
     """CharacterEffectDef.command_play_damage_effect 0x6673d0: SHARP selects the one
     sharpweapon slot; the extra effect (id 1) belongs to TASER."""
-    import inspect
 
-    src = inspect.getsource(sound_meta)
-    assert "sharp adds sharpweapon" not in src
-    assert "sharp = the one sharpweapon slot; taser = effect id 1" in src
+    def rules(o):
+        if isinstance(o, dict):
+            for k, v in o.items():
+                if k == "damage_rule" and isinstance(v, str):
+                    yield v
+                yield from rules(v)
+        elif isinstance(o, list):
+            for v in o:
+                yield from rules(v)
+
+    (text,) = rules(sound_meta.build(str(fx_extract)))
+    assert "sharp adds sharpweapon" not in text
+    assert "sharp = the one sharpweapon slot; taser = effect id 1" in text
     rule = fx.damage_rule()
     assert rule is not None and fx.damage_slots(2, "taser") != fx.damage_slots(2, "sharp")
 
@@ -409,9 +416,9 @@ def nav_level(tmp_path):
     object 1 of the .hpd is carried by the edges between the file-space vertices
     (5, 1, 0.5) and (5, 1, 3.5) = engine (-5, 1, 0.5) and (-5, 1, 3.5)."""
     base = tmp_path / "extracted"
-    scene = tl._node(SCENE, "SceneNode", "", None)
-    scene += tl._node(SCENES, "Folder", "Scenes", SCENE)
-    scene += tl._node(
+    scene = frag_node(SCENE, "SceneNode", "", None)
+    scene += frag_node(SCENES, "Folder", "Scenes", SCENE)
+    scene += frag_node(
         LVL,
         "SceneScope(LoadBlock)",
         "Demo",
@@ -422,31 +429,33 @@ def nav_level(tmp_path):
         assetName="/Levels/Game_Levels_Part2/Demo/Demo.fragment",
         m_isceneid=9,
     )
-    tl._write(base / "Levels" / "Game_Levels_Part2" / "Demo.scene", tl._fragment(scene))
+    write_bytes(base / "Levels" / "Game_Levels_Part2" / "Demo.scene", fragment_bytes(scene))
     door = "/LevelDesign/Door.fragment"
-    lvl = tl._node(
+    lvl = frag_node(
         HOST_A, "FragmentNode", "door near", "host", 0, localPos=[-5.0, 0.0, 2.0],
         localOrient=tl.ID, assetName=door,
     )  # fmt: skip
-    lvl += tl._node(
+    lvl += frag_node(
         HOST_B, "FragmentNode", "door far", "host", 1, localPos=[40.0, 0.0, 40.0],
         localOrient=tl.ID, assetName=door,
     )  # fmt: skip
-    lvl += tl._node(
+    lvl += frag_node(
         LONE, "AIStaticPathObjectNode", "no vertices", "host", 2, localPos=[-5.0, 1.0, 2.0],
         localOrient=tl.ID,
     )  # fmt: skip
-    tl._write(base / "Levels" / "Game_Levels_Part2" / "Demo" / "Demo.fragment", tl._fragment(lvl))
-    d = tl._node(
+    write_bytes(
+        base / "Levels" / "Game_Levels_Part2" / "Demo" / "Demo.fragment", fragment_bytes(lvl)
+    )
+    d = frag_node(
         PO, "KynapseDoor(AIStaticPathObjectNode)", "", "host", 0, localPos=[0.0, 0.0, 0.0],
         localOrient=tl.ID, impassable=True, canLeave=True, canBypass=False,
     )  # fmt: skip
     for nid, z in ((V1, -1.5), (V2, 1.5)):
-        d += tl._node(
+        d += frag_node(
             nid, "AIStaticPathObjectVertexNode", "", PO, nid, localPos=[0.0, 1.0, z],
             localOrient=tl.ID,
         )  # fmt: skip
-    tl._write(base / "LevelDesign" / "Door.fragment", tl._fragment(d))
+    write_bytes(base / "LevelDesign" / "Door.fragment", fragment_bytes(d))
     _nav_files(tmp_path)
     return tmp_path
 

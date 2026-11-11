@@ -143,11 +143,11 @@ def test_sheet_json_records_the_flag(tmp_path):
         assert we.texture_alpha_flag(h) is bool(alpha)
         d = tmp_path / str(alpha)
         d.mkdir()
-        we._write_sheet_json(h, d)
+        we.write_sheet_json(h, d)
         js = we.read_sheet_json(d)
         assert js["textureHasAlpha"] is bool(alpha) and js["alphaThreshold"] == 95
     # a header without an image record: no key (readers fall back to the pixels)
-    we._write_sheet_json(tv._sheet_header(), tmp_path)
+    we.write_sheet_json(tv._sheet_header(), tmp_path)
     assert "textureHasAlpha" not in we.read_sheet_json(tmp_path)
 
 
@@ -369,11 +369,11 @@ def test_mtl_no_highlight_still_covers_a_faded_standard_sheet(tmp_path):
     d.mkdir()
     sheet = dict(STD, opacity=0.5, specularPower=0.0)
     (d / "sheet.json").write_text(json.dumps(sheet), encoding="utf-8")
-    assert we._mtl_no_highlight(d, 0.0, None) is True  # as before the opacity rule
+    assert we.mtl_no_highlight(d, 0.0, None) is True  # as before the opacity rule
     (d / "sheet.json").write_text(json.dumps(dict(sheet, blendType=1)), encoding="utf-8")
-    assert we._mtl_no_highlight(d, 0.0, None) is False  # rewritten layer: no engine material
+    assert we.mtl_no_highlight(d, 0.0, None) is False  # rewritten layer: no engine material
     (d / "sheet.json").write_text(json.dumps(dict(sheet, renderType=1)), encoding="utf-8")
-    assert we._mtl_no_highlight(d, 0.0, None) is False
+    assert we.mtl_no_highlight(d, 0.0, None) is False
 
 
 # ---------------------------------------------------------------------------

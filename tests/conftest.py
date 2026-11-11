@@ -16,9 +16,16 @@ import pytest
 # The wlib modules are FLAT top-level modules that import each other directly
 # (``import watchmen_extract as we``), so the package directory must be on
 # sys.path before any of them can be imported.
-WLIB = Path(__file__).resolve().parent.parent / "wlib"
-if str(WLIB) not in sys.path:
-    sys.path.insert(0, str(WLIB))
+# watchmen.py sits in the toolkit root and the Blender scripts in tools/; the test
+# modules import each other's fixtures, so this folder goes on the path as well.
+TESTS = Path(__file__).resolve().parent
+ROOT = TESTS.parent
+WLIB = ROOT / "wlib"
+for _p in (TESTS, ROOT / "tools", ROOT, WLIB):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
+
+import kapow_props as kp  # noqa: E402  (wlib is on the path from here on)
 
 
 # ---------------------------------------------------------------------------
@@ -374,3 +381,373 @@ def build_clip_header(key_count, duration, frame_rate_scale=1):
     """[f32 keyRate][f32 duration][u32 0][u32 keyCount][u32 frameRateScale]."""
     key_rate = (key_count - 1) / duration
     return struct.pack("<ffIII", key_rate, duration, 0, key_count, frame_rate_scale)
+
+
+# ---------------------------------------------------------------------------
+# characters_export.export on a synthetic extract
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def export_env(tmp_path, monkeypatch, rig):
+    """A minimal extract: one character with two models on the rig fixture's
+    bind, one baked clip; a second character whose bakes are still pending.
+    The archive-reading steps (discover, binds, bakes) are replaced; everything
+    from the cached bake to the written GLB runs as in a real export."""
+    ex = tmp_path / "ex"
+    (ex / "extracted").mkdir(parents=True)
+    out = tmp_path / "chars"
+    calls = {"bake": [], "faces": [], "load_parts": [], "jiggle_kw": []}
+
+    import characters_export as ce
+
+    monkeypatch.setattr(
+        ce,
+        "discover",
+        lambda e: {
+            "Heavy": {"Heavy": ("large", ["/m/Heavy_Body", "/m/Heavy_Hair"])},
+            "Thug": {"Thug_A": ("small", ["/m/Thug_Body"])},
+        },
+    )
+    monkeypatch.setattr(ce, "bind_mismatches", lambda e: {"large": "other bone list than X.model"})
+    monkeypatch.setattr(ce, "ensure_all_binds", lambda keys, e, naz: {"small": "no skeleton"})
+    monkeypatch.setattr(ce, "ensure_bind", lambda key, e, naz: str(rig.bind_npz))
+    monkeypatch.setattr(ce, "animation_meta", lambda e, o: None)
+
+    def bake_cache(key, bind, e, o, budget=None):
+        calls["bake"].append(key)
+        if key == "small":
+            return 0, 2  # two clips still to bake
+        cdir = os.path.join(o, "_bake", key)
+        os.makedirs(cdir, exist_ok=True)
+        f = os.path.join(cdir, "clip_test.npz")
+        if not os.path.exists(f):
+            np.savez(f, pal=rig.palette, dur=np.float32(0.2), fps=np.float32(rig.fps))
+            open(os.path.join(cdir, "torn.tmp.npz"), "wb").close()  # a killed run's leftover
+        return 1, 0
+
+    monkeypatch.setattr(ce, "bake_cache", bake_cache)
+    import char_lib
+    import jiggle_d6
+
+    def load_parts(models, bn, sheets=None):
+        calls["load_parts"].append([os.path.basename(m) for m in models])
+        return [
+            (rig.V + np.float32(i), rig.SI, rig.SW, rig.T, rig.UV, "mat_" + os.path.basename(m))
+            for i, m in enumerate(models)
+        ]
+
+    monkeypatch.setattr(char_lib, "load_parts", load_parts)
+    jig = []
+
+    def apply_jiggle(pal, fps, bind, model=None, loop=False, props=None):
+        jig.append(model)
+        calls["jiggle_kw"].append({"fps": fps, "model": model, "loop": loop, "props": props})
+        return np.asarray(pal, np.float32) * np.float32(1.0)
+
+    monkeypatch.setattr(jiggle_d6, "apply_jiggle", apply_jiggle)
+    calls["jiggle"] = jig
+    return ex, out, calls
+
+
+# ---------------------------------------------------------------------------
+# characters_export.face_attach on a synthetic head
+# ---------------------------------------------------------------------------
+
+
+def _bind_npz(path, names, R, t, par):
+    np.savez(
+        str(path),
+        Rb=np.asarray(R, float),
+        tb=np.asarray(t, float),
+        names=np.array(names),
+        par=np.array(par),
+    )
+    return str(path)
+
+
+def _rz(deg):
+    a = np.radians(deg)
+    return np.array([[np.cos(a), -np.sin(a), 0], [np.sin(a), np.cos(a), 0], [0, 0, 1.0]])
+
+
+@pytest.fixture
+def face_env(tmp_path, monkeypatch):
+    """Body bind: Bip, Spine2, Neck, Head.  Face bind of the head model: Head,
+    Jaw (below Head), Neck (aligned with the body's Neck) and Bip01 (0.5 m off
+    the body's Bip: a misaligned match)."""
+    ex = tmp_path / "ex"
+    ex.mkdir()
+    body_names = ["Bip", "Spine2", "Neck", "Head"]
+    Rb = [np.eye(3), np.eye(3), np.eye(3), _rz(30)]
+    tb = [[0, 1.0, 0], [0, 1.3, 0], [0, 1.5, 0], [0, 1.6, 0]]
+    body = _bind_npz(tmp_path / "body.npz", body_names, Rb, tb, [-1, 0, 1, 2])
+    face_names = ["Bip01", "Neck", "Head", "Jaw"]
+    # the face model's frame: its Head at the origin, rotated by -10 deg
+    Rh = _rz(-10)
+    M = np.asarray(Rb[3]) @ Rh.T
+    tf = [[0, 0.5, 0], [0, -0.1, 0], [0, 0, 0], [0, -0.05, 0.04]]
+    Rf = [np.eye(3), np.eye(3), Rh, Rh]
+    # Neck: aligned under the global head transform M,t (t maps face Head -> body Head)
+    t = np.asarray(tb[3]) - M @ np.asarray(tf[2])
+    Rf[1] = M.T @ np.asarray(Rb[2])
+    tf[1] = list(M.T @ (np.asarray(tb[2]) - t))
+    import build_bind_file as bbf
+    import bake_v4
+    import char_lib
+    import face_export
+    import parse_model_nodes
+
+    def build(model, template, dst):
+        _bind_npz(dst, face_names, Rf, tf, [-1, 0, 1, 2])
+        return dst
+
+    monkeypatch.setattr(bbf, "build", build)
+    import characters_export as ce
+
+    monkeypatch.setattr(ce, "_read_bytes", lambda p: b"")
+    monkeypatch.setattr(
+        parse_model_nodes,
+        "parse",
+        lambda b: (["", "x"], np.ones((2, 3)), np.tile([0, 0, 0, 1.0], (2, 1)), np.array([5, 0])),
+    )
+    V = np.array([[0, 0.02, 0.0], [0, -0.05, 0.04], [0, 0.45, 0], [0, -0.1, 0.01]], np.float32)
+    # vertex k: all weight on face joint k (Bip01, Neck, Head, Jaw)
+    SI = np.array([[0, 0, 0, 0], [1, 0, 0, 0], [2, 0, 0, 0], [3, 0, 0, 0]][::-1], np.uint16)
+    SW = np.array([[1, 0, 0, 0]] * 4, np.float32)
+    T = np.array([[0, 1, 2], [1, 2, 3]], np.uint32)
+    UV = np.zeros((4, 2), np.float32)
+    face_part = (V, SI, SW, T, UV, "face_mat")
+    ref_V = (V.astype(float) @ M.T + t).astype(np.float32)
+    ref_part = (
+        ref_V,
+        np.array([[3, 2, 0, 0]] * 4, np.uint16),
+        np.array([[0.75, 0.25, 0, 0]] * 4, np.float32),
+        T,
+        UV,
+        "head_mat",
+    )
+
+    def load_parts(models, bn, sheets=None):
+        return [ref_part] if models == ["/m/StaticHead"] else [face_part]
+
+    monkeypatch.setattr(char_lib, "load_parts", load_parts)
+    monkeypatch.setattr(face_export, "head_family", lambda head: "Fam")
+    clips = {
+        "Fam/MouthClosed_EyesOpen": b"a",
+        "Fam/MouthClosed_EyesClosed": b"b",
+        "Fam/MouthTalk_EyesAnger": b"c",
+        "Other/X": b"d",
+    }
+    monkeypatch.setattr(face_export, "face_clips", lambda e: clips)
+    monkeypatch.setattr(bake_v4, "_load_bind", lambda p: None)
+    poses = {
+        "Fam/MouthClosed_EyesOpen": 0.0,
+        "Fam/MouthClosed_EyesClosed": 1.0,
+        "Fam/MouthTalk_EyesAnger": 2.0,
+    }
+
+    baked = []
+
+    def bake(nm, up, bank=None, **kw):
+        baked.append(kw)
+        if nm not in poses:
+            raise ValueError("no such clip")
+        return np.full((1, 4, 3, 4), poses[nm], np.float32), 1.0
+
+    monkeypatch.setattr(bake_v4, "bake", bake)
+    return dict(ex=ex, body=body, bn=body_names, M=M, t=t, baked=baked)
+
+
+# ---------------------------------------------------------------------------
+# face_export.export on one synthetic head
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def faces_env(tmp_path, monkeypatch):
+    """An extract with one face-rigged head and the face clips `clips` of its family
+    (the test fills them in); the bind, the meshes and the GLB writer are replaced and
+    every bake_v4.bake call is recorded as (clip, keyword arguments)."""
+    import bake_v4
+    import build_bind_file
+    import char_lib
+    import face_export
+    import variant_glb as vg
+
+    ex, out = tmp_path / "face_ex", tmp_path / "faces"
+    (ex / "extracted").mkdir(parents=True)
+    clips, baked, written = {}, [], []
+    monkeypatch.setattr(face_export, "find_heads", lambda e: [str(tmp_path / "Head1")])
+    monkeypatch.setattr(face_export, "head_family", lambda head: "EN1")
+    monkeypatch.setattr(face_export, "face_clips", lambda e: clips)
+    monkeypatch.setattr(
+        build_bind_file, "build", lambda m, t, p: np.savez(p, names=np.array(["Jaw"]))
+    )
+    monkeypatch.setattr(bake_v4, "_load_bind", lambda p=None: None)
+
+    def bake(nm, up, bank=None, **kw):
+        baked.append((nm, kw))
+        return np.zeros((2, 1, 3, 4), np.float32), 0.1
+
+    monkeypatch.setattr(bake_v4, "bake", bake)
+    monkeypatch.setattr(char_lib, "load_parts", lambda models, bn: [])
+    monkeypatch.setattr(char_lib, "find_textures", lambda parts, roots: {})
+
+    def write_glb(parts, anims, path, bind, textures=None, asset_extras=None):
+        written.append(path)
+        Path(path).write_bytes(b"glb")
+
+    monkeypatch.setattr(vg, "write_glb", write_glb)
+    return dict(ex=ex, out=out, clips=clips, baked=baked, written=written)
+
+
+# ---------------------------------------------------------------------------
+# Small builders and lookups shared by several test files
+# ---------------------------------------------------------------------------
+
+
+def u32s(*v):
+    """Little-endian u32 values."""
+    return struct.pack("<%dI" % len(v), *v)
+
+
+def f32s(*v):
+    """Little-endian f32 values."""
+    return struct.pack("<%df" % len(v), *v)
+
+
+def kstr(s):
+    """A fragment string value: [u32 words][text NUL-padded to whole words]."""
+    b = s.encode("latin1") + b"\0"
+    b += b"\0" * (-len(b) % 4)
+    return u32s(len(b) // 4) + b
+
+
+def entity_ref(v):
+    """None -> null, "host" -> tag 2, int -> tag 3, ("up", a, ids) -> tag 4,
+    ("single", ids) -> tag 5."""
+    if v is None:
+        return u32s(1)
+    if v == "host":
+        return u32s(2)
+    if isinstance(v, int):
+        return u32s(3, v)
+    if v[0] == "up":
+        return u32s(4, v[1], len(v[2]), *v[2])
+    return u32s(5, len(v[1]), *v[1])
+
+
+def prop_value(v):
+    """A fragment property value encoded by its Python type."""
+    if isinstance(v, bool):
+        return u32s(int(v))
+    if isinstance(v, int):
+        return u32s(v & 0xFFFFFFFF)
+    if isinstance(v, float):
+        return f32s(v)
+    if isinstance(v, str):
+        return kstr(v)
+    if isinstance(v, list) and v and isinstance(v[0], str):
+        return u32s(len(v)) + b"".join(kstr(s) for s in v)
+    if isinstance(v, list):
+        return f32s(*v)
+    raise TypeError(v)
+
+
+ENTITY_KEYS = ("logicalParent", "m_etarget1", "_eauxaction", "m_etriggerentity", "_ealldeadaction")
+
+
+def frag_node(nid, typ, name, parent, order=0, **props):
+    """One type record and one instance record.  Entity properties take the entity_ref
+    forms, everything else is encoded by its Python type."""
+    b = u32s(0xFFFFFFFF, nid) + kstr(typ) + u32s(0xFFFFFFFE, nid)
+    b += u32s(kp.name_hash("name")) + kstr(name)
+    b += u32s(kp.name_hash("logicalParent")) + entity_ref(parent)
+    b += u32s(kp.name_hash("siblingOrder")) + u32s(order)
+    for k, v in props.items():
+        b += u32s(kp.name_hash(k)) + (entity_ref(v) if k in ENTITY_KEYS else prop_value(v))
+    return b
+
+
+def fragment_bytes(payload, name="", singleton=False, reapplyable=False, version=4):
+    """A whole fragment file: header (Fragment::LoadHeader 0x54306d) and one chunk."""
+    nm = name.encode("latin1") + b"\0"
+    head = u32s(version) + bytes([int(singleton), 0]) + u32s(len(nm)) + nm
+    head += bytes([int(reapplyable), 0]) + u32s(1)
+    return head + u32s(len(payload)) + payload
+
+
+def write_bytes(path, data):
+    """Write `data` to `path`, making its folder."""
+    os.makedirs(os.path.dirname(str(path)), exist_ok=True)
+    with open(str(path), "wb") as fh:
+        fh.write(data)
+
+
+def state_named(meta, cls, name):
+    """State `name` of class `cls` in an anim_meta table."""
+    return next(s for s in meta["classes"][cls]["states"] if s["name"] == name)
+
+
+def rot_vector(R):
+    """Rotation vector (axis x angle, radians) of a 3x3 rotation matrix."""
+    a = float(np.arccos(np.clip((np.trace(R) - 1.0) / 2.0, -1.0, 1.0)))
+    if a < 1e-12:
+        return np.zeros(3)
+    return a * np.array([R[2, 1] - R[1, 2], R[0, 2] - R[2, 0], R[1, 0] - R[0, 1]]) / (2 * np.sin(a))
+
+
+def rig_part(rig, dx, name):
+    """The Rig fixture's mesh moved by dx along every axis, as a part with material `name`."""
+    return (rig.V + np.float32(dx), rig.SI, rig.SW, rig.T, rig.UV, name)
+
+
+def class_name_record(order, name="ModelRes"):
+    """[u32 length][class name NUL] in byte order `order`."""
+    raw = name.encode("ascii") + b"\0"
+    return struct.pack(order + "I", len(raw)) + raw
+
+
+def joint_origin(P, k, tb):
+    """World position of joint k over the frames of palette P (bind positions tb)."""
+    return np.einsum("fab,b->fa", P[:, k, :, :3].astype(np.float64), tb[k]) + P[:, k, :, 3]
+
+
+def model_named(level, name):
+    """The model record called `name` in a level export."""
+    return next(r for r in level["models"] if r["name"] == name)
+
+
+def rotation_angle_deg(R):
+    """Rotation angle of a 3x3 rotation matrix, degrees."""
+    return float(np.degrees(np.arccos(np.clip((np.trace(R) - 1) / 2, -1, 1))))
+
+
+def clear_character_caches():
+    """Empty the texture, layer, fragment-node and sheet caches of the character
+    export (module state of char_lib and characters_export)."""
+    import char_lib
+    import characters_export as ce
+
+    for c in (char_lib._TEXIDX, char_lib._LAYERCACHE, ce._FRAG_NODES, ce._TEX_SHEETS):
+        c.clear()
+
+
+@pytest.fixture
+def character_caches():
+    """The character export's caches empty before and after the test."""
+    clear_character_caches()
+    yield
+    clear_character_caches()
+
+
+@pytest.fixture
+def material_caches(monkeypatch):
+    """No WATCHMEN_MATERIALS / WATCHMEN_MATERIAL_OPTS, and the character export's
+    caches empty before and after the test."""
+    monkeypatch.delenv("WATCHMEN_MATERIALS", raising=False)
+    monkeypatch.delenv("WATCHMEN_MATERIAL_OPTS", raising=False)
+    clear_character_caches()
+    yield
+    clear_character_caches()

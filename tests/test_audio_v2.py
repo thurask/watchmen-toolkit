@@ -10,14 +10,11 @@ byte count; an Entity value names a node of another fragment as
 """
 
 import json
-import os
 import struct
-import sys
 import wave
 
 import pytest
 
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wlib"))
 import anim_meta as am
 import anim_state_machine as asm
 import face_rule as fr
@@ -144,7 +141,7 @@ def test_pc_stream_is_split_at_the_link_records():
 
 def test_per_track_files_hold_only_their_own_packets_and_end_sample(tmp_path):
     probe, packets = pc_stream(2)
-    computed = [wx._ogg_from_packets(p, True)[4] for p in packets]
+    computed = [wx.ogg_from_packets(p, True)[4] for p in packets]
     ends = [c - 7 for c in computed]
     raw, packets = pc_stream(2, ends=ends)
     name = "/derived_pc/sounds/music/a/Song_track0.mediastream_s"
@@ -172,7 +169,7 @@ def test_per_track_files_hold_only_their_own_packets_and_end_sample(tmp_path):
 
 def test_one_track_stream_keeps_its_name_and_ends_at_the_stored_position(tmp_path):
     _probe, packets = pc_stream(1)
-    computed = wx._ogg_from_packets(packets[0], True)[4]
+    computed = wx.ogg_from_packets(packets[0], True)[4]
     raw, _packets = pc_stream(1, ends=[computed - 7])
     name = "/derived_pc/sounds/music/Menu_track0.mediastream_s"
     out = wx.decode_audio_tracks(raw, tmp_path / "t", name)
@@ -695,6 +692,27 @@ def test_references_resolve_per_fragment_not_by_node_id(sound_extract):
     # an instance nobody knows: no guess by bare node id
     assert db.resolve({"xref": ["deadbeef", "00000002"]}, body) is None
     assert db.resolve({"etag": 1}, body) is None and db.unresolved == {"deadbeef": 1}
+
+
+def test_files_of_one_name_are_tried_nearest_folder_first():
+    s = need_sm()
+    home = "TNT/Fragments/Enemy01/Visual.fragment"
+    cands = [
+        "TNT/Other/Sound.fragment",
+        "TNT/Fragments/Enemy02/Sound.fragment",
+        "TNT/Fragments/Enemy01/Sub/Sound.fragment",
+        "TNT/Fragments/Sound.fragment",
+    ]
+    assert s.nearest_first(cands, home) == [
+        "TNT/Fragments/Enemy01/Sub/Sound.fragment",  # shares TNT/Fragments/Enemy01
+        "TNT/Fragments/Enemy02/Sound.fragment",  # shares TNT/Fragments ...
+        "TNT/Fragments/Sound.fragment",  # ... equally: the order they came in
+        "TNT/Other/Sound.fragment",
+    ]
+    # whole folder names only: "Enemy0" of Enemy01 / Enemy02 is not a shared folder
+    a, b = "TNT/Fragments/Enemy02/S.fragment", "TNT/Fragments/X/S.fragment"
+    assert s.nearest_first([b, a], home) == [b, a]
+    assert s.nearest_first([b, a], None) == [b, a] == s.nearest_first([b, a], "")
 
 
 def test_play_tree_and_durations(sound_extract):

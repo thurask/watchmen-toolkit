@@ -1,12 +1,8 @@
 """Found on the real-data run of export r5 (case-sensitive file system)."""
 
 import os
-import sys
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(os.path.join(HERE, "..", "wlib"))
-
-import characters_export as ce  # noqa: E402
+import characters_export as ce
 
 
 def test_tw_weapon_found_when_reference_case_differs(tmp_path, monkeypatch):

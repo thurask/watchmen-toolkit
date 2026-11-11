@@ -129,7 +129,7 @@ def test_part1_layout_means_xbox_360_when_nothing_else_decides():
 
 
 def test_model_sidecar_and_log_carry_no_marker_once_the_console_is_known(tmp_path, monkeypatch):
-    monkeypatch.setattr(we, "_write_obj_mtl", lambda *a: None)
+    monkeypatch.setattr(we, "write_obj_mtl", lambda *a: None)
     h, s = open_model("ps3")
     logs = []
     assert we.decode_model(h, s, tmp_path / "a.obj", log=lambda *a: logs.append(a[0])) is True

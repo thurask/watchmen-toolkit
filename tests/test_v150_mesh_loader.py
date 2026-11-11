@@ -16,11 +16,11 @@ the numpy vertex decoder.
     callers       char_lib.load_parts, variant_glb.load_parts, the weapon
                   attachment and export_female_anims.mesh_arrays all read
                   through it; one unreadable archive block is logged
-    half floats   _half equals numpy's float16 on all 65,536 codes; a
+    half floats   half_to_float equals numpy's float16 on all 65,536 codes; a
                   non-finite normal or UV drops that attribute with a note
                   and never reaches an OBJ
-    _decode_sub   the numpy version equals the per-vertex struct loop bit for
-                  bit (PC and console layouts, random streams)
+    decode_mesh_vertices  the numpy version equals the per-vertex struct loop
+                  bit for bit (PC and console layouts, random streams)
 
 Synthetic fixtures only (the builders of test_p3_part1_model,
 test_v120_regressions and test_p2_console_chars)."""
@@ -409,18 +409,18 @@ def test_export_female_anims_reads_its_body_through_the_loader(capsys):
 
 
 # ---------------------------------------------------------------------------
-# half floats and _decode_sub
+# half floats and decode_mesh_vertices
 # ---------------------------------------------------------------------------
 def test_half_equals_numpy_float16_on_every_code():
     codes = np.arange(65536, dtype=np.uint16)
     ref = codes.view("<f2").astype(np.float64)
-    got = np.array([we._half(int(c)) for c in codes], np.float64)
+    got = np.array([we.half_to_float(int(c)) for c in codes], np.float64)
     fin = np.isfinite(ref)
     assert np.array_equal(np.isfinite(got), fin)
     assert got[fin].tobytes() == ref[fin].tobytes()  # bit for bit, -0.0 included
     assert np.array_equal(np.isnan(got), np.isnan(ref))
     assert np.array_equal(np.isinf(got) & (got > 0), np.isinf(ref) & (ref > 0))
-    assert we._half(0x7C00) == float("inf") and we._half(0xFC00) == float("-inf")
+    assert we.half_to_float(0x7C00) == float("inf") and we.half_to_float(0xFC00) == float("-inf")
 
 
 def _random_stream(rng, nv, stride, be, finite=True):
@@ -482,7 +482,7 @@ def test_decode_sub_equals_the_per_vertex_loop(be, stride):
             s = _random_stream(rng, nv, stride, be, finite)
             for vbo in (0, 3):
                 n1, n2 = [], []
-                a = we._decode_sub(s, vbo, nv, stride, be, None, n1)
+                a = we.decode_mesh_vertices(s, vbo, nv, stride, be, None, n1)
                 b = we._decode_sub_loop(s, vbo, nv, stride, be, None, n2)
                 assert all(_same(x, y) for x, y in zip(a, b)), (nv, finite, vbo)
                 assert n1 == n2
@@ -490,10 +490,10 @@ def test_decode_sub_equals_the_per_vertex_loop(be, stride):
 
 def test_decode_sub_past_the_end_drops_the_attribute_and_keeps_positions():
     s = struct.pack("<3f", 1, 2, 3) + bytes(14)  # room for the normal, not the UV
-    v, n, uv = we._decode_sub(s, 0, 1, 44)
+    v, n, uv = we.decode_mesh_vertices(s, 0, 1, 44)
     assert v == [(1.0, 2.0, 3.0)] and n == [(0.0, 0.0, 0.0)] and uv is None
     with pytest.raises(struct.error):
-        we._decode_sub(s, 0, 2, 44)  # positions past the end raise, as in 1.4.0
+        we.decode_mesh_vertices(s, 0, 2, 44)  # positions past the end raise, as in 1.4.0
 
 
 def _vertex(normal=(0, 0, 1), uv=(0.5, 0.5)):
@@ -504,7 +504,7 @@ def _vertex(normal=(0, 0, 1), uv=(0.5, 0.5)):
 _H1, _H05, _INF, _NAN = 0x3C00, 0x3800, 0x7C00, 0x7E00
 
 
-@pytest.mark.parametrize("decode", [we._decode_sub, we._decode_sub_loop])
+@pytest.mark.parametrize("decode", [we.decode_mesh_vertices, we._decode_sub_loop])
 def test_a_non_finite_normal_or_uv_drops_that_attribute_with_a_note(decode):
     s = _vertex((0, 0, _H1), (_H05, _H05)) + _vertex((_NAN, 0, _H1), (_H05, _INF))
     notes = []

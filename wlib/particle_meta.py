@@ -123,11 +123,14 @@ def texture_tree(src, textures=None):
     return None
 
 
-def _lookup(root, asset, cache=None):
+def find_asset(root, asset, cache=None):
     """Path of asset '/Art/x.bmp' below `root`, or None when it is not there
     (wutil.find_ci: each part as listed, else the first sorted name equal to it
     ignoring case).  `cache` ({dir: sorted names}) saves listing a folder twice."""
     return find_ci(root, asset, cache)
+
+
+_lookup = find_asset  # the private spelling, kept for existing callers
 
 
 def _rel(path, root):
@@ -140,9 +143,9 @@ def _num(x):
 
 def _disk_ref(ref, tree_root, cache=None):
     """An asset string in the spelling of the folder or file it names below
-    `tree_root` (_lookup), a leading slash kept; one that names nothing there in
+    `tree_root` (find_asset), a leading slash kept; one that names nothing there in
     the spelling of the table (canonical_names.canonical)."""
-    hit = _lookup(tree_root, ref, cache)
+    hit = find_asset(tree_root, ref, cache)
     if hit is None:
         return canonical_names.canonical(ref, "canonical")
     parts = _rel(hit, tree_root).split("/")
@@ -241,7 +244,7 @@ def file_row(rel, data, tree, stored=None, spell=None):
 
 
 def _texture_entry(asset, tree_root, cache=None):
-    d = _lookup(tree_root, asset, cache)
+    d = find_asset(tree_root, asset, cache)
     out = {"found": False, "dir": None, "images": [], "used_by": []}
     if d is None:
         return out
@@ -319,7 +322,7 @@ def build(src, textures=None, log=None):
             tex[asset]["used_by"].append(rel)
         for asset in row["models"]:
             if asset not in models:
-                p = _lookup(root, asset, listings)
+                p = find_asset(root, asset, listings)
                 models[asset] = {
                     "found": p is not None,
                     "file": _rel(p, root) if p else None,

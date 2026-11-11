@@ -13,11 +13,9 @@ import json
 import math
 import os
 import struct
-import sys
 
 import pytest
 
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools"))
 import blender_import_level as bil
 
 TOP = "/Levels/L/Lev/Lev.fragment"
@@ -339,10 +337,7 @@ def test_host_offset_copies_go_to_a_collection_of_their_own(export):
     assert on["1:00000006"]["group"] == ("Disabled",)
     assert on["1:00000006"]["props"]["watchmen_host_offset_copy"] is True
     # the collection is switched off after the import, and the text says why
-    import inspect
-
-    src = inspect.getsource(bil)
-    assert '("Characters", "Scene models"), HOST_OFFSET_GROUP)' in src
+    assert bil.HOST_OFFSET_GROUP in bil.GROUPS_SWITCHED_OFF
     assert "Whether the game draws these nodes is not established" in bil.__doc__
     assert "a level import on desktop Blender 5.2" in bil.__doc__
     assert "was not inspected in detail" in bil.__doc__

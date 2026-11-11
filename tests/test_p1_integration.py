@@ -13,11 +13,9 @@ import pathlib
 import os
 import pickle
 import struct
-import sys
 
 import pytest
 
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wlib"))
 import anim_meta as am
 import anim_state_machine as asm
 import characters_export as ce

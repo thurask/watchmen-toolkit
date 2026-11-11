@@ -1457,7 +1457,7 @@ def _volume(lv, n):
 _VOLUME_NATIVES = ("CollisionBoxNode", "CollisionSphereNode", "CollisionCapsuleNode")
 
 
-def _child_when(parent, i):
+def child_when(parent, i):
     """How a child action of `parent` is fired: (when, delay seconds or None)."""
     match parent.cls:
         case "TriggerActionDelay":
@@ -1476,6 +1476,9 @@ def _child_when(parent, i):
             # 0x84aea3, 0x84bde2): the timed cuts are children of the tour's sequence node
             return "tour_refire", None
     return "immediate", None
+
+
+_child_when = child_when  # the private spelling, kept for existing callers
 
 
 # ---------------------------------------------------------------- sections
@@ -1544,7 +1547,7 @@ def _section_graph(lv):
                     )
         elif k == "action":
             for i, c in enumerate(acts):
-                when, delay = _child_when(n, i)
+                when, delay = child_when(n, i)
                 e = {"from": u, "to": lv.uid[id(c)], "kind": "child", "order": i, "when": when}
                 if delay is not None:
                     e["delay"] = delay
@@ -2097,7 +2100,7 @@ def _visible(n):
     return v is not False
 
 
-def _is_identity(world, eps=1e-6):
+def is_identity(world, eps=1e-6):
     """Whether a `world` record ({pos, quat}) is the identity within `eps` (the
     quaternion or its negative); None without a record."""
     if not world:
@@ -2112,6 +2115,9 @@ def _is_identity(world, eps=1e-6):
         all(abs(a - s * b) <= eps for a, b in zip(q, (0.0, 0.0, 0.0, 1.0), strict=True))
         for s in (1, -1)
     )
+
+
+_is_identity = is_identity  # the private spelling, kept for existing callers
 
 
 def _section_terrain(lv):
@@ -2141,7 +2147,7 @@ def _section_terrain(lv):
         rec["parent_link"] = n.p("parentLink")
         rec.update(lv.placement(n))
         rec["drawn_with"] = "identity"  # engine 0x49c3be: never the node's transform
-        rec["world_is_identity"] = _is_identity(rec.get("world"))
+        rec["world_is_identity"] = is_identity(rec.get("world"))
         rec["scale"] = None
         rec["node"] = {
             k: n.p(k)
@@ -2321,7 +2327,7 @@ def _section_models(lv, cubes=None, culling=None):
         if id(n) in copies:
             twin = copies[id(n)]
             rec["host_offset_copy"] = {"twin": lv.uid[id(twin)] if twin is not None else None}
-        rec["cube_map"] = _nearest_cube(rec, cubes)
+        rec["cube_map"] = nearest_cube(rec, cubes)
         above = {lv.uid[id(g)] for g in _pvs_chain(lv, n) if g.cls == VISIBILITY_GROUP}
         rec["cube_map_by_area"] = _cube_by_area(
             rec, by_uid, [g for g, s in zip(groups, shows, strict=True) if above <= s]
@@ -2339,7 +2345,7 @@ def _cube_by_area(rec, by_uid, groups):
     for g in groups:
         key = tuple(g["cube_maps"])
         if key not in memo:
-            c = _nearest_cube(rec, [by_uid[u] for u in key if u in by_uid], file_state=False)
+            c = nearest_cube(rec, [by_uid[u] for u in key if u in by_uid], file_state=False)
             memo[key] = None if c is None else {k: c[k] for k in ("uid", "texture", "distance")}
         cube = memo[key]
         for row in rows:
@@ -2351,7 +2357,7 @@ def _cube_by_area(rec, by_uid, groups):
     return rows
 
 
-def _nearest_cube(rec, cubes, file_state=True):
+def nearest_cube(rec, cubes, file_state=True):
     """CUBE_MAP_RULE on the file state: the candidate_at_load cube node nearest to
     the placement's world position (squared distance, the first of equals as the
     engine's strict `<` keeps it, 0x4d1299) -> {"uid", "texture", "distance",
@@ -2375,6 +2381,9 @@ def _nearest_cube(rec, cubes, file_state=True):
         "distance": _r(bd**0.5, 3),
         "same_fragment": best.get("fragment") == rec.get("fragment"),
     }
+
+
+_nearest_cube = nearest_cube  # the private spelling, kept for existing callers
 
 
 PATH_OBJECT_NATIVE = "AIStaticPathObjectNode"
@@ -2701,7 +2710,7 @@ def _walk_actions(lv, n, depth, out, seen, how=None):
     """Depth-first list of what firing `n`'s children does (aux actions followed)."""
     acts = [c for c in n.children if _is_action(c)]
     for i, c in enumerate(acts):
-        when, delay = _child_when(n, i)
+        when, delay = child_when(n, i)
         _, names = _params(lv, c)
         rec = {"depth": depth, "uid": lv.uid[id(c)], "label": _label(lv, c, names), "when": when}
         if delay is not None:
@@ -3542,11 +3551,14 @@ LOGICAL_INPUT_BUTTONS = {
 
 
 @functools.cache
-def _input_codes():
+def input_codes():
     """wlib/input_code_enums.json, read once (callers only read it)."""
     here = os.path.dirname(os.path.abspath(__file__))
     with open(os.path.join(here, "input_code_enums.json"), encoding="utf-8") as fh:
         return json.load(fh)
+
+
+_input_codes = input_codes  # the private spelling, kept for existing callers
 
 
 def input_code_name(device, code):
@@ -3554,7 +3566,7 @@ def input_code_name(device, code):
     GamepadButton on the pad devices; on KEYBOARD_MOUSE KeyboardKeys below 256 and
     "MOUSE_BUTTON_*" for 256 + a MouseButtons value (wlib/input_code_enums.json; the
     tables are read from code, their use for these codes is inferred)."""
-    t = _input_codes()
+    t = input_codes()
     if device != "KEYBOARD_MOUSE":
         return t["GamepadButton"].get(str(code))
     if code >= 256:
@@ -3635,7 +3647,7 @@ def _type_ids():
     return {kapow_props.name_hash(t): t for t in _SAVE_TYPES}
 
 
-def _save_value(ty, w, p):
+def save_value(ty, w, p):
     """(value, next index) of a `ty` value at word p of the record's words."""
     if ty.startswith("list(") and ty.endswith(")"):
         n = w[p]
@@ -3645,7 +3657,7 @@ def _save_value(ty, w, p):
         out = []
         item = ty.removeprefix("list(").removesuffix(")")
         for _ in range(n):
-            v, p = _save_value(item, w, p)
+            v, p = save_value(item, w, p)
             out.append(v)
         return out, p
     match ty:
@@ -3665,6 +3677,9 @@ def _save_value(ty, w, p):
         case "Entity":
             return "%08x" % w[p], p + 1
     raise ValueError(ty)
+
+
+_save_value = save_value  # the private spelling, kept for existing callers
 
 
 def parse_save(data):
@@ -3717,7 +3732,7 @@ def parse_save(data):
         try:
             if ty is None:
                 raise ValueError("type")
-            v, used = _save_value(ty, words, 0)
+            v, used = save_value(ty, words, 0)
             if used != nw:
                 raise ValueError("length")
             rec["value"] = v

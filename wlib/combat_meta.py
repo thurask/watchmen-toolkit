@@ -2446,7 +2446,7 @@ def link_classes(data, classes, extract_out):
 
 # -------------------------------------------------------------- state blocks
 def _event(rec, eid):
-    """The first firing record of an event of a state record (anim_meta._events
+    """The first firing record of an event of a state record (anim_meta.state_event_records
     did the timing: start position, slot speed, looping)."""
     best = None
     for e in rec.get("events") or []:

@@ -1167,7 +1167,7 @@ def coloring_image(doc, stream):
         return None
     t["fmt"] = wx.TEX_FMT[en][0]
     if doc["order"] == "<":
-        want = wx._chain_bytes_exact(en, w, h, t["mips"])
+        want = wx.chain_bytes_exact(en, w, h, t["mips"])
         kind, unit = wx.TEX_FMT[en][1]
         if kind == "lin":  # rows are padded to 4 bytes: take them apart
             np = _np()
@@ -1177,14 +1177,12 @@ def coloring_image(doc, stream):
                 info["leftover_bytes"] = len(stream)
                 return None
             rows = np.frombuffer(stream, np.uint8, pitch * h).reshape(h, pitch)
-            img = wx._decode_one_layer(
-                np.ascontiguousarray(rows[:, : w * unit]).tobytes(), en, w, h
-            )
+            img = wx.decode_one_layer(np.ascontiguousarray(rows[:, : w * unit]).tobytes(), en, w, h)
         else:
-            img = wx._decode_one_layer(stream, en, w, h)
+            img = wx.decode_one_layer(stream, en, w, h)
     elif t["size"]:
         want = t["size"]
-        img = wx._x360_base_level(stream, en, w, h) if len(stream) >= want else None
+        img = wx.x360_base_level(stream, en, w, h) if len(stream) >= want else None
         if img is not None and min(w, h) < 4 and wx.TEX_FMT[en][1][0] == "blk":
             # measured: the 1 x 1 map of Part 1 reads 204 here and 255 on PC / PS3
             info["unverified"] = (
@@ -1196,7 +1194,7 @@ def coloring_image(doc, stream):
         if len(stream) >= 36:
             (n,) = struct.unpack_from(">I", stream, 8)
             want = 36 + n
-        img = wx._ps3_layer_image(stream[36:], {"enum": en, "aw": w, "ah": h}, False)
+        img = wx.ps3_layer_image(stream[36:], {"enum": en, "aw": w, "ah": h}, False)
     info["expected_bytes"] = want
     info["leftover_bytes"] = len(stream) - want
     if img is None:

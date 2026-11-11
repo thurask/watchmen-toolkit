@@ -20,7 +20,7 @@ import test_v120_regressions as tv
 # frozen 1.4.0 copies (reference)
 # ---------------------------------------------------------------------------
 def old_texture_sheet(header, order="<"):
-    H = we._sheet_hashes()
+    H = we.sheet_hashes()
     n = len(header)
     salt = None
     rt = H["renderType"]
@@ -279,7 +279,7 @@ def old_rescue_texture_plan(hdr, stream, order="<"):
             continue
         sols = []
         for mips in itertools.product(range(1, 14), repeat=len(recs)):
-            if sum(we._chain_bytes(e, w, h, m) for (e, w, h), m in zip(recs, mips)) == len(stream):
+            if sum(we.chain_bytes(e, w, h, m) for (e, w, h), m in zip(recs, mips)) == len(stream):
                 sols.append(mips)
                 if len(sols) > 400:
                     sols = []
@@ -288,12 +288,12 @@ def old_rescue_texture_plan(hdr, stream, order="<"):
             off = 0
             tot = 0.0
             for (e, w, h), m in zip(recs, mips):
-                img = we._decode_one_layer(stream[off:], e, w, h)
+                img = we.decode_one_layer(stream[off:], e, w, h)
                 if img is None:
                     tot = 1e9
                     break
                 tot += we._coherence(img)
-                off += we._chain_bytes(e, w, h, m)
+                off += we.chain_bytes(e, w, h, m)
             if tot < 1e9 and (best is None or tot < best[0]):
                 best = (tot, [(e, w, h, m) for (e, w, h), m in zip(recs, mips)])
     return best[1] if best else None
@@ -303,7 +303,7 @@ def _brute(recs, total):
     """The 1.4.0 search: the product of 1..13 mips per layer, in order."""
     sols = []
     for mips in itertools.product(range(1, 14), repeat=len(recs)):
-        if sum(we._chain_bytes(e, w, h, m) for (e, w, h), m in zip(recs, mips)) == total:
+        if sum(we.chain_bytes(e, w, h, m) for (e, w, h), m in zip(recs, mips)) == total:
             sols.append(mips)
     return sols
 
@@ -319,7 +319,7 @@ def _brute(recs, total):
 )
 def test_exact_mip_sums_equal_the_product_search(recs):
     sizes = {
-        sum(we._chain_bytes(e, w, h, m) for (e, w, h), m in zip(recs, ms))
+        sum(we.chain_bytes(e, w, h, m) for (e, w, h), m in zip(recs, ms))
         for ms in itertools.product(range(1, 14), repeat=len(recs))
     }
     for total in sorted(sizes)[:: max(1, len(sizes) // 12)] + [1, 12345]:
@@ -341,7 +341,7 @@ def _crafted(monkeypatch, recs, stream_len):
 
         return np.zeros((max(1, h), max(1, w), 3), np.uint8)
 
-    monkeypatch.setattr(we, "_decode_one_layer", dec)
+    monkeypatch.setattr(we, "decode_one_layer", dec)
     monkeypatch.setattr(we, "_coherence", lambda img: 1.0)
     return b"\0" * stream_len, decoded
 
@@ -352,7 +352,7 @@ def test_a_failing_header_returns_fast(monkeypatch):
     recs = [(7, 2048, 2048)] * 4 + [(5, 1024, 1024)] * 2
     stream, decoded = _crafted(monkeypatch, recs, 12345)
     t0 = time.perf_counter()
-    assert we._rescue_texture_plan(b"x" * 400, stream) is None
+    assert we.rescue_texture_plan(b"x" * 400, stream) is None
     # nothing decoded is the property; the time bound only catches a hang
     assert decoded == [] and time.perf_counter() - t0 < 30.0
 
@@ -362,14 +362,14 @@ def test_the_rescue_gives_up_after_its_budget(monkeypatch):
     stream, decoded = _crafted(monkeypatch, recs, 48)
     logs = []
     t0 = time.perf_counter()
-    assert we._rescue_texture_plan(b"x" * 200, stream, log=logs.append, max_plans=5) is None
+    assert we.rescue_texture_plan(b"x" * 200, stream, log=logs.append, max_plans=5) is None
     assert time.perf_counter() - t0 < 30.0  # a hang only; the budget is checked below
     assert logs == [
         "      ! texture plan rescue gave up after 5 candidate plans (RESCUE_MAX_PLANS)"
     ]
     assert we.is_warning_line(logs[0])
     # within the budget: the plan of the 1.4.0 search
-    plan = we._rescue_texture_plan(b"x" * 200, stream, log=logs.append)
+    plan = we.rescue_texture_plan(b"x" * 200, stream, log=logs.append)
     assert plan == old_rescue_texture_plan(b"x" * 200, stream) and len(logs) == 1
 
 
@@ -384,9 +384,7 @@ def test_the_rescue_picks_the_1_4_0_plan(monkeypatch, seed):
     ]
     stream, _ = _crafted(monkeypatch, recs, 1)
     ms = [rng.randrange(1, 14) for _ in recs]
-    size = sum(we._chain_bytes(e, w, h, m) for (e, w, h), m in zip(recs, ms))
+    size = sum(we.chain_bytes(e, w, h, m) for (e, w, h), m in zip(recs, ms))
     stream = bytes(rng.getrandbits(8) for _ in range(size))
     monkeypatch.setattr(we, "_coherence", lambda img: float(img.shape[0] * 7 % 5 + img.shape[1]))
-    assert we._rescue_texture_plan(b"x" * 200, stream) == old_rescue_texture_plan(
-        b"x" * 200, stream
-    )
+    assert we.rescue_texture_plan(b"x" * 200, stream) == old_rescue_texture_plan(b"x" * 200, stream)

@@ -13,11 +13,9 @@ import hashlib
 import json
 import os
 import struct
-import sys
 
 import pytest
 
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wlib"))
 import kapow_props
 import watchmen_extract as wx
 
@@ -28,7 +26,7 @@ except ImportError:  # pragma: no cover
 
 import test_formats_v2 as tf
 
-TEXT_HASH = wx._name_hash("textRes")
+TEXT_HASH = kapow_props.name_hash("textRes")
 
 
 def need():

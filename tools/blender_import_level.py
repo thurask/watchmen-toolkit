@@ -110,6 +110,8 @@ CHARACTER_PIVOT_HEIGHT = 1.0
 # the group (collection below the level collection, switched off) of the model records the
 # level file marks with host_offset_copy; whether the game draws them is not established
 HOST_OFFSET_GROUP = ("Host-offset copies",)
+#: groups whose collections import_level switches off once the level is in
+GROUPS_SWITCHED_OFF = (("Navigation",), ("Characters", "Scene models"), HOST_OFFSET_GROUP)
 
 #: Identical images are merged after every DEDUPE_EVERY imported GLBs (and at the end).
 DEDUPE_EVERY = 25
@@ -1333,7 +1335,7 @@ def import_level(
         if lc is not None and not lc.exclude:
             context.view_layer.active_layer_collection = lc
     _exclude(context, lib_root)
-    for off in (("Navigation",), ("Characters", "Scene models"), HOST_OFFSET_GROUP):
+    for off in GROUPS_SWITCHED_OFF:
         if off in groups:
             _exclude(context, groups[off])
     far = 0.0

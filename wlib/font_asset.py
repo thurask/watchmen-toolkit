@@ -128,7 +128,7 @@ def _pixel_bytes(data, tex, bo):
         wx = _tex_fmt()
         if tex["enum"] not in wx.TEX_FMT:
             raise FontError("texture format id %d" % tex["enum"])
-        return p, wx._chain_bytes_exact(tex["enum"], tex["width"], tex["height"], tex["mips"])
+        return p, wx.chain_bytes_exact(tex["enum"], tex["width"], tex["height"], tex["mips"])
     if tex["size"]:  # Xbox 360: the descriptor carries the stored size
         return p, tex["size"]
     # PS3: 36-byte RSX descriptor, byte count at +8
@@ -293,10 +293,10 @@ def atlas_image(data, doc):
         return None
     blk = pixels(data, doc)
     if doc["order"] == "<":
-        return wx._decode_one_layer(blk, en, w, h)
+        return wx.decode_one_layer(blk, en, w, h)
     if t["size"]:
-        return wx._x360_base_level(blk, en, w, h)
-    return wx._ps3_layer_image(blk[36:], {"enum": en, "aw": w, "ah": h}, False)
+        return wx.x360_base_level(blk, en, w, h)
+    return wx.ps3_layer_image(blk[36:], {"enum": en, "aw": w, "ah": h}, False)
 
 
 def checks(doc):

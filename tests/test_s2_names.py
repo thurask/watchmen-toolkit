@@ -11,12 +11,9 @@ Synthetic fixtures only."""
 
 import json
 import os
-import sys
 
 import pytest
 
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wlib"))
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import canonical_names as cn
 import level_meta as lm
 import particle_meta as pm

@@ -37,7 +37,7 @@ def _capture(monkeypatch):
     def fake(path, name, v, n, uv, tris, subs, mats, tex_index, log):
         cap.update(v=[tuple(p) for p in v], n=[tuple(p) for p in n])
 
-    monkeypatch.setattr(we, "_write_obj_mtl", fake)
+    monkeypatch.setattr(we, "write_obj_mtl", fake)
     return cap
 
 
@@ -208,7 +208,7 @@ def test_area_test_tolerates_the_console_rounding():
     verts = np.array([(0, 0, 0), (2, 0, 0), (0, 1, 0)], np.float32)
     idx = np.array([0, 1, 2], np.uint16)
     for w, want in ((1.0, True), (1.0016, True), (0.9984, True), (1.006, False), (0.5, False)):
-        assert sr._weight_is_area([{"area_weight": w}], verts, idx) is want, w
+        assert sr.weight_is_area([{"area_weight": w}], verts, idx) is want, w
 
 
 # ---------------------------------------------------------------------------

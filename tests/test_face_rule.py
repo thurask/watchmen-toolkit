@@ -9,12 +9,10 @@ group gated by ACTION HITTAKEN whose members test the DAMAGE_POSE enum.
 
 import json
 import os
-import sys
 
 import numpy as np
 import pytest
 
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wlib"))
 import anim_state_machine as asm
 import face_rule as fr
 import face_synth as fs
@@ -605,9 +603,9 @@ def heads(tmp_path):
         modelNames=[model(m) for m in ("Skel", "Some_Head")],
     )
     body.write(tmp_path, "Thug")
-    fr._HEADS.clear()
+    fr.HEADS.clear()
     yield str(tmp_path)
-    fr._HEADS.clear()
+    fr.HEADS.clear()
 
 
 def test_game_head_is_the_head_collections_model_of_the_variants_type(heads):
@@ -1085,7 +1083,7 @@ def test_face_part_takes_the_overriding_sheets_diffuse_and_keeps_its_other_layer
     (key,) = tex
     assert key == "head" and key.path.endswith("#sheet=Goatee") and key != head
     assert colour(tex[key]) == (200, 10, 10)  # head02's diffuse ...
-    plain = char_lib._find_layers(head, roots)
+    plain = char_lib.find_layers(head, roots)
     assert colour(plain) == (10, 200, 10)
     assert tex[key]["normal"] == plain["normal"]  # ... on head's own normal map
     assert face["parts"][0][5] is key
@@ -1117,14 +1115,14 @@ def test_subtract_blend_layer_becomes_black_ink_with_the_brightness_as_alpha(tmp
     _texture_dir(tmp_path, "/art/r/coat.bmp", (90, 60, 30), sheet={"blendType": 0, "renderType": 0})
     char_lib._LAYERCACHE.clear()
     roots = [str(tmp_path / "textures")]
-    ink = char_lib._find_layers(we.texture_ref("/art/r/spots.bmp"), roots)
+    ink = char_lib.find_layers(we.texture_ref("/art/r/spots.bmp"), roots)
     assert ink["blend"] == "subtract"
     px = Image.open(io.BytesIO(ink["diffuse"]))
     assert px.mode == "RGBA"
     assert px.getpixel((1, 1)) == (0, 0, 0, 255)  # full ink
     assert px.getpixel((2, 2)) == (0, 0, 0, 128)
     assert px.getpixel((0, 0)) == (0, 0, 0, 0)  # nothing: the face shows through
-    coat = char_lib._find_layers(we.texture_ref("/art/r/coat.bmp"), roots)
+    coat = char_lib.find_layers(we.texture_ref("/art/r/coat.bmp"), roots)
     assert "blend" not in coat
     assert Image.open(io.BytesIO(coat["diffuse"])).convert("RGB").getpixel((0, 0)) == (90, 60, 30)
 

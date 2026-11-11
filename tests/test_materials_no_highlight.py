@@ -19,7 +19,6 @@ import numpy as np
 import pytest
 
 import char_lib
-import characters_export as ce
 import materials as mt
 import rig_glb
 import variant_glb as vg
@@ -36,15 +35,7 @@ GREY = lambda: Image.new("RGB", (2, 2), (128,) * 3)
 SPEC_SIZE = lambda: Image.fromarray(np.array([[0, 255], [128, 64]], np.uint8), "L")
 
 
-@pytest.fixture(autouse=True)
-def _fresh(monkeypatch):
-    monkeypatch.delenv("WATCHMEN_MATERIALS", raising=False)
-    monkeypatch.delenv("WATCHMEN_MATERIAL_OPTS", raising=False)
-    for c in (char_lib._TEXIDX, char_lib._LAYERCACHE, ce._FRAG_NODES, ce._TEX_SHEETS):
-        c.clear()
-    yield
-    for c in (char_lib._TEXIDX, char_lib._LAYERCACHE, ce._FRAG_NODES, ce._TEX_SHEETS):
-        c.clear()
+pytestmark = pytest.mark.usefixtures("material_caches")
 
 
 # ---------------------------------------------------------------- the function
@@ -247,7 +238,7 @@ def _mtl(root, path, name="m"):
     idx = we.build_texture_index(root / "textures")
     out = root / "obj" / (name + ".obj")
     v = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)]
-    we._write_obj_mtl(
+    we.write_obj_mtl(
         out,
         name,
         v,
@@ -297,7 +288,7 @@ def test_mtl_of_a_material_without_a_highlight_has_no_roughness_bake(tmp_path, m
     ns = [x for x in lines if x.startswith("Ns ")]
     assert ns and ns != ["Ns 0.000000"] and not [x for x in lines if x.startswith("map_Ns")]
     assert not (d2 / "roughnessEngine.png").exists()
-    want = we._mtl_ns_of_roughness(we._mtl_const_roughness(43.0))
+    want = we.mtl_ns_of_roughness(we.mtl_const_roughness(43.0))
     assert float(ns[0].split()[1]) == pytest.approx(want)
     # a specular layer that is black everywhere: no highlight either
     p3, d3 = _spec_size_tree(tmp_path / "black", 0.4)
