@@ -22,7 +22,7 @@ import watchmen_extract as we
 WLIB = Path(__file__).resolve().parent.parent / "wlib"
 
 #: modules split out of watchmen_extract, each with what it holds
-HOMES = {"extract_log", "byte_reader"}
+HOMES = {"extract_log", "byte_reader", "extract_paths"}
 
 
 def _wlib_modules():

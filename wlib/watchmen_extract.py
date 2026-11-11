@@ -72,10 +72,11 @@ from PIL import Image
 _WLIB = os.path.dirname(os.path.abspath(__file__))
 if _WLIB not in sys.path:
     sys.path.append(_WLIB)
-from wutil import long_path, order_name, platform_name, qrows_conj_xyzw, rel_path  # noqa: E402
+from wutil import order_name, platform_name, qrows_conj_xyzw, rel_path  # noqa: E402
 
 import byte_reader  # noqa: E402
 import extract_log  # noqa: E402
+import extract_paths  # noqa: E402
 
 # MS-ADPCM tables (SFX 'sound' assets are MS-ADPCM/PCM -> WAV; music stays Ogg)
 _COEF = (256, 0, 512, -256, 0, 0, 192, 64, 240, 0, 460, -208, 392, -232)
@@ -3791,7 +3792,7 @@ def texture_ref(path):
     `extract` the spelling the texture was written under), so a material is
     named like the texture folder it resolves to whatever letter case the
     referring model stores."""
-    path = _names_mod().canonical(path)
+    path = extract_paths.names_module().canonical(path)
     return TexRef(_material_stem(path), path)
 
 
@@ -5676,122 +5677,6 @@ def _model_skipped(log, out_path, reason):
     return False
 
 
-class OutputNames:
-    """Which asset names this run has already written, so that a name stored in
-    several blocks is written once and never silently overwritten.
-
-    The level blocks repeat their shared assets (Part 2 PC: 8,711 block entries
-    are 7,023 names), and the copies are byte-identical in every set measured
-    (six sets: no name has two different header / stream pairs; in Part 1
-    the Prison block lists 22 names without the stream its other copies have).
-    place() makes the rule explicit instead of relying on that:
-
-    * the first copy keeps the name as stored ("new");
-    * a later copy with the same bytes is not written again ("repeat"); it is
-      written under the FIRST copy's spelling when only the letter case differs
-      (Rubble_RoofTop_02 / Rubble_Rooftop_02), which is what a case-insensitive
-      file system did anyway;
-    * a copy that brings the stream an earlier one lacked completes it ("fill");
-    * a copy with DIFFERENT bytes gets its own name, `<stem>~<block>.<ext>`
-      (`~<block>~2` ... if that is taken too), and a log line ("variant") -- the
-      earlier file stays as it is.
-    Blocks are processed in sorted order, so the result does not depend on the
-    archive's entry order.
-
-    `run` (a canonical_names.Run) gives every name its canonical spelling before
-    it is placed and records the stored one; without it names stay as stored.
-
-    `same_bytes` is True after place() returned "repeat" for a copy whose header
-    AND stream state equal the copy already written (both with the same stream, or
-    both without one); a repeat that lacks the stream the earlier copy had is
-    "repeat" with same_bytes False."""
-
-    def __init__(self, log=None, run=None):
-        self._log = log if callable(log) else (lambda *a: None)
-        self._run = run
-        self._by = {}  # lower-case name -> [variant dict]
-        self._taken = set()  # lower-case output names
-        self.repeats = 0
-        self.same_bytes = False
-        self.case_twins = []  # (spelling skipped, spelling written)
-        self.variants = []  # (name as stored, name written, block)
-
-    @staticmethod
-    def _digest(header, stream):
-        import hashlib
-
-        return (
-            hashlib.sha1(header or b"").digest(),
-            hashlib.sha1(stream).digest() if stream else None,
-        )
-
-    @staticmethod
-    def variant_name(name, block, k=1):
-        """`dir/Stem.ext` -> `dir/Stem~<block>.ext` (k > 1: `~<block>~<k>`)."""
-        head, _, base = name.replace("\\", "/").rpartition("/")
-        stem, dot, ext = base.partition(".")
-        tag = "".join(c if c.isalnum() or c in "-_" else "_" for c in block.split("/")[-1])
-        tag = tag[: -len("_block")] if tag.lower().endswith("_block") else tag
-        base = "%s~%s%s%s%s" % (stem, tag or "block", "~%d" % k if k > 1 else "", dot, ext)
-        return (head + "/" if _ else "") + base
-
-    def place(self, name, block, header, stream):
-        """-> (name to write under, status): "new", "repeat", "fill" or "variant"."""
-        stored = name
-        if self._run is not None:
-            # --names canonical: the table's spelling (noted below, for the copy written)
-            name = self._run.name(stored, record=False)
-        key = name.replace("\\", "/").lower()
-        hd, sd = self._digest(header, stream)
-        known = self._by.setdefault(key, [])
-        self.same_bytes = False
-        for v in known:
-            if v["hd"] != hd or (sd is not None and v["sd"] is not None and v["sd"] != sd):
-                continue
-            if stored != v["stored"] and stored not in v["twins"]:
-                v["twins"].add(stored)
-                if stored != v["name"]:
-                    self.case_twins.append((stored, v["name"]))
-                    if self._run is not None:
-                        self._run.twin(stored, v["name"])
-            if v["sd"] is None and sd is not None:
-                v["sd"] = sd
-                return v["name"], "fill"
-            self.repeats += 1
-            self.same_bytes = v["sd"] == sd
-            return v["name"], "repeat"
-        out, k = name, 1
-        if known:
-            out = self.variant_name(name, block)
-            while out.lower() in self._taken:
-                k += 1
-                out = self.variant_name(name, block, k)
-            self.variants.append((name, out, block))
-            self._log(
-                "      WARNING: %s is stored with different content in %s than in %s: written as %s"
-                % (name, block, known[0]["block"], out)
-            )
-        self._taken.add(out.lower())
-        known.append(dict(hd=hd, sd=sd, name=out, stored=stored, twins=set(), block=block))
-        if self._run is not None:
-            if name != stored:
-                self._run.renamed_as(out, stored)
-            if not known[:-1]:
-                self._run.wrote(out)  # references in another letter case follow this spelling
-        return out, ("variant" if known[:-1] else "new")
-
-
-def standalone_output_name(names, stem, header, stream):
-    """Output name of a standalone `_h_z` / `_s_z` pair (`stem` = its archive path
-    without the suffix) through the run's OutputNames -> (name, status).  Two
-    pairs with the same base name in different folders do not overwrite each
-    other: a copy with different bytes is written as `<name>~<folder>.<ext>`
-    with a WARNING, an identical one is "repeat" (not written again)."""
-    stem = stem.replace("\\", "/")
-    folder = stem.rpartition("/")[0]
-    return names.place(stem.split("/")[-1], folder or stem, header, stream)
-
-
 #: what the last decode_model call recorded when it was given no `status` dict
 MODEL_STATUS = {}
 
@@ -6719,7 +6604,7 @@ def decode_audio_tracks(raw, out_dir, name, exact=True, log=None, labels=None):
         if r is None:
             return None
         data, ch, rate, npk, last = r
-        outp = safe(out_dir, tname)
+        outp = extract_paths.safe(out_dir, tname)
         outp.parent.mkdir(parents=True, exist_ok=True)
         outp.write_bytes(data)
         log(
@@ -6729,7 +6614,7 @@ def decode_audio_tracks(raw, out_dir, name, exact=True, log=None, labels=None):
         out.append(
             dict(
                 index=k,
-                file=out_rel(out_dir, tname),
+                file=extract_paths.out_rel(out_dir, tname),
                 label=lab,
                 channels=ch,
                 rate=rate,
@@ -7134,7 +7019,7 @@ def _emit_audio(container, ext, name, out_dir, vgmstream_cli, log, tag, keep_con
     the reliable artifact and a .wav is only produced when --vgmstream-cli is
     given.  --keep-xma still forces keeping PS3 .mp3 containers too."""
     keep_container = keep_container or ext == ".xma"
-    base = safe(out_dir, name)
+    base = extract_paths.safe(out_dir, name)
 
     def _keep():
         outp = base.with_suffix(base.suffix + ext)
@@ -7195,12 +7080,12 @@ def decode_sfx_console(header, order, name, out_dir, vgmstream_cli, log, keep_co
     def done(ok, ext, rec):
         if not ok:
             return False
-        wav = vgmstream_cli and safe(out_dir, name + ".wav").exists()
+        wav = vgmstream_cli and extract_paths.safe(out_dir, name + ".wav").exists()
         rec.pop("_pe", None)
-        rec["file"] = out_rel(out_dir, name + (".wav" if wav else ext))
+        rec["file"] = extract_paths.out_rel(out_dir, name + (".wav" if wav else ext))
         if wav:
             try:
-                with wave.open(str(safe(out_dir, name + ".wav")), "rb") as w:
+                with wave.open(str(extract_paths.safe(out_dir, name + ".wav")), "rb") as w:
                     rec["decoded_samples"] = w.getnframes()
                     rec["decoded_duration_s"] = round(w.getnframes() / float(w.getframerate()), 4)
             except (wave.Error, OSError, EOFError, ZeroDivisionError):
@@ -7346,12 +7231,13 @@ def decode_console_audio(
             out.append(
                 dict(
                     index=k,
-                    file=out_rel(
+                    file=extract_paths.out_rel(
                         out_dir,
                         tname
                         + (
                             ".wav"
-                            if vgmstream_cli and safe(out_dir, tname + ".wav").exists()
+                            if vgmstream_cli
+                            and extract_paths.safe(out_dir, tname + ".wav").exists()
                             else ext
                         ),
                     ),
@@ -7387,9 +7273,14 @@ def decode_console_audio(
     return [
         dict(
             index=0,
-            file=out_rel(
+            file=extract_paths.out_rel(
                 out_dir,
-                name + (".wav" if vgmstream_cli and safe(out_dir, name + ".wav").exists() else ext),
+                name
+                + (
+                    ".wav"
+                    if vgmstream_cli and extract_paths.safe(out_dir, name + ".wav").exists()
+                    else ext
+                ),
             ),
             label=None,
             channels=ch,
@@ -7403,64 +7294,6 @@ def decode_console_audio(
 # ===========================================================================
 # Driver
 # ===========================================================================
-#: names Windows reserves for devices (in any letter case, with or without an extension)
-_WIN_DEVICES = frozenset(
-    ["CON", "PRN", "AUX", "NUL"]
-    + ["COM%d" % i for i in range(1, 10)]
-    + ["LPT%d" % i for i in range(1, 10)]
-)
-
-
-def _not_a_device(part):
-    """`part`, or `_part` when Windows would open a device for it (CON, NUL.txt, ...)."""
-    return "_" + part if part.split(".", 1)[0].strip().upper() in _WIN_DEVICES else part
-
-
-def _no_trailing_dots(part):
-    """`part` with each trailing '.' or ' ' replaced by '_': Windows drops them
-    ("Foo. " opens "Foo"), so two entries could land on one file there; the same
-    name is written on every system (none in the six shipped archives, measured)."""
-    core = part.rstrip(". ")
-    return part if core == part else core + "_" * (len(part) - len(core))
-
-
-def _safe_path(base, name):
-    """safe() without the Windows extended-length form."""
-    parts = [p for p in name.replace("\\", "/").split("/") if p not in ("", ".", "..")]
-    parts = [_not_a_device(_no_trailing_dots(p.replace(":", "_"))) for p in parts]
-    # --names canonical (default): the table's spelling, and one spelling per folder
-    parts = _names_mod().output_parts(base, parts)
-    out = base.joinpath(*parts) if parts else base / "_unnamed"
-    if os.path.commonpath([os.path.abspath(base), os.path.abspath(out)]) != os.path.abspath(base):
-        raise ValueError("unsafe archive entry name %r" % name)
-    return out
-
-
-def safe(base, name):
-    """Archive entry name -> a path guaranteed to stay under `base`.
-
-    Entry names are attacker-controlled (rot-2 obfuscated, not authenticated), so
-    strip '..'/absolute anchors AND ':' -- pathlib treats 'C:/x' as a new anchor
-    on Windows and would otherwise escape `base` entirely.  A component Windows
-    reserves for a device (CON, NUL.txt, ...; none in the shipped archives) gets a
-    leading '_' on every platform, and so do trailing dots and spaces become '_'
-    (_no_trailing_dots).  On Windows a path of LONG_PATH_LIMIT (240) characters or
-    more is returned in the extended-length form \\\\?\\C:\\... (wutil.long_path), which
-    opens past MAX_PATH; compare it with other paths through wutil.rel_path.
-
-    Unless --names stored is in force the components take their canonical
-    spelling (canonical_names.output_parts)."""
-    return long_path(_safe_path(base, name))
-
-
-def out_rel(base, name):
-    """`name` as a "file" value of a JSON beside it: '/'-separated, relative to the
-    output tree `base`.  With --names canonical it is the path safe() writes
-    (folders in the spelling of the tree), so the value names the file on a
-    case-sensitive file system too; with --names stored the name as stored."""
-    if _names_mod().is_canonical():
-        return _safe_path(Path(base), name).relative_to(Path(base)).as_posix()
-    return name.replace("\\", "/").lstrip("/")
 
 
 def _clamp16(x):
@@ -7913,14 +7746,6 @@ _DECODED_CLASSES = frozenset(("Texture", "Model", "ModelRes", "sound", "mediastr
 _DECODED_SUFFIXES = (".animation", ".aipathdata", ".txt", ".wav", ".bmp", ".tga", ".model")
 
 
-@functools.cache
-def _names_mod():
-    """canonical_names (--names canonical|stored), imported on first use."""
-    import canonical_names as _cnm
-
-    return _cnm
-
-
 #: why kapow_json did not import (the asset loop names it on each asset it leaves raw)
 _KAPOW_JSON_ERROR = []
 
@@ -7999,7 +7824,7 @@ def main(argv):
     try:
         return _extract_main(argv)
     finally:
-        _names_mod().end()
+        extract_paths.names_module().end()
 
 
 def _extract_main(argv):
@@ -8174,10 +7999,12 @@ def _extract_main(argv):
     sfx_failed = []  # console sound assets no audio could be written for
     stats = dict(files=0, tex=0, mdl=0, aud=0)
     # --names: the canonical spelling of every output path, and what was respelled
-    name_run = _names_mod().begin()
+    name_run = extract_paths.names_module().begin()
     # extracted/, textures/, models/ and audio/ spell every folder alike
-    _names_mod().share_folders(a.out)
-    names = OutputNames(log, name_run)  # one output per asset name (repeats, twins, variants)
+    extract_paths.names_module().share_folders(a.out)
+    names = extract_paths.OutputNames(
+        log, name_run
+    )  # one output per asset name (repeats, twins, variants)
     model_stored = {}  # model output path -> the archive's spelling of a respelled name
     text_writer = None
     if not a.no_text:
@@ -8209,7 +8036,7 @@ def _extract_main(argv):
                 log("  ! %s: %s" % (e.name, ex))
                 continue
         if data is not None and not a.no_files:
-            p = safe(a.out / "files", name_run.name(e.name))
+            p = extract_paths.safe(a.out / "files", name_run.name(e.name))
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_bytes(data)
             stats["files"] += 1
@@ -8224,7 +8051,9 @@ def _extract_main(argv):
             try:
                 if not a.flat_music and _audio_packets(data):
                     pc_audio.append((e.name, e))  # needs the descriptors
-                elif decode_audio(data, safe(a.out / "audio", e.name + ".ogg"), True, log):
+                elif decode_audio(
+                    data, extract_paths.safe(a.out / "audio", e.name + ".ogg"), True, log
+                ):
                     stats["aud"] += 1
                 else:
                     console_audio.append((e.name, e))
@@ -8374,14 +8203,18 @@ def _extract_blocks_and_rest(
                 failed_blocks.append(stem)
                 continue
             # same registry as the block assets; the folder names a differing copy
-            name, placed = standalone_output_name(names, stem, header, stream)
+            name, placed = extract_paths.standalone_output_name(names, stem, header, stream)
             if placed == "repeat":
                 continue
             if do_tex and ".texture" in low:
                 try:
-                    if carve_texture(stream, header, safe(a.out / "textures", name), log):
+                    if carve_texture(
+                        stream, header, extract_paths.safe(a.out / "textures", name), log
+                    ):
                         stats["tex"] += 1
-                        mark_stored_name(safe(a.out / "textures", name), name_run.stored_of(name))
+                        mark_stored_name(
+                            extract_paths.safe(a.out / "textures", name), name_run.stored_of(name)
+                        )
                 except Exception as ex:
                     log("      ! texture %s: %s" % (name, ex))
             elif do_mdl and ".modelres" in low:
@@ -8389,7 +8222,7 @@ def _extract_blocks_and_rest(
                     (
                         header,
                         stream,
-                        safe(a.out / "models", name + ".obj"),
+                        extract_paths.safe(a.out / "models", name + ".obj"),
                         None,
                         console_platform_of(stem) or run_platform,
                     )
@@ -8472,7 +8305,7 @@ def _extract_blocks_and_rest(
             # analysis; a later copy with the same header and stream wrote the same files
             # under the same name already (raw, JSON, the files beside it), so it is skipped
             if do_extract_all and not (placed == "repeat" and names.same_bytes):
-                _ep = safe(a.out / "extracted", name)
+                _ep = extract_paths.safe(a.out / "extracted", name)
                 _ep.parent.mkdir(parents=True, exist_ok=True)
                 _ep.write_bytes(header if header else b"")
                 if stream:
@@ -8570,12 +8403,16 @@ def _extract_blocks_and_rest(
                             si = sfx_info(header) or {}
                             loop = bool(si.get("looping"))
                             write_wav(
-                                r[0], r[1], r[2], safe(a.out / "audio", wn), a.smpl_loops and loop
+                                r[0],
+                                r[1],
+                                r[2],
+                                extract_paths.safe(a.out / "audio", wn),
+                                a.smpl_loops and loop,
                             )
                             stats["aud"] += 1
                             if si:
                                 si.pop("_pe", None)
-                                si["file"] = out_rel(a.out / "audio", wn)
+                                si["file"] = extract_paths.out_rel(a.out / "audio", wn)
                                 sound_info[name.replace("\\", "/").lstrip("/")] = si
                         else:
                             sfx_failed.append(name)
@@ -8629,9 +8466,13 @@ def _extract_blocks_and_rest(
                     tex_repeats += 1
                     continue
                 try:
-                    if carve_texture(stream, header, safe(a.out / "textures", name), log):
+                    if carve_texture(
+                        stream, header, extract_paths.safe(a.out / "textures", name), log
+                    ):
                         stats["tex"] += 1
-                        mark_stored_name(safe(a.out / "textures", name), name_run.stored_of(name))
+                        mark_stored_name(
+                            extract_paths.safe(a.out / "textures", name), name_run.stored_of(name)
+                        )
                 except Exception as ex:
                     log("      ! texture %s: %s" % (name, ex))
             elif do_mdl and (cls in ("Model", "ModelRes") or ".modelres" in low):
@@ -8639,19 +8480,23 @@ def _extract_blocks_and_rest(
                     mdl_repeats += 1
                     continue
                 if name_run.stored_of(name):
-                    model_stored[safe(a.out / "models", name + ".obj")] = name_run.stored_of(name)
+                    model_stored[extract_paths.safe(a.out / "models", name + ".obj")] = (
+                        name_run.stored_of(name)
+                    )
                 model_jobs.append(
                     (
                         header,
                         stream,
-                        safe(a.out / "models", name + ".obj"),
+                        extract_paths.safe(a.out / "models", name + ".obj"),
                         BLOCK_ORDER,
                         console_platform_of(stem) or run_platform,
                     )
                 )
             elif not a.no_audio and (cls.lower() == "mediastream" or ".mediastream" in low):
                 try:
-                    if decode_audio(stream, safe(a.out / "audio", name + ".ogg"), True, log):
+                    if decode_audio(
+                        stream, extract_paths.safe(a.out / "audio", name + ".ogg"), True, log
+                    ):
                         stats["aud"] += 1
                 except Exception as ex:
                     log("      ! audio %s: %s" % (name, ex))
@@ -8722,7 +8567,7 @@ def _extract_blocks_and_rest(
         }
         import json as _json
 
-        jp = safe(a.out / "audio", name + ".json")
+        jp = extract_paths.safe(a.out / "audio", name + ".json")
         jp.parent.mkdir(parents=True, exist_ok=True)
         with open(jp, "w", encoding="utf-8", newline="\n") as _f:
             _f.write(_json.dumps(doc, indent=1))
@@ -8746,7 +8591,7 @@ def _extract_blocks_and_rest(
             if tr:
                 stats["aud"] += len(tr)
                 _music_sidecar(name, tr, "one file per track")
-            elif decode_audio(raw, safe(a.out / "audio", name + ".ogg"), True, log):
+            elif decode_audio(raw, extract_paths.safe(a.out / "audio", name + ".ogg"), True, log):
                 stats["aud"] += 1
                 log("      ! %s does not split into tracks: written as one file" % name)
             else:
@@ -8763,7 +8608,10 @@ def _extract_blocks_and_rest(
             doc["not_decoded"] = sorted(n.replace("\\", "/").lstrip("/") for n in sfx_failed)
         (a.out / "audio").mkdir(parents=True, exist_ok=True)
         with open(
-            safe(a.out / "audio", "sound_info.json"), "w", encoding="utf-8", newline="\n"
+            extract_paths.safe(a.out / "audio", "sound_info.json"),
+            "w",
+            encoding="utf-8",
+            newline="\n",
         ) as _f:
             _f.write(_json.dumps(doc, indent=1))
         src = {}
@@ -9026,12 +8874,12 @@ def _extract_blocks_and_rest(
     try:
         name_run.write(a.out)
     except OSError as ex:
-        log("  ! %s: %s" % (_names_mod().RUN_FILE, ex))
+        log("  ! %s: %s" % (extract_paths.names_module().RUN_FILE, ex))
     if name_run.renamed:
         log(
             "  names       : %d written under their canonical spelling (--names stored keeps"
             " the archive's); canonical -> stored in %s"
-            % (len(name_run.renamed), _names_mod().RUN_FILE)
+            % (len(name_run.renamed), extract_paths.names_module().RUN_FILE)
         )
     log("  audio       : %d" % stats["aud"])
     log("  output      : %s" % a.out)
@@ -9058,6 +8906,15 @@ _HOMES = {
     "extract_logger": ("extract_log", "extract_logger"),
     "ByteReader": ("byte_reader", "ByteReader"),
     "_Rd": ("byte_reader", "ByteReader"),
+    "OutputNames": ("extract_paths", "OutputNames"),
+    "standalone_output_name": ("extract_paths", "standalone_output_name"),
+    "_WIN_DEVICES": ("extract_paths", "_WIN_DEVICES"),
+    "_not_a_device": ("extract_paths", "_not_a_device"),
+    "_no_trailing_dots": ("extract_paths", "_no_trailing_dots"),
+    "_safe_path": ("extract_paths", "_safe_path"),
+    "safe": ("extract_paths", "safe"),
+    "out_rel": ("extract_paths", "out_rel"),
+    "_names_mod": ("extract_paths", "names_module"),
 }
 
 
