@@ -33,6 +33,7 @@ HOMES = {
     "texture_decode",
     "texture_carve",
     "material_refs",
+    "model_header",
 }
 
 
