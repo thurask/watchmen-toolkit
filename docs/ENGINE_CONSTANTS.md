@@ -1576,6 +1576,10 @@ blink cadence is an invention.
   `Dominatrix_3` in the game), Gimp 2, GimpGagBall 5. The least-used pick runs over the whole
   collection, so a level's first Dominatrix is `Dominatrix_1`, its second `Dominatrix_2`, and
   so on.
+- No member limit at 10: a Dominatrices collection of 12 members (two copied nodes added after
+  `Dominatrix_10`) loads and deals out all 12 [measured: add-on block pair, Bordello]. A fragment's
+  header chunk count must equal its chunks (0x409a94 reads exactly that many) and no property
+  value may span two chunks (0x545e1b -> 0x405f88 reads a value from one chunk) [code].
 - The enemy collections are instanced by the level's root fragment, inside the level block.
   A restart or checkpoint restore from the in-game menu (`MenuIngameCtrl` →
   `MasterSceneCtrl.command_load_current_level` 0x78de32) deactivates that block;
@@ -2410,6 +2414,9 @@ constants from the executable's bytes.
   `combat.rules.partner_ai.waypoint_move` holds the constants.
 
 ### AIBrainNode and the Kynapse bridge
+
+**Entity-info pool (Kynapse `EntityInfoManager`).** Each level's `.aipathdata` sets fixed profile pools: `AICharacterProfile` MaxCount **34**, `AIVisibleObjectProfile` 20, `AIFakeTargetProfile` 100, `AIVehicleProfile` 20, world `MaxEntity` 1000; the same in all five PC Part 2 levels [data]. `FUN_00928430` builds the pools (`FUN_00927e10`, `FUN_009239c0(MaxCount)`); `FUN_00928000` returns an empty handle when a pool is full, with no message [code]. Every character with an active AI brain, the two heroes included, holds an `AICharacterProfile` entry; an enemy that gets none is never seen by Perception (`AddNewKnownEnemies` 0x7dcc88 from `AIBrainNode.GetSeenAIEnemies`), has no target, and `Enemy.Evaluate` 0x72587d returns IDLING [code]. The entry is released by `CharacterAIBrain.command_deactivate` (0x0d645e53, handler 0x64915c -> `AIBrainNode::Deactivate` 0x4859b0 -> 0x484b8f, world remove of the brain entity +0x58), which `DeleteCharacterRootFragment` 0x67625b sends to `m_eaibrain` (CharacterRoot members+0x0c) at the end of `StateDead` 0x6bb12a or in `DeleteSubSystems` 0x696e73 [code]. Full write-up: `reviews\re_audit_kept_bodies_and_mod_paths\REPORT.md` in the project folder.
+
 
 `AIBrainNode` constructor 0x486099 (constants from exe bytes) against the three
 `CharacterRootTemplate_*` fragments (measured, PC Part 2 and PC Part 1, identical in both
@@ -3929,6 +3936,14 @@ Read from code unless marked; constants from exe bytes.
   vfunc 35 0x48f3cb stores 0 for a value above 1. Attach 0x495bf6 walks +0x48 until the cast
   to `PivotNode` succeeds; 0x48f31f leaves the pivot parent null when the parent is the scene
   singleton. Sibling insert 0x48f556.
+- Transform::SetWorldPos 0x47e785 (this = the pivot, entity + 0x58) [measured]: with a parent
+  (pivot +0x40 non-null) the world position goes through 0x47d839 (times the inverse of the
+  parent matrix, 0x4210e7) first; 0x47da30 then, when the value differs (0x47b374) or bit 5 of
+  the owner's +0x12c is set, copies 16 bytes to the local row at pivot +0x4c (entity +0xa4 ..
+  +0xb0) and, unless bit 7 of the flags is set, calls vfunc +0x90 of the owner at pivot +0x44
+  with the flags (0x10 from SetWorldPos). Whether that
+  call recomputes the world matrices (own and children) at once or marks them dirty is not
+  established.
 - Enabled 0x48e51d (bit 0 of +0x40, recursive); visible 0x48e028 (byte +0x55 AND the node
   behind the handle at +0x3c); 0x492b67 sets the handle to the nearest ancestor of class
   `PVSRootNode`; `Node::SetVisible` 0x48f69a only stores the byte and calls vfunc 27 (a bare

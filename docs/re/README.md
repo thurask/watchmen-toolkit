@@ -1,6 +1,6 @@
 # Reverse-engineering notes
 
-Twenty-one notes read from the decompiled game executable `KapowMultiDEDRM.exe` (32-bit x86 PE,
+Twenty-two notes read from the decompiled game executable `KapowMultiDEDRM.exe` (32-bit x86 PE,
 image base 0x400000), plus one (`physx_d6.md`) read from `PhysXCore.dll` (PhysX 2.8.1.1, image base
 0x10000000). Each cites the function addresses it rests on and tags every finding as read from code
 (`[code]`), inferred, measured on the shipped data or on a capture, or not established. Addresses
@@ -512,3 +512,12 @@ files, 19,166 citations mapped.
 - Over the 19,233-function dump alone the count is 1,531,660 of 3,268,845 bytes of live code
   (46.9 %); the merged dump adds 28,816 bytes of restored tails and 11,404 bytes of hand-written
   functions found by the gap sweep to the live base.
+
+### [outfit_mix.md](outfit_mix.md) — the outfit copy at spawn and a per-part mix
+
+Reads the spawn path from `InstantiateSubSystems` 0x67884e to `command_set_override_model` 0x69c8e3 and
+`CopyModelResSettingsFromCharacter` 0x4b28d1: an outfit is copied by its `modelNames` list (resolved slot by slot,
+0x4a52b0) and its texture-sheet description string; the head is a separate character chosen by HeadCtrl +0xe8. Gives
+the native Character layout per slot, the head-name blanking that changes a member once it is dealt out, and a
+hook at 0x69cf11 for a per-part mix. Parts bind to the skeleton by bone index through slot 0 only, so parts
+rendered on the same skeleton combine. Evidence: read from code; nothing run in the game.
