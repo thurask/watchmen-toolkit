@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- **Golden GLB tests.** `tests/test_glb_golden.py` runs `variant_glb.write_glb` and
+  `rig_glb.build_rigged_glb` on fixed synthetic input over the switches a `pc_p2` export does
+  not run: flat rig, mirrored frame, legacy face rule with blink keys, engine face rule with and
+  without the idle cycle and without metadata, vertex attributes off, textures with and
+  without a normal map, weapon, alternatives, outfits and ragdoll helpers; `build_rigged_glb`
+  static and skinned, engine materials on and off, header node table as hierarchy and flat,
+  legacy clips. 26 cases, written against the 1.7.0 code. A case passes on the recorded file
+  SHA-256, or, where the platform's float math writes other last bits, on an exact hash of
+  everything but the float values plus four float sums within 1e-9 of their scale. Measured:
+  Windows (Python 3.15, numpy 2.5) writes other last bits in the float64 JSON node transforms
+  of 20 cases, relative difference 2e-17, binary buffers identical; `rig_glb` re-encodes
+  textures with Pillow, so images are compared as pixels. `GLB_GOLDEN_STRICT=1` demands the
+  SHA-256 (it holds on Linux, Python 3.13, numpy 2.1 and 2.5). (2026-11-11)
+
 ## 1.7.0 — 2026-11-11
 
 **Failures are reported, and a few wrong values are fixed.** `extract` exits 1 when a block
