@@ -29,6 +29,7 @@ HOMES = {
     "naz_archive",
     "kapow_block",
     "texture_header",
+    "texture_sheet",
 }
 
 
@@ -81,9 +82,10 @@ def test_a_delete_through_watchmen_extract_is_undone(name):
     assert getattr(mod, there) is before
 
 
-def test_a_patch_on_the_old_spelling_reaches_callers_left_in_watchmen_extract(tmp_path):
-    """_sheet_warning stays in watchmen_extract and calls extract_log.warn; a
-    patch on the old private spelling `_run_warning` reaches it."""
+def test_a_patch_on_the_old_spelling_reaches_callers_in_other_modules(tmp_path):
+    """texture_sheet.sheet_warning (old spelling `_sheet_warning`) calls
+    extract_log.warn; a patch on the old private spelling `_run_warning`
+    reaches it."""
     got = []
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(we, "_run_warning", got.append)
