@@ -1,6 +1,18 @@
 # Changelog
 
-## Unreleased
+## 1.7.0 — 2026-11-11
+
+**Failures are reported, and a few wrong values are fixed.** `extract` exits 1 when a block
+cannot be read or parsed, and a failure that drops or changes output writes a `WARNING:` line
+instead of passing silently; on PC Part 2 an export writes none. Weapon `hits_to_break` is
+counted in float32 as the game stores durability (`anim_meta` revision 7), the ragdoll sidecar
+carries the gravity the game simulates with beside the constructor default, and `faces` no
+longer records a head as done when a clip failed to bake. `characters` walks the model tree
+once and writes no jiggle memo for a skeleton without jiggle bones. `jiggle_pass.py` and
+`export_female_anims.py` are retired, and 54 helpers the tests and the mod builders reach have
+public names, the private spelling kept as an alias. On PC Part 2 the output changes are
+`anim_meta.json` (that field and the revision), `_glb_options.json` (the revision), the 26
+`*.ragdoll.json` (two new keys) and the absent memo files; every GLB is byte-identical.
 
 - **The ragdoll sidecar carries the gravity the game simulates with.** `<Variant>.ragdoll.json`
   `common.scene.gravity` is the extract's GameEssentials `PhysicsWorld` gravity ((0, -14.82, 0)
