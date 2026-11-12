@@ -50,6 +50,48 @@ class GltfDoc:
         arr = np.asarray(arr, np.float32)
         return self.accessor(self.view(arr.tobytes(), target), FLOAT, len(arr), typ)
 
+    def add_attributes(self, pending, attributes):
+        """`attributes` (a primitive's dict) with one float accessor per entry of
+        `pending` ({name: (array, type)}, in its order; None = none), each array
+        written as it is."""
+        for name, (arr, typ) in (pending or {}).items():
+            attributes[name] = self.accessor(
+                self.view(np.ascontiguousarray(arr).tobytes(), ARRAY_BUFFER), FLOAT, len(arr), typ
+            )
+        return attributes
+
+    def add_skinned_primitive(self, Vg, joints, SW, T, UV, pending, material, material_first):
+        """A skinned triangle primitive (the dict, not yet appended to a mesh).
+
+        Written in this order: POSITION of `Vg` (float32 (n, 3), with min / max),
+        JOINTS_0 of `joints` (unsigned short (n, 4)), WEIGHTS_0 of `SW`, TEXCOORD_0
+        of `UV`, the uint32 indices of `T`, then the `pending` attributes
+        (add_attributes).  `material` is called for the material index: before the
+        pending attributes when `material_first`, after them otherwise (a material
+        that embeds its images the first time it is used puts their buffer views
+        at that point)."""
+        av, ac = self.view, self.accessor
+        n = len(Vg)
+        ap = ac(
+            av(Vg.tobytes(), ARRAY_BUFFER), FLOAT, n, "VEC3", Vg.min(0).tolist(), Vg.max(0).tolist()
+        )
+        aj = ac(av(joints.tobytes(), ARRAY_BUFFER), UNSIGNED_SHORT, n, "VEC4")
+        aw = ac(av(np.ascontiguousarray(SW).tobytes(), ARRAY_BUFFER), FLOAT, n, "VEC4")
+        auv = ac(av(np.ascontiguousarray(UV).tobytes(), ARRAY_BUFFER), FLOAT, n, "VEC2")
+        ai = ac(
+            av(np.ascontiguousarray(T.astype(np.uint32)).tobytes(), ELEMENT_ARRAY_BUFFER),
+            UNSIGNED_INT,
+            T.size,
+            "SCALAR",
+        )
+        mi = material() if material_first else None
+        attributes = self.add_attributes(
+            pending, {"POSITION": ap, "JOINTS_0": aj, "WEIGHTS_0": aw, "TEXCOORD_0": auv}
+        )
+        if not material_first:
+            mi = material()
+        return {"attributes": attributes, "indices": ai, "material": mi, "mode": 4}
+
     def add_trs(self, sm, chn, node, input_acc, Q, T):
         """The rotation and translation channels of `node`: the VEC4 rotation
         accessor of `Q` (K, 4), the VEC3 translation accessor of `T` (K, 3), both

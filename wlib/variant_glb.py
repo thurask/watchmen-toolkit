@@ -669,13 +669,6 @@ def write_glb(
             T = T.reshape(-1, 3)[:, [0, 2, 1]]
         return T, pend, bool(at.get("has_color") and at.get("has_alpha"))
 
-    def _vwrite(pend, attributes):
-        for name, (arr, typ) in (pend or {}).items():
-            attributes[name] = ac(
-                av(np.ascontiguousarray(arr).tobytes(), 34962), 5126, len(arr), typ
-            )
-        return attributes
-
     def _blend(mi, blend):
         """material index `mi`, or its alphaMode BLEND twin for a part whose
         vertex alpha varies (it multiplies the texture alpha in the engine).
@@ -882,31 +875,29 @@ def write_glb(
         )
         return len(j["materials"]) - 1
 
+    def _primitive(part, material_first):
+        """The skinned primitive of one part (V, SI, SW, T, UV, material name).
+        material_first: the part's material is made before its NORMAL / TANGENT /
+        COLOR_0 views (body and face parts) or after them (attachment, alternative
+        and outfit parts); a material's images land in the buffer where it is made
+        first."""
+        V, SI, SW, T, UV, nm = part
+        Vg = np.ascontiguousarray(V, np.float32)
+        T, pend, vblend = _vprep(part, Vg, T)
+        return doc.add_skinned_primitive(
+            Vg,
+            _used_joints(SI, SW),
+            SW,
+            T,
+            UV,
+            pend,
+            lambda: _blend(_mkmat(nm), vblend),
+            material_first,
+        )
+
     prims = []
     for _part in parts:
-        V, SI, SW, T, UV, nm = _part
-        Vg = np.ascontiguousarray(V, np.float32)
-        T, _pend, _vblend = _vprep(_part, Vg, T)
-        ap = ac(
-            av(Vg.tobytes(), 34962), 5126, len(Vg), "VEC3", Vg.min(0).tolist(), Vg.max(0).tolist()
-        )
-        aj = ac(av(_used_joints(SI, SW).tobytes(), 34962), 5123, len(Vg), "VEC4")
-        aw = ac(av(np.ascontiguousarray(SW).tobytes(), 34962), 5126, len(Vg), "VEC4")
-        auv = ac(av(np.ascontiguousarray(UV).tobytes(), 34962), 5126, len(Vg), "VEC2")
-        ai = ac(
-            av(np.ascontiguousarray(T.astype(np.uint32)).tobytes(), 34963), 5125, T.size, "SCALAR"
-        )
-        mi = _mkmat(nm)
-        prims.append(
-            {
-                "attributes": _vwrite(
-                    _pend, {"POSITION": ap, "JOINTS_0": aj, "WEIGHTS_0": aw, "TEXCOORD_0": auv}
-                ),
-                "indices": ai,
-                "material": _blend(mi, _vblend),
-                "mode": 4,
-            }
-        )
+        prims.append(_primitive(_part, True))
     j["meshes"].append({"name": "variant", "primitives": prims})
     mnode = len(j["nodes"])
     j["nodes"].append({"name": "mesh", "mesh": 0, "skin": 0})
@@ -940,42 +931,8 @@ def write_glb(
         # separate object, individually hideable.
         aprims = []
         for _part in aparts:
-            V, SI, SW, T, UV, nm = _part
-            Vg = np.ascontiguousarray(V, np.float32)
-            T, _pend, _vblend = _vprep(_part, Vg, T)
-            ap = ac(
-                av(Vg.tobytes(), 34962),
-                5126,
-                len(Vg),
-                "VEC3",
-                Vg.min(0).tolist(),
-                Vg.max(0).tolist(),
-            )
-            aj = ac(av(_used_joints(SI, SW).tobytes(), 34962), 5123, len(Vg), "VEC4")
-            aw = ac(av(np.ascontiguousarray(SW).tobytes(), 34962), 5126, len(Vg), "VEC4")
-            auv = ac(av(np.ascontiguousarray(UV).tobytes(), 34962), 5126, len(Vg), "VEC2")
-            ai_ = ac(
-                av(np.ascontiguousarray(T.astype(np.uint32)).tobytes(), 34963),
-                5125,
-                T.size,
-                "SCALAR",
-            )
-            aprims.append(
-                {
-                    "attributes": _vwrite(
-                        _pend,
-                        {
-                            "POSITION": ap,
-                            "JOINTS_0": aj,
-                            "WEIGHTS_0": aw,
-                            "TEXCOORD_0": auv,
-                        },
-                    ),
-                    "indices": ai_,
-                    "material": _blend(_mkmat(nm), _vblend),
-                    "mode": 4,
-                }
-            )
+            # the material after the pending attributes, as this site always wrote it
+            aprims.append(_primitive(_part, False))
         if not aprims:
             continue
         mi_ = len(j["meshes"])
@@ -1059,43 +1016,7 @@ def write_glb(
         )
         fprims = []
         for _part in face["parts"]:
-            V, SI, SW, T, UV, nm = _part
-            Vg = np.ascontiguousarray(V, np.float32)
-            T, _pend, _vblend = _vprep(_part, Vg, T)
-            ap = ac(
-                av(Vg.tobytes(), 34962),
-                5126,
-                len(Vg),
-                "VEC3",
-                Vg.min(0).tolist(),
-                Vg.max(0).tolist(),
-            )
-            aj = ac(av(_used_joints(SI, SW).tobytes(), 34962), 5123, len(Vg), "VEC4")
-            aw = ac(av(np.ascontiguousarray(SW).tobytes(), 34962), 5126, len(Vg), "VEC4")
-            auv = ac(av(np.ascontiguousarray(UV).tobytes(), 34962), 5126, len(Vg), "VEC2")
-            ai_ = ac(
-                av(np.ascontiguousarray(T.astype(np.uint32)).tobytes(), 34963),
-                5125,
-                T.size,
-                "SCALAR",
-            )
-            mi = _mkmat(nm)
-            fprims.append(
-                {
-                    "attributes": _vwrite(
-                        _pend,
-                        {
-                            "POSITION": ap,
-                            "JOINTS_0": aj,
-                            "WEIGHTS_0": aw,
-                            "TEXCOORD_0": auv,
-                        },
-                    ),
-                    "indices": ai_,
-                    "material": _blend(mi, _vblend),
-                    "mode": 4,
-                }
-            )
+            fprims.append(_primitive(_part, True))
         fmi = len(j["meshes"])
         j["meshes"].append({"name": "face", "primitives": fprims})
         fmnode = len(j["nodes"])
