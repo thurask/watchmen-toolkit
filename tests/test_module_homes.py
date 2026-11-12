@@ -35,6 +35,7 @@ HOMES = {
     "material_refs",
     "model_header",
     "model_mesh",
+    "obj_mtl",
 }
 
 
