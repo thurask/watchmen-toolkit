@@ -124,6 +124,22 @@
   `texture_decode.layer_image`, instead of reaching the texture code through
   `watchmen_extract`. Messages and JSON unchanged: `pc_p2`, `ps3_p2`, `x360_p2` and `pc_p1`
   byte-identical to the 1.7.0 export, `_extract_done.txt` excluded (measured). (2026-11-12)
+- **The descriptor scan is retired; the exact header is the only Texture reader.**
+  Measured on the six sets: the exact reader reads every carved Texture header (939 per Part 2
+  set, 1,208 per Part 1 set) and on PC tiles every stream; the scan read the same values on
+  every layer it found but stopped early on 44 / 59 headers per set (a present slot after one,
+  two, three, five or six absent slots). Gone: `parse_texture_header`, `_stride_layers`,
+  `_valid_rec`, `_tex_path_off`, `header_dims`, `rescue_texture_plan` (`RESCUE_MAX_PLANS`,
+  `_exact_mip_sums`), `_carve_texture_legacy`, `console_recover_layers`, `image_coherence`,
+  `looks_like_normal`, and their `watchmen_extract` spellings. `plan_texture_layers` returns
+  the exact plan or `fail`; a PC Texture whose header does not read or whose layers do not tile
+  the stream writes no PNG and one `WARNING:` line (was: drift rescue, then a coherence
+  search). A console header that does not read writes nothing and one `WARNING:` line; a
+  console stream that does not fit the exact sizes or segments is cut by the header's frame-0
+  layers (was: the stride walk). `texture_alpha_flag` reads the layer-0 descriptor on every
+  platform; `texture_header.source_name` gives the asset name from the source path. Neither
+  path is taken on the six sets: all six byte-identical to the 1.7.0 export, `_extract_done.txt`
+  excluded, 0 `WARNING:` lines (measured). (2026-11-12)
 
 ## 1.7.0 — 2026-11-11
 

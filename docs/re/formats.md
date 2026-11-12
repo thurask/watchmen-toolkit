@@ -350,9 +350,9 @@ Desc (29 bytes): u32 width · u32 height · u32 formatEnum · u32 x · u32 type 
   `LockRect(face, level)`; the lock helper indexes its table `[face × mipCount + level]` with D3D faces 0..5,
   face-major). The code that copies stream bytes into it was not found.
 
-**Toolkit:** `watchmen_extract.parse_texture_frames()` / `parse_texture_header()` and `chain_bytes_exact()` (the port
-of `parse_texture()` + `tex_chain_bytes()`) replace the stride walk and stream-shape oracle; layers are labelled by
-slot (`TEXTURE_LAYER_SLOTS`, `CUBE_FACE_ORDER`).
+**Toolkit:** `texture_header.read_texture_header()` (`parse_texture_frames()` its `None`-on-error form) and
+`chain_bytes_exact()` are the port of `parse_texture()` + `tex_chain_bytes()`, the only reader of the header; layers are
+labelled by slot (`TEXTURE_LAYER_SLOTS`, `CUBE_FACE_ORDER`).
 
 ### 5.2 Per-platform format mapping (read from exe data)
 

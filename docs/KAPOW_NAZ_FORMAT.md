@@ -562,9 +562,10 @@ big-endian (`parse_texture_frames(hdr, ">")`). On Xbox 360 the last u32 of the
 descriptor is the **stored byte size of that layer** (0 on PC and PS3); the sizes
 add up to the stream length on 937 of 937 Part 2 and 1,190 of 1,190 Part 1
 textures, and for a cube layer the size is six times the 2D rule. `extract` plans
-the console carve from this header and falls back to the stride walk, with a
-`WARNING:` line and `decodeWarnings` in `sheet.json`, only when it does not read
-(0 times on the four console sets).
+the console carve from this header; a stream that fits neither its stored sizes
+(X360) nor its segments (PS3) is cut by the frame-0 layers, with a `WARNING:` line
+and `decodeWarnings` in `sheet.json` (0 times on the four console sets). A header
+that does not read is not decoded (`WARNING:` line; 0 times on the six sets).
 
 `hasAlpha` of slot 0 is what enables the alpha test (0x429e77 → 0x571d5d); `sheet.json`
 records it as `textureHasAlpha`.
@@ -596,12 +597,11 @@ per Part 1 set; the three platforms agree): Part 2 has slot 3 on 59 textures
 (lamps, neon signs, windows, TV and movie screens), slot 4 on 10 (ground, floor
 and roof textures plus `pickupWindows`) and slot 7 on 55; Part 1 has slot 4 on
 24 and slot 7 on 33; slots 5 and 6 occur on none. `extract` names every layer
-PNG by its slot (`watchmen_extract.TEXTURE_SLOT_LABELS`): `diffuse`, `normal`,
+PNG by its slot (`texture_header.TEXTURE_SLOT_LABELS`): `diffuse`, `normal`,
 `specMap`, `glow`, `height`, `fallOff`, `ambOcc`, `specSize`. 15 textures per
 Part 2 set and 23 per Part 1 set have a slot-3 map without a slot-2 map, and
-10 and 24 have a slot-4 map. A layer whose slot is not known (the stride walk
-and the drift rescue, which decode no shipped texture) is labelled by a format
-rule instead: a slot-3 map without a slot-2 map is written `_specMap_` and a
+10 and 24 have a slot-4 map. A layer whose slot is not known (a layer list built
+from formats only; no shipped texture) is labelled by a format rule instead: a slot-3 map without a slot-2 map is written `_specMap_` and a
 slot-4 map `_specSize_`, and the material writers use them as a specular-colour
 map and a specular-power map.
 
@@ -666,6 +666,10 @@ empty slots before it. No extra field exists. The offsets of a "30-byte record"
 count) are the fields of §4.2 read through a window that begins five bytes
 early, at `nFrames`: the "× 256" is the `hasAnim` byte in front of the width,
 and the "256 signature" is the type field (1) seen one byte early.
+Measured on the six sets: a walk that steps +30 bytes, or +34 for the four
+absent slots before slot 7, stops early on 44 of 939 Part 2 and 59 of 1,208
+Part 1 headers per platform (a present slot after one, two, three, five or six
+absent ones) and agrees with the grammar on every layer it does read.
 
 ### 4.4 Layer sizing
 

@@ -3,9 +3,9 @@
 (`TEXTURE_SLOTS`, `TEXTURE_SLOT_LABELS`, `texture_layer_label`), animation and
 cube-map frames (`parse_texture_frames`, `texture_frame_ms`, `CUBE_FACE_ORDER`),
 the alpha flag, and the layer plan that tiles the stream exactly
-(`plan_texture_layers`, `chain_bytes`, `chain_bytes_exact`).
-`parse_texture_header` and its helpers are the descriptor scan the plan falls
-back to.
+(`plan_texture_layers`, `chain_bytes`, `chain_bytes_exact`).  One reader:
+`read_texture_header` (the header) and `read_descriptor` (the 29-byte descriptor,
+also read by `.font` and `.terraincoloringasset`).
 """
 
 import os
@@ -30,22 +30,17 @@ class TextureHeaderError(byte_reader.ReadError):
 def texture_alpha_flag(header, order="<", name=None):
     """The alpha byte of a Texture header's layer 0 (`u8 hasAlpha` of the image
     descriptor, docs/KAPOW_NAZ_FORMAT.md section 4.2) -> bool, or None when the
-    header has no image record.  The engine copies it to bit 0 of the texture
-    buffer's flags (0x429e77) and the material setup enables the alpha test from
-    that bit of the layer-0 texture (0x571d5d): the pixels are not inspected.
-    PC: parse_texture_frames; otherwise the byte at +25 of the 30-byte window
-    parse_texture_header uses (the same on X360: equal to the PC byte on all 908
-    textures the two Part 2 builds share).  A header the readers refuse gives
-    None and a WARNING line naming `name`."""
+    header does not read (read_texture_header) or has no layer 0.  The engine
+    copies it to bit 0 of the texture buffer's flags (0x429e77) and the material
+    setup enables the alpha test from that bit of the layer-0 texture
+    (0x571d5d): the pixels are not inspected.  The same byte on every platform
+    (equal to the PC byte on all 908 textures the two Part 2 builds share).  An
+    error while reading gives None and a WARNING line naming `name`."""
     try:
-        if order == "<":
-            ex = parse_texture_frames(header)
-            if ex and ex["frames"] and ex["frames"][0]["slots"][0]:
-                return bool(ex["frames"][0]["slots"][0]["alpha"])
-        info = parse_texture_header(header, order)
-        if not info or not info["images"]:
-            return None
-        return bool(header[info["images"][0]["rec_off"] + 25] & 1)
+        ex = parse_texture_frames(header, order)
+        if ex and ex["frames"] and ex["frames"][0]["slots"][0]:
+            return bool(ex["frames"][0]["slots"][0]["alpha"])
+        return None
     except (struct.error, ValueError, IndexError, KeyError) as e:
         extract_log.warn(
             "      WARNING: texture %s: alpha flag not read, textureHasAlpha left out (%s: %s)"
@@ -55,32 +50,8 @@ def texture_alpha_flag(header, order="<", name=None):
 
 
 # ---------------------------------------------------------------------------
-# Texture .header parser  (DETERMINISTIC; no offset scan).
-#
-# Layout of a "Texture" asset header (the block_h_z blob), all little-endian:
-#   +0    u32  typeNameLen           (8 = "Texture\0")
-#   +4    char[typeNameLen] typeName ("Texture\0")
-#   +12   u32  classId/version       (always 0x2D = 45 on WM07)
-#   +16   9 x 20-byte PROPERTY records (the generic property bag):
-#              [salt u32][nameHashLo u32][nameHashHi u32][typeTag u32][value u32]
-#         `salt` is a per-asset constant repeated on every record (it is the
-#         alignment oracle that proved the record size). 9 records => 180 bytes,
-#         so the image-descriptor array begins at a FIXED offset 16+180 = 196.
-#   +196  IMAGE-DESCRIPTOR ARRAY: one 30-byte record per stored sub-image
-#         (a material packs several: diffuse + normal + specular, sometimes 4):
-#              +0  u32  flags (1 on image[0], 0 after)
-#              +4  u32  authoredWidth  * 256   (low byte = flags; use >>8)
-#              +8  u32  authoredHeight * 256   (   "    "    "   ; use >>8)
-#              +13 u8   FORMAT ENUM   (5=DXT1 6=DXT3 7=DXT5 9=ATI2/BC5 0-4=linear)
-#              +20 u32  256           (clamp constant)
-#              +26 u8   authored mip count = log2(max(authoredW,authoredH))+1
-#         The array ends when +13 is not a valid enum or +26 not in 1..13; what
-#         follows is a length-prefixed source path "/data/.../<name>.bmp".
-#
-# VERIFIED: image count matches reality (sky=1, walls/props=3 diffuse+normal+spec,
-# sculptures=4); authored dims match the GPU (FemaleSkinBody 512x1024 authored ->
-# 256x512 stored after 1 mip-drop = the byte-exact GPU copy). Format & name are
-# 100% exact. See WATCHMEN_EXTRACTION_MASTER.md §6.
+# Texture header layout: read_texture_header (FUN_005382aa) and read_descriptor
+# (FUN_00429e77); docs/KAPOW_NAZ_FORMAT.md section 4.
 # ---------------------------------------------------------------------------
 TEX_ENUMS = {0, 1, 2, 3, 4, 5, 6, 7, 9, 10}
 TEX_FMT = {  # enum -> (D3D name, ('blk',bytes/block) | ('lin',bpp))
@@ -323,8 +294,8 @@ def read_texture_header(hdr, order="<"):
                     "type": d["type"],
                     "alpha": bool(d["alpha"]),
                     "usage": d["usage"],
-                    # slot 7 is the record the stride walk reaches through
-                    # a 4-byte "drift" (four absent-slot bytes): the specSize map
+                    # slot 7 is the specSize map ("drift": the name the
+                    # format rule of texture_layer_label reads)
                     "drift": k == 7,
                     "chain": chain_bytes_exact(d["enum"], d["width"], d["height"], d["mips"]),
                     "size": d["size"],
@@ -376,60 +347,6 @@ def _exact_texture_plan(hdr, stream_len):
     return {"kind": kind, "layers": L, "count": count, "exact": True}
 
 
-def parse_texture_header(hdr, order="<"):
-    """Deterministically parse a Texture .header blob.
-
-    Returns dict(typename, path, name, images=[{enum,fmt,kind,aw,ah,mip,rec_off}])
-    or None if `hdr` is not a Texture header.  order '<' PC / '>' X360+PS3 (the
-    console record packs the same fields at shifted offsets: dims u32be@+6/+10,
-    enum byte @+16, mips u32be@+26; console enums reflect platform re-encodes,
-    e.g. X360 stores L8 spec-size maps as DXT1). `path`/`name` come straight from the
-    embedded source path (100% correct naming); each image's `enum`/`fmt` are the
-    engine's authoritative format; `aw`/`ah` are authored dims, `mip` the authored
-    mip count.  (Stored byte-resolution still comes from the stream length — this
-    block stores reduced-LOD data; see MASTER §6.)
-    """
-    if not is_texture_header(hdr, order):
-        return None
-    tlen = struct.unpack_from(order + "I", hdr, 0)[0]
-    p = 4 + tlen + 4  # skip typeName + classId(0x2D)
-    if p + 36 > len(hdr):
-        return None
-    p, prs = kapow_block.prop_walk(hdr, order)
-    rs = 30  # image records are 30 bytes on BOTH engines
-    # (only the PROPERTY records differ: 16 vs 20)
-    images = []
-    rec = p
-    while rec + 30 <= len(hdr):
-        v = _valid_rec(hdr, rec, order=order)
-        if v is None:
-            break
-        fmt, kind = TEX_FMT[v["enum"]]
-        images.append(
-            {
-                "enum": v["enum"],
-                "fmt": fmt,
-                "kind": kind,
-                "aw": v["aw"],
-                "ah": v["ah"],
-                "mip": v["mip"],
-                "rec_off": rec,
-            }
-        )
-        rec += rs
-    # source path: first length-prefixed "/data"|"/art" run after the records
-    path = ""
-    for marker in (b"/data", b"/Data", b"/art", b"/Art"):
-        j = hdr.find(marker, rec - 4 if rec > 4 else 0)
-        if j >= 4:
-            plen = struct.unpack_from(order + "I", hdr, j - 4)[0]
-            if 0 < plen < 512 and j + plen <= len(hdr):
-                path = hdr[j : j + plen].decode("ascii", "replace").rstrip("\x00")
-                break
-    name = path.replace("\\", "/").rstrip("/").split("/")[-1].rsplit(".", 1)[0] if path else ""
-    return {"typename": "Texture", "recsize": rs, "path": path, "name": name, "images": images}
-
-
 def is_normal_layer(images, idx, order="<"):
     """Format-agnostic normal-map test. PC normals are ATI2 (enum 9). Consoles
     re-encode the SAME normal: X360 -> enum 10 (BC5), PS3 -> enum 7 (DXT5). On
@@ -455,8 +372,8 @@ def texture_layer_label(images, idx, order="<"):
     parallax map; L8, DXT3A on X360), 5 fallOff, 6 ambOcc, 7 specSize (the
     specular-power map; L8, DXT1 on X360).
 
-    Without a slot (the stride walk and the drift rescue, which see formats
-    only) the format rule applies: idx0 => diffuse; normal by format; a
+    Without a slot (a layer list built from formats only) the format rule
+    applies: idx0 => diffuse; normal by format; a
     `drift` record or L8 => specSize; the FIRST colour layer after the normal =>
     specMap; a further colour layer => glow.  That rule cannot tell a slot-4
     height map from a slot-7 specSize map, nor a glow map without a specular map
@@ -482,17 +399,8 @@ def texture_layer_label(images, idx, order="<"):
 
 
 # ---------------------------------------------------------------------------
-# DETERMINISTIC texture layer planner.  Given a Texture
-# header and the byte-exact bound stream length, return the exact layer
-# layout that tiles the stream: a single multi-layer set, a 6-face cubemap, or
-# an N-frame animation/array.  Resolves 1190/1190 level-block textures.
-#
-# Why this is needed: the header is a SEQUENTIAL serialized stream (texture.cpp
-# FUN_005382aa reads field-by-field via typed-read vtables), so a fixed 30-byte
-# descriptor stride slips on trailing layers. We read what we can at stride 30
-# (+4-gap fallback), then use the exact stream length as an oracle to (a) detect
-# cube (6x) / animation (Nx) multiples and (b) recover a dropped trailing layer
-# by scanning the header for the missing descriptor record.
+# Layer plan: the layers of the header tile the stream once (a single set), six
+# times (a cube map) or once per frame (an animation); see _exact_texture_plan.
 # ---------------------------------------------------------------------------
 def chain_bytes(en, w, h, mip):
     """Sum of `mip` mip-level byte sizes from authored base dims, per format."""
@@ -511,145 +419,20 @@ def chain_bytes(en, w, h, mip):
     return total
 
 
-def _tex_path_off(hdr):
-    for m in (b"/data", b"/Data", b"/art", b"/Art", b"/levels", b"/Levels"):
-        j = hdr.find(m)
-        if j >= 4:
-            return j - 4
-    return len(hdr)
-
-
-def _valid_rec(hdr, r, powtwo=False, order="<"):
-    if r + 30 > len(hdr):
-        return None
-    if order == ">":
-        en = hdr[r + 16]
-        mip = struct.unpack_from(">I", hdr, r + 26)[0]
-        f4, f8 = struct.unpack_from(">II", hdr, r + 6)
-    else:
-        en = hdr[r + 13]
-        mip = hdr[r + 26]
-        f4, f8 = struct.unpack_from("<II", hdr, r + 4)
-    if en not in TEX_ENUMS or not (1 <= mip <= 13):
-        return None
-    aw, ah = f4 >> 8, f8 >> 8
-    if not (0 < aw <= 8192 and 0 < ah <= 8192):
-        return None
-    if powtwo and not ((aw & (aw - 1)) == 0 and (ah & (ah - 1)) == 0):
-        return None
-    return {"enum": en, "mip": mip, "aw": aw, "ah": ah}
-
-
-def _stride_layers(hdr, order="<"):
-    info = parse_texture_header(hdr, order)
-    if not info or not info["images"]:
-        return [], 0, 0, 30
-    rs = info.get("recsize", 30)
-    r0 = info["images"][0]["rec_off"]
-    end = _tex_path_off(hdr)
-    out = []
-    r = r0
-    last = r0
-    while r + 27 <= end:
-        v = _valid_rec(hdr, r, order=order)
-        if v:
-            v["drift"] = False
-            out.append(v)
-            last = r
-            r += rs
-            continue
-        v = _valid_rec(hdr, r + 4, order=order)  # 4-byte gap = the specSize slot marker
-        if v:
-            v["drift"] = True
-            out.append(v)
-            last = r + 4
-            r += rs + 4
-            continue
-        break
-    return out, last, end, rs
-
-
 def plan_texture_layers(hdr, stream_len):
-    """Return dict(kind, layers, count) where kind in
-    {'single','cube','anim','fail'} and Sum(layer chains) * count == stream_len.
+    """Return dict(kind, layers, count, exact) where kind in {'single','cube',
+    'anim'} and Sum(layer chains) * count == stream_len, from the exact header
+    (_exact_texture_plan); {'kind': 'fail', 'layers': [], 'count': 0} when the
+    header does not read or its layers do not tile the stream.
       single: one material, layers = [diffuse, normal, spec, ...]
       cube  : count == 6, layers describe ONE face
       anim  : count == N frames, layers describe ONE frame (a full material set)
     """
-    ex = _exact_texture_plan(hdr, stream_len)
-    if ex:
-        return ex
-    L, last, end, rs = _stride_layers(hdr)
-    if not L:
-        return {"kind": "fail", "layers": [], "count": 0}
-
-    def total(layers):
-        return sum(chain_bytes(x["enum"], x["aw"], x["ah"], x["mip"]) for x in layers)
-
-    S = total(L)
-    if S <= 0:
-        return {"kind": "fail", "layers": L, "count": 0}
-    if abs(S - stream_len) <= 64:
-        return {"kind": "single", "layers": L, "count": 1}
-    if abs(S * 6 - stream_len) <= 400:
-        return {"kind": "cube", "layers": L, "count": 6}
-    # EXACT frame-multiple animation first (validated on the Part 2 level
-    # blocks); inexact multiples wait until after the dropped-layer recovery --
-    # Part 1 drift can make a loose multiple "fit" a stream that is really
-    # layers (Caustics01_002: 60*184 ~ 11120 which is truly 16x16 + 128x128).
-    n = round(stream_len / S)
-    if 2 <= n <= 64 and S * n == stream_len:
-        return {"kind": "anim", "layers": L, "count": n}
-    # recover a dropped trailing layer using the stream length as the oracle
-    if S < stream_len - 64:
-        pos = last + rs
-        acc = []
-        add = 0
-        need = stream_len - S
-        while pos + 30 <= end and add < need - 64:
-            v = _valid_rec(hdr, pos, powtwo=True)
-            if v:
-                c = chain_bytes(v["enum"], v["aw"], v["ah"], v["mip"])
-                if add + c <= need + 64:
-                    acc.append(v)
-                    add += c
-                    pos += rs
-                    continue
-            pos += 1
-        if acc and abs(S + add - stream_len) <= 64:
-            return {"kind": "single", "layers": L + acc, "count": 1}
-        if acc:
-            # repaired set as an EXACT frame multiple (Caustics01_001: 32 x
-            # [16x16 + drifted 128x128] = 355840)
-            S2 = S + add
-            n2 = round(stream_len / S2) if S2 else 0
-            if 2 <= n2 <= 64 and n2 * S2 == stream_len:
-                return {"kind": "anim", "layers": L + acc, "count": n2}
-    if 2 <= n <= 64 and abs(S * n - stream_len) <= max(256, n * 8):
-        return {"kind": "anim", "layers": L, "count": n}  # each frame = full set L (loose)
-    en0 = L[0]
-    S1 = chain_bytes(en0["enum"], en0["aw"], en0["ah"], en0["mip"])
-    n1 = round(stream_len / S1)
-    if 2 <= n1 <= 64 and S1 >= 256 and abs(S1 * n1 - stream_len) <= max(256, n1 * 8):
-        return {"kind": "anim", "layers": [en0], "count": n1}
-    return {"kind": "fail", "layers": L, "count": 0}
+    return _exact_texture_plan(hdr, stream_len) or {"kind": "fail", "layers": [], "count": 0}
 
 
-def header_dims(header):
-    """Candidate (width, height) pairs of a texture header without a parseable
-    plan: every power of two 32..4096 stored as a little-endian u32 at any byte
-    offset (a bytes search for each of the eight values), largest first,
-    squares then pairs within a factor 2."""
-    pows = {v for v in (32 << k for k in range(8)) if struct.pack("<I", v) in header}
-    pows = sorted(pows, reverse=True)
-    dims = [(a, a) for a in pows]
-    for a in pows:
-        for b in pows:
-            if a != b and a // 2 <= b <= a * 2:
-                dims.append((a, b))
-    seen, out = set(), []
-    for d in dims:
-        if d not in seen:
-            seen.add(d)
-            out.append(d)
-    return out or [(512, 512), (256, 256), (1024, 1024)]
+def source_name(ex):
+    """The asset name of a read_texture_header result: the file name of the
+    frame-0 source path without its extension ('' without a path)."""
+    path = ex["frames"][0]["path"] if ex and ex["frames"] else ""
+    return path.replace("\\", "/").rstrip("/").split("/")[-1].rsplit(".", 1)[0] if path else ""

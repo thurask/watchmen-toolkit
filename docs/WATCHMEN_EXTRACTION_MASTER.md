@@ -300,25 +300,14 @@ GPU copy**.
   incl. the multi-layer material textures. Shared assets live in the parent
   block, level assets in the level.
 
-**The length-based planner (fallback).** `watchmen_extract.parse_texture_header()`
-(the stride walk over 30-byte windows, §4.3 of the format doc) and
-`plan_texture_layers()` (shape from the stream length: single / cube×6 / animN)
-decode no shipped texture; they run only when the exact header does not read. Their rules: anim counts capped at 64 and
-tiered — EXACT frame multiples are accepted before the dropped-layer recovery,
-LOOSE multiples only after it; the recovery can return a repaired set as an
-exact frame multiple (Caustics01_001 = 32 × [16×16 + drifted 128×128]).
-`rescue_texture_plan` (carve-time, fail path only): full-offset record scan →
-record-subsequence + mip brute force to EXACT stream tiling → coherence-scored
-pick (Floor_Sidewalk_Curb_01's 4-layer drift). Results of that planner: Part 1
-1971 textures → 1734 single / 201 cube / 35 anim (all ≤×32) / 1 drift-rescued;
-Part 2 bordello 234 single / 37 cube / 2 anim / 0 fail; Part 1 all 8 blocks
-1971/1971, 3581 PNGs, a 400-sample coherence scan with ONE outlier =
-NightVision_Raster.BMP, a genuine 0/255 scanline overlay (rows alternate
-exactly); Part 2 all 7 blocks 1333/1333 (1203 single / 112 cube / 18 anim).
-Mansion_Floor_Wood_01/02 and Highlight_01 are singles ([512-set + 1024×1024
-L8] and [32×32 + 128×128]; L8 coherence 8.8 vs 40.9 for a wrong plan), not
-anims; Caustics01_001's ×32 plan decodes frame-for-frame identical in coherence
-to Caustics01_001_g.
+**One header reader.** `texture_header.read_texture_header` reads the Texture
+header by its grammar (§4.2 of the format doc); `plan_texture_layers` returns the
+layers' plan (single / cube×6 / animN) when they tile the stream exactly, else
+`fail`, and the carve then writes no PNG and one `WARNING:` line. Measured on the
+six sets: every carved Texture header reads (939 per Part 2 set, 1,208 per Part 1
+set) and every PC one tiles its stream. A descriptor walk at a fixed 30-byte stride
+(with a +34 step for the gap before slot 7) misses trailing layers on 44 Part 2 and
+59 Part 1 headers per platform (format doc §4.3).
 
 **Stub-diffuse materials are real packing.** 9 Part 1 textures pack a ≤8×8
 layer 0 followed by full-size layers — e.g. Mercenary_armor2 = 4×4 "diffuse" +
@@ -473,16 +462,13 @@ Part 1 / WM06 records 16 bytes (`[salt][hash32][tag][val]`, +4 when tag==2);
 salt hits — no version flag. The texture descriptor (29 bytes plus one
 presence byte per optional slot) is the same on both engines; only the start of
 the descriptor area shifts. The `sound` field layout after the propbag is
-byte-identical to Part 2. Measured: 1970/1971 Part 1 textures plan
-deterministically in the fallback planner (1713 single / 201 cube / 56 anim;
-sole fail = Floor_Sidewalk_Curb_01, rescued by `rescue_texture_plan`); a
-sample of 60 Part 1 SFX decode 60/60 (`_propbag_end` must walk the right
-record size, or `decode_sfx` bails and no SFX/dialog is written; music is a
-separate loose-file path). Part 2: bordello 273/273 texture plans, mainmenu
-6/6 SFX. Part 1 headers show serializer DRIFT in the stride walk (a record
-slips a byte, corrupting dim/mip fields: Mercenary_armor2's bogus 4×4 record
-would give 116,510 tiny PNGs, Caustics01_002 ×60) — the exact header grammar
-has no such drift.
+byte-identical to Part 2. Measured: every Part 1 Texture header reads by the
+exact grammar (1,208 carved per set); a sample of 60 Part 1 SFX decode 60/60
+(`_propbag_end` must walk the right record size, or `decode_sfx` bails and no
+SFX/dialog is written; music is a separate loose-file path). Part 2: mainmenu
+6/6 SFX. A fixed-stride walk over Part 1 descriptors slips (Mercenary_armor2
+would give a bogus 4×4 record, Caustics01_002 ×60); the exact grammar has no
+such drift.
 
 **`characters` on Part 1.** Discovery is driven by the Part 2 cast list
 `ENEMY_FRAGS` in `characters_export.py` ('Dominatrices', 'Gimp',
@@ -729,29 +715,15 @@ X360 & PS3: nightowlbelt 20/0.58, dominatrix 43/1.17).
   differ from PC on flat-exponent dirs where the PC carve wrote NO `spec.txt`
   but the consoles read `$specularData` (e.g. crowbar expScale 26.95) — the
   console bake is the better-informed one.
-- **Stride-walk fallback on console** (`_stride_layers`, `_is_normal_layer(order)`,
-  `texture_layer_label(order)`, `_console_recover_layers`; reached 0 times on
-  the four console sets): console header records pack the fields at shifted
-  offsets (dims u32be @+6/+10 (>>8), format enum byte @+16, mip count u32be
-  @+26, records of 30 bytes after the 9 salt-props @196). `_is_normal_layer` is
-  format-agnostic, not `enum==9 → normal`: enum 9/10 = normal, and on console a non-idx0 DXT5 (enum 7)
-  = normal (enum 7 only appears as diffuse at idx0 on PC; spec/glow are always
-  DXT1/L8). The specSize record is preceded by an extra 4-byte field — the
-  presence bytes of the empty slots in front of slot 7 — on EVERY platform
-  (45/45 specSize records, 0/39 true-glow records; PC+PS3+X360 audit), so the
-  walk tags it `drift` and labels it specSize regardless of codec. The
-  recovery of trailing records dropped under drift: PS3 via its exact segment
-  sizes (271/271 bordello textures match the PC layer count); X360 via
-  byte-scan + exact-fill validation (265/271; the 6 misses are 4-layer
-  textures whose 4th L8 specSize map is not recovered). A record recovered by
-  byte-scan loses the drift context, and the last-recovered-record heuristic
-  is unsafe (PS3 ground truth: 24 recovered trailing layers are true glow, 20
-  are L8 specSize), so ~20 recovery-path X360 textures keep a `*_glow_*` /
-  missing 4th layer in that path, and an X360 L8 specSize re-encoded as DXT1
-  (the glow enum) is written `3_glow_*` unless the drift tag marks it. The bi-endian rule: every console-touched decoder is
+- **Console layer fallback** (reached 0 times on the four console sets): a
+  stream that fits neither the X360 stored sizes nor the PS3 segments of the
+  exact header is cut by the header's frame-0 layers, with a `WARNING:` line
+  and `decodeWarnings` in `sheet.json`. `is_normal_layer` is format-agnostic,
+  not `enum==9 → normal`: enum 9/10 = normal, and on console a non-idx0 DXT5
+  (enum 7) = normal (enum 7 only appears as diffuse at idx0 on PC; spec/glow
+  are always DXT1/L8). The bi-endian rule: every console-touched decoder is
   `order`-aware; the hardcoded-LE `struct` reads are PC-only paths
-  (`decode_audio`/`decode_sfx` Vorbis+ADPCM, `_carve_texture_legacy`,
-  `_valid_rec`'s `<` branch).
+  (`decode_audio`/`decode_sfx` Vorbis+ADPCM).
 - **Ruled out.** (a) "X360 ships normals compressed with a different BC5
   encoder than PC" (diffuse 82/90 byte-identical, specMap 38/52, normal median
   angular ~9.6° concentrated in R/G, Z ~0.3, on 90 shared bordello textures):

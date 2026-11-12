@@ -2,14 +2,11 @@
 stream, decoded and written as PNGs (`<asset>/<j>_<label>_<WxH>_<FMT>.png`)
 with `sheet.json` and `spec.txt` beside them (`carve_texture`; console streams
 through `carve_texture_console`; PC cube maps level by level,
-`PC_CUBE_LEVEL_MAJOR`).  `rescue_texture_plan` scores candidate plans when the
-exact plan does not tile the stream.
-
-  TEXTURE  "TextureSheet": diffuse (DXT1/DXT5) + normal (BC5/ATI2) + spec (DXT1),
-           auto-located from header power-of-two dims + the BC5 normal signature.
+`PC_CUBE_LEVEL_MAJOR`).  The layers come from the exact header
+(texture_header.read_texture_header); a header that does not read, or whose
+layers do not tile the stream, is not decoded and gets a WARNING line.
 """
 
-import itertools
 import os
 import struct
 import sys
@@ -158,17 +155,22 @@ def carve_texture_console(stream, header, out_dir, log=None):
     PNG.  The layer plan comes from the exact header (parse_texture_frames, big-
     endian) -- on X360 with each layer's stored size, on PS3 with one stream
     segment per layer; file names follow the PC carve (faceN_ / frameN_).  A
-    header or stream that does not fit falls back to the stride walk; that,
-    and every layer or face that could not be written, is logged as one
+    stream that does not fit is cut by the header's frame-0 layers; that, a
+    header that does not read, and every layer or face that could not be
+    written, is logged as one
     "WARNING: texture <name>: ..." line and listed in sheet.json under
     TEXTURE_DECODE_KEY.  Returns #PNGs written > 0."""
     if not callable(log):
         log = lambda *a, **k: None
-    info = texture_header.parse_texture_header(header, ">")
-    ex = texture_header.parse_texture_frames(header, ">")
-    if ex is None and (info is None or not info["images"]):
+    try:
+        ex = texture_header.read_texture_header(header, ">")
+    except texture_header.TextureHeaderError as e:
+        log(
+            "      WARNING: texture %s: not decoded, the header does not read (%s)"
+            % (out_dir.name, e)
+        )
         return False
-    name = (info["name"] if info else "") or out_dir.name
+    name = texture_header.source_name(ex) or out_dir.name
     notes = []
 
     def warn(msg):
@@ -176,43 +178,35 @@ def carve_texture_console(stream, header, out_dir, log=None):
         log("      WARNING: texture %s: %s" % (name, msg))
 
     segs = texture_decode.ps3_segments(stream)
-    if ex is None:
-        warn("header does not parse as the exact Texture layout: layer plan from the stride walk")
-    else:
-        res = _carve_x360_exact(stream, ex, out_dir, warn)
+    res = _carve_x360_exact(stream, ex, out_dir, warn)
+    if res is not None:
+        wrote, nl, nf = res
+        _write_spec_txt(header, out_dir)
+        texture_sheet.mark_texture_decode(out_dir, notes)
+        log(
+            "      %s: X360 layers=%d x%d (exact stream %d) -> %s/ (%d png)"
+            % (name, nl, nf, len(stream), out_dir.name, wrote)
+        )
+        return wrote > 0
+    if segs is not None:
+        res = _carve_ps3_exact(stream, ex, segs, out_dir, warn)
         if res is not None:
             wrote, nl, nf = res
             _write_spec_txt(header, out_dir)
             texture_sheet.mark_texture_decode(out_dir, notes)
-            log(
-                "      %s: X360 layers=%d x%d (exact stream %d) -> %s/ (%d png)"
-                % (name, nl, nf, len(stream), out_dir.name, wrote)
-            )
+            log("      %s: PS3 %d segs -> %s/ (%d png)" % (name, len(segs), out_dir.name, wrote))
             return wrote > 0
-        if segs is not None:
-            res = _carve_ps3_exact(stream, ex, segs, out_dir, warn)
-            if res is not None:
-                wrote, nl, nf = res
-                _write_spec_txt(header, out_dir)
-                texture_sheet.mark_texture_decode(out_dir, notes)
-                log(
-                    "      %s: PS3 %d segs -> %s/ (%d png)" % (name, len(segs), out_dir.name, wrote)
-                )
-                return wrote > 0
-            warn(
-                "%d stream segments for %d header layers: layer plan from the stride walk"
-                % (len(segs), sum(1 for fr in ex["frames"] for d in fr["slots"] if d))
-            )
-        else:
-            sizes = sum(d["size"] for fr in ex["frames"] for d in fr["slots"] if d)
-            warn(
-                "header layer sizes add up to %d, the stream is %d bytes: layer plan from "
-                "the stride walk, layers may be missing" % (sizes, len(stream))
-            )
-    L, _last, _end, _rs = texture_header._stride_layers(header, ">")
-    if not L:
-        return False
-    L = texture_decode.console_recover_layers(header, stream, L, _last, _end, _rs)
+        warn(
+            "%d stream segments for %d header layers: layer plan from the header's frame-0 layers"
+            % (len(segs), sum(1 for fr in ex["frames"] for d in fr["slots"] if d))
+        )
+    else:
+        sizes = sum(d["size"] for fr in ex["frames"] for d in fr["slots"] if d)
+        warn(
+            "header layer sizes add up to %d, the stream is %d bytes: layer plan from "
+            "the header's frame-0 layers, layers may be missing" % (sizes, len(stream))
+        )
+    L = [d for d in ex["frames"][0]["slots"] if d]
     out_dir.mkdir(parents=True, exist_ok=True)
     wrote = 0
     if segs is not None:  # ---- PS3
@@ -254,7 +248,7 @@ def carve_texture_console(stream, header, out_dir, log=None):
             off += sizes[j]
     if total * reps != len(stream):
         warn(
-            "stride-walk plan covers %d of %d stream bytes: layers may be missing or wrong"
+            "frame-0 plan covers %d of %d stream bytes: layers may be missing or wrong"
             % (total * reps, len(stream))
         )
     _write_spec_txt(header, out_dir)
@@ -287,97 +281,6 @@ def _write_spec_txt(header, out_dir):
     texture_sheet.write_sheet_json(header, out_dir, ">")
 
 
-#: rescue_texture_plan: most candidate layer plans it decodes and scores before
-#: it gives up (a crafted or corrupt header can have many exact-size plans)
-RESCUE_MAX_PLANS = 600
-
-
-def _exact_mip_sums(recs, total):
-    """Every per-layer mip count tuple (1..13 each, as itertools.product orders
-    them) whose chain sizes add up to `total`, found by meeting in the middle:
-    13 chain sizes per layer, the sums of the first half of the layers looked up
-    against those of the second (at most 2 x 13^2 sums for 4 layers, where the
-    product walked 13^4 = 28,561)."""
-    sizes = [[texture_header.chain_bytes(e, w, h, m) for m in range(1, 14)] for e, w, h in recs]
-    half = len(recs) // 2
-    left = {}
-    for ms in itertools.product(range(13), repeat=half):
-        left.setdefault(sum(sizes[i][m] for i, m in enumerate(ms)), []).append(ms)
-    out = []
-    for ms in itertools.product(range(13), repeat=len(recs) - half):
-        rest = total - sum(sizes[half + i][m] for i, m in enumerate(ms))
-        for lm in left.get(rest, ()):
-            out.append(tuple(m + 1 for m in lm + ms))
-    out.sort()
-    return out
-
-
-def rescue_texture_plan(hdr, stream, order="<", log=None, max_plans=None):
-    """Last-resort planner for headers with serializer DRIFT (a record slips a
-    byte, corrupting its mip/dim fields; no texture of the PC sets reaches this
-    function, 0 of 3,469, measured).
-    Strategy: (1) take the FORMAT/dim sequence from a full-offset scan of valid
-    power-of-two records; (2) for candidate record subsequences (all, all-minus-
-    one corrupt record, each single record), find the per-layer mip counts whose
-    chain sizes tile the stream EXACTLY (_exact_mip_sums; a set with more than
-    400 is skipped); (3) among exact solutions, pick the one whose decoded layers
-    score best (lowest coherence = natural images; the first in product order on
-    a tie).  At most `max_plans` (RESCUE_MAX_PLANS) plans are decoded: past that
-    it gives up, says so through `log` and returns None.
-    Returns [(enum, aw, ah, mip)] or None."""
-    if max_plans is None:
-        max_plans = RESCUE_MAX_PLANS
-    info = texture_header.parse_texture_header(hdr, order)
-    if not info or not info["images"]:
-        return None
-    p0 = info["images"][0]["rec_off"]
-    end = texture_header._tex_path_off(hdr)
-    hits = []
-    for pos in range(p0, max(p0, end - 27)):
-        v = texture_header._valid_rec(hdr, pos, powtwo=True, order=order)
-        if v and (not hits or pos - hits[-1][0] >= 28):
-            hits.append((pos, v))
-    if not (1 <= len(hits) <= 6):
-        return None
-    # candidate record subsequences: all hits, all-minus-one (drop a corrupt
-    # record), and each single hit (bogus placeholder + one real texture)
-    cands = [tuple(hits)]
-    if len(hits) > 1:
-        for k in range(len(hits)):
-            cands.append(tuple(hits[:k] + hits[k + 1 :]))
-        cands += [(h,) for h in hits]
-    best = None
-    scored = 0
-    for cand in cands:
-        recs = [(v["enum"], v["aw"], v["ah"]) for _, v in cand]
-        if len(recs) > 4:
-            continue
-        sols = _exact_mip_sums(recs, len(stream))
-        if len(sols) > 400:
-            sols = []  # too ambiguous to pick by image statistics
-        for mips in sols:
-            if scored >= max_plans:
-                if callable(log):
-                    log(
-                        "      ! texture plan rescue gave up after %d candidate plans"
-                        " (RESCUE_MAX_PLANS)" % scored
-                    )
-                return None
-            scored += 1
-            off = 0
-            tot = 0.0
-            for (e, w, h), m in zip(recs, mips, strict=True):
-                img = texture_decode.decode_one_layer(stream[off:], e, w, h)
-                if img is None:
-                    tot = 1e9
-                    break
-                tot += texture_decode.image_coherence(img)
-                off += texture_header.chain_bytes(e, w, h, m)
-            if tot < 1e9 and (best is None or tot < best[0]):
-                best = (tot, [(e, w, h, m) for (e, w, h), m in zip(recs, mips, strict=True)])
-    return best[1] if best else None
-
-
 #: PC cube maps: True = mip LEVELS one after another, six faces per level; False =
 #: six face mip chains one after another (the files of releases before 1.4.0).
 #: Measured: read level by level, all six faces of all 110 + 200 PC cube maps equal
@@ -388,10 +291,10 @@ PC_CUBE_LEVEL_MAJOR = True
 def carve_texture(stream, header, out_dir, log=None):
     """DETERMINISTIC carve: parse the layer plan from the header + the byte-exact
     stream length, then decode every layer (diffuse / normal / spec / ...) — or
-    each cube face / animation frame — with NO coherence guessing. Falls back to
-    the drift-rescue planner, then the legacy heuristic, only if the header is
-    not a cleanly parseable Texture.  An exception leaves with a note naming the
-    texture, its sizes and its byte order."""
+    each cube face / animation frame — with NO coherence guessing.  A header
+    that does not read, or whose layers do not tile the stream, writes nothing
+    and one WARNING line.  An exception leaves with a note naming the texture,
+    its sizes and its byte order."""
     try:
         return _carve_texture(stream, header, out_dir, log)
     except Exception as ex:
@@ -418,33 +321,16 @@ def _carve_texture(stream, header, out_dir, log):
         header, ">"
     ):
         return carve_texture_console(stream, header, out_dir, log)
-    info = texture_header.parse_texture_header(header)
-    if info is None:
-        return _carve_texture_legacy(stream, header, out_dir, log)
     plan = texture_header.plan_texture_layers(header, S)
     if plan["kind"] == "fail":
-        rl = rescue_texture_plan(header, stream, log=log)
-        if rl:
-            out_dir.mkdir(parents=True, exist_ok=True)
-            wrote = 0
-            off = 0
-            for j, (en, w, h, mip) in enumerate(rl):
-                img = texture_decode.decode_one_layer(stream[off:], en, w, h)
-                off += texture_header.chain_bytes(en, w, h, mip)
-                if img is None:
-                    continue
-                lbl = texture_header.texture_layer_label([{"enum": e} for e, _, _, _ in rl], j)
-                Image.fromarray(img).save(
-                    out_dir / ("%d_%s_%dx%d_%s.png" % (j, lbl, w, h, texture_header.TEX_FMT[en][0]))
-                )
-                wrote += 1
-            log(
-                "      %s: DRIFT-RESCUE %d layers -> %s/ (%d png)"
-                % (info["name"] or out_dir.name, len(rl), out_dir.name, wrote)
-            )
-            if wrote:
-                return True
-        return _carve_texture_legacy(stream, header, out_dir, log)
+        try:
+            ex = texture_header.read_texture_header(header)
+            why = "its layers do not tile the %d-byte stream once, six times or per frame" % S
+            name = texture_header.source_name(ex) or out_dir.name
+        except texture_header.TextureHeaderError as e:
+            why, name = "the header does not read (%s)" % e, out_dir.name
+        log("      WARNING: texture %s: not decoded, %s" % (name, why))
+        return False
     out_dir.mkdir(parents=True, exist_ok=True)
     layers, kind, count = plan["layers"], plan["kind"], plan["count"]
     cb = lambda x: (
@@ -500,76 +386,14 @@ def _carve_texture(stream, header, out_dir, log):
     texture_sheet.write_sheet_json(header, out_dir, "<")
     log(
         "      %s: %s x%d (set=%dB) layers=%d -> %s/ (%d png)"
-        % (info["name"] or out_dir.name, kind, count, set_bytes, len(layers), out_dir.name, wrote)
+        % (
+            texture_header.source_name(texture_header.parse_texture_frames(header)) or out_dir.name,
+            kind,
+            count,
+            set_bytes,
+            len(layers),
+            out_dir.name,
+            wrote,
+        )
     )
     return wrote > 0
-
-
-def _carve_texture_legacy(stream, header, out_dir, log):
-    """Legacy coherence-search carve — retained as a fallback for non-Texture or
-    unparseable headers (e.g. standalone _h_z blobs without a class tag)."""
-    S = len(stream)
-    if S < 4096:
-        return False
-    ordered = texture_header.header_dims(header)
-    ordered = [d for d in ordered if d[0] == d[1]] + [d for d in ordered if d[0] != d[1]]
-    chosen, best_coh = None, None
-    for w, h in ordered:
-        for dfmt in ("DXT1", "DXT5"):
-            bb = 8 if dfmt == "DXT1" else 16
-            dsize, _ = texture_decode.mip_chain_size(w, h, bb)
-            if dsize > S:
-                continue
-            if not texture_decode.looks_like_normal(
-                texture_decode.decode_bc5_base(stream[dsize:], w, h)
-            ):
-                continue
-            db = texture_decode.decode_dxt_base(stream, w, h, dfmt)
-            if db is None:
-                continue
-            c = texture_decode.image_coherence(db)
-            if c < 60 and (best_coh is None or c < best_coh):
-                best_coh, chosen = c, (w, h, dfmt, dsize)
-    # File names follow the standard <j>_<label>_<WxH>_<FMT>.png scheme:
-    # build_texture_index's *_diffuse_*.png rglob and find_layer's
-    # *_<label>_*.png globs link legacy-carved textures from OBJ/MTL too.
-    out_dir.mkdir(parents=True, exist_ok=True)
-    if chosen is None:
-        for w, h in ordered:
-            for dfmt in ("DXT1", "DXT5"):
-                db = texture_decode.decode_dxt_base(stream, w, h, dfmt)
-                if db is not None and texture_decode.image_coherence(db) < 45:
-                    Image.fromarray(db).save(out_dir / ("0_diffuse_%dx%d_%s.png" % (w, h, dfmt)))
-                    log(
-                        "      %dx%d diffuse=%s normal=NOT-FOUND -> %s/"
-                        % (w, h, dfmt, out_dir.name)
-                    )
-                    return True
-        return False
-    w, h, dfmt, dsize = chosen
-    db = texture_decode.decode_dxt_base(stream, w, h, dfmt)
-    if db is not None:
-        Image.fromarray(db).save(out_dir / ("0_diffuse_%dx%d_%s.png" % (w, h, dfmt)))
-    nxy = texture_decode.decode_bc5_base(stream[dsize:], w, h)
-    if nxy:
-        nxy = texture_decode.ati2_xy(nxy)
-        texture_decode.normal_to_png(nxy[0], nxy[1], out_dir / ("1_normal_%dx%d_ATI2.png" % (w, h)))
-    nsize, _ = texture_decode.mip_chain_size(w, h, 16)
-    spec_off, spec_dims, best = dsize + nsize, "", None
-    for sw, sh in ((w, h), (w // 2, h // 2)):
-        if sw < 4 or sh < 4:
-            continue
-        sb = texture_decode.decode_dxt_base(stream[spec_off:], sw, sh, "DXT1")
-        if sb is not None:
-            c = texture_decode.image_coherence(sb)
-            if best is None or c < best[0]:
-                best = (c, sw, sh, sb)
-    if best and best[0] < 45:
-        # colour spec layer -> the specMap slot find_layer/write_obj_mtl look up
-        Image.fromarray(best[3]).save(out_dir / ("2_specMap_%dx%d_DXT1.png" % (best[1], best[2])))
-        spec_dims = "%dx%d" % (best[1], best[2])
-    log(
-        "      %dx%d diffuse=%s normal=BC5 specular=%s -> %s/"
-        % (w, h, dfmt, spec_dims or "n/a", out_dir.name)
-    )
-    return True

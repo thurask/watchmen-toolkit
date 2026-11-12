@@ -33,29 +33,6 @@ def _notes(ei):
 # ---------------------------------------------------------------------------
 
 
-def test_rescue_plan_refuses_a_mip_tuple_shorter_than_its_records(monkeypatch):
-    """rescue_texture_plan pairs every candidate record with one mip count; a
-    solution of the wrong length used to score a plan with the tail left out."""
-    recs = {0: {"enum": 5, "aw": 4, "ah": 4, "mip": 1}, 40: {"enum": 5, "aw": 4, "ah": 4, "mip": 1}}
-    monkeypatch.setattr(we, "parse_texture_header", lambda h, o="<": {"images": [{"rec_off": 0}]})
-    monkeypatch.setattr(we, "_tex_path_off", lambda h: 80)
-    monkeypatch.setattr(we, "_valid_rec", lambda h, pos, powtwo=False, order="<": recs.get(pos))
-    monkeypatch.setattr(we, "decode_one_layer", lambda *a, **k: np.zeros((4, 4), np.uint8))
-    monkeypatch.setattr(we, "_exact_mip_sums", lambda r, total: [(1,) * (len(r) - 1 or 1)])
-    with pytest.raises(ValueError, match="zip"):
-        we.rescue_texture_plan(b"\0" * 80, b"\0" * 64)
-
-
-def test_rescue_plan_unchanged_when_the_lengths_agree(monkeypatch):
-    recs = {0: {"enum": 5, "aw": 4, "ah": 4, "mip": 1}}
-    monkeypatch.setattr(we, "parse_texture_header", lambda h, o="<": {"images": [{"rec_off": 0}]})
-    monkeypatch.setattr(we, "_tex_path_off", lambda h: 80)
-    monkeypatch.setattr(we, "_valid_rec", lambda h, pos, powtwo=False, order="<": recs.get(pos))
-    monkeypatch.setattr(we, "decode_one_layer", lambda *a, **k: np.zeros((4, 4), np.uint8))
-    monkeypatch.setattr(we, "_exact_mip_sums", lambda r, total: [(1,) * len(r)])
-    assert we.rescue_texture_plan(b"\0" * 80, b"\0" * 64) == [(5, 4, 4, 1)]
-
-
 def _restored_lashes():
     """72 UV pairs in the restored layout: four strips at the upper strip's mean."""
     _mean, s, (du, dv) = we.LASH_RESTORE["strips"]["upper"]

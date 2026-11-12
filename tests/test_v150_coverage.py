@@ -8,7 +8,6 @@
     characters_export._brown_hair_layers the brown-tinted hair layer of a
                                synthetic variant
     watchmen_extract.rsx_unswizzle      against a reference RSX swizzle
-    watchmen_extract._carve_texture_legacy  the coherence-search carve
     watchmen_extract.carve_texture_console  a PS3 L8 and an X360 DXT1 texture with
                                known pixels, the early returns
     mesh_loader.mesh_arrays    the archive walk and mesh_arrays' skipped pieces
@@ -19,7 +18,6 @@ No game files.
 import io
 import json
 import os
-import struct
 
 import numpy as np
 import pytest
@@ -355,58 +353,6 @@ def test_x360_dxt1_layer_with_known_pixels(tmp_path):
 def test_console_carve_of_something_that_is_not_a_texture(tmp_path):
     assert we.carve_texture_console(b"\0" * 64, b"\0" * 64, tmp_path / "t") is False
     assert not (tmp_path / "t").exists()
-
-
-# ---------------------------------------------------------------------------
-# watchmen_extract._carve_texture_legacy
-# ---------------------------------------------------------------------------
-
-
-def _solid_dxt1_chain(w, h, c565):
-    n, _m = we.mip_chain_size(w, h, 8)
-    return struct.pack("<HHI", c565, c565, 0) * (n // 8)
-
-
-def _flat_bc5_chain(w, h):
-    n, _m = we.mip_chain_size(w, h, 16)
-    return bytes([128, 128, 0, 0, 0, 0, 0, 0] * 2) * (n // 16)
-
-
-def test_legacy_carve_finds_diffuse_normal_and_spec(tmp_path):
-    hdr = b"not a texture class" + struct.pack("<I", 64)  # dims: 64 x 64
-    stream = _solid_dxt1_chain(64, 64, 0xF800) + _flat_bc5_chain(64, 64)
-    stream += _solid_dxt1_chain(64, 64, 0x07E0)
-    log = []
-    assert we.carve_texture(stream, hdr, tmp_path / "t", log.append)
-    names = sorted(p.name for p in (tmp_path / "t").glob("*.png"))
-    assert names == [
-        "0_diffuse_64x64_DXT1.png",
-        "1_normal_64x64_ATI2.png",
-        "2_specMap_64x64_DXT1.png",
-    ]
-    d = np.asarray(Image.open(tmp_path / "t" / names[0]))
-    assert (d[..., :3] == (255, 0, 0)).all()
-    n = np.asarray(Image.open(tmp_path / "t" / names[1]))
-    assert (n[..., 0] == 128).all() and (n[..., 1] == 128).all()
-    s = np.asarray(Image.open(tmp_path / "t" / names[2]))
-    assert (s[..., :3] == (0, 255, 0)).all()
-    assert log == ["      64x64 diffuse=DXT1 normal=BC5 specular=64x64 -> t/"]
-
-
-def test_legacy_carve_without_a_normal_map_and_of_noise(tmp_path):
-    hdr = b"junk" + struct.pack("<I", 32)
-    rng = np.random.default_rng(7)
-    stream = (
-        _solid_dxt1_chain(32, 32, 0x001F) + rng.integers(0, 256, 6000, dtype=np.uint8).tobytes()
-    )
-    log = []
-    assert we.carve_texture(stream, hdr, tmp_path / "a", log.append)
-    assert sorted(p.name for p in (tmp_path / "a").glob("*.png")) == ["0_diffuse_32x32_DXT1.png"]
-    assert "normal=NOT-FOUND" in log[0]
-    # no size in the header and a stream too short for the default 256..1024 guesses
-    noise = rng.integers(0, 256, 8192, dtype=np.uint8).tobytes()
-    assert we.carve_texture(noise, b"junk", tmp_path / "b", log.append) is False
-    assert we.carve_texture(b"\0" * 1000, hdr, tmp_path / "c") is False  # under 4 KiB
 
 
 # ---------------------------------------------------------------------------

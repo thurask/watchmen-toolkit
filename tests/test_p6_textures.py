@@ -70,7 +70,7 @@ def test_glow_without_a_specular_map_and_height_beside_specsize():
 
 
 def test_layers_without_a_slot_keep_the_format_rule():
-    """The stride walk and the drift rescue see formats only."""
+    """A layer list built from formats only (no slot)."""
     L = [{"enum": 5}, {"enum": 9}, {"enum": 5}, {"enum": 5}, {"enum": 3}]
     assert [we.texture_layer_label(L, j) for j in range(5)] == [
         "diffuse",

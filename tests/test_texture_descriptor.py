@@ -1,14 +1,16 @@
 """The one reader of the 29-byte texture descriptor and of the Texture header
 (`texture_header.read_descriptor`, `descriptor_ok`, `layer_bytes`,
-`read_texture_header`) and the one top-mip decode by platform
-(`texture_decode.layer_image`), on synthetic inputs: a PC mip chain, an
-Xbox 360 layer with its stored size, a PS3 layer behind its RSX descriptor."""
+`read_texture_header`), the one top-mip decode by platform
+(`texture_decode.layer_image`), and the carve of a header that does not read or
+does not tile its stream, on synthetic inputs: a PC mip chain, an Xbox 360
+layer with its stored size, a PS3 layer behind its RSX descriptor."""
 
 import struct
 
 import numpy as np
 import pytest
 
+import texture_carve
 import texture_decode
 import texture_header as th
 
@@ -233,8 +235,7 @@ def _reference_frames(hdr, order="<"):
                         "type": typ,
                         "alpha": bool(alpha),
                         "usage": usage,
-                        # slot 7 is the record the stride walk reaches through
-                        # a 4-byte "drift" (four absent-slot bytes): the specSize map
+                        # slot 7: the specSize map
                         "drift": k == 7,
                         "chain": th.chain_bytes_exact(en, w, h, mip),
                         "size": size,
@@ -283,3 +284,53 @@ def test_reader_equals_the_reference_on_mutated_headers(order):
             assert th.parse_texture_frames(m, order) == _reference_frames(m, order)
             n += 1
     assert n > 1000
+
+
+# ---------------------------------------------------------------------------
+# The carve on the one reader: what a header that does not read, or does not
+# tile its stream, leaves behind.
+# ---------------------------------------------------------------------------
+def test_pc_layers_that_do_not_tile_the_stream_write_nothing_and_warn(tmp_path):
+    hdr = _header("<", {0: _desc("<", 8, 8, 5, 4)})  # 32 + 8 + 8 + 8 = 56 bytes
+    assert th.plan_texture_layers(hdr, 57) == {"kind": "fail", "layers": [], "count": 0}
+    log = []
+    assert texture_carve.carve_texture(bytes(57), hdr, tmp_path / "t", log.append) is False
+    assert log == [
+        "      WARNING: texture Thing: not decoded, its layers do not tile the 57-byte "
+        "stream once, six times or per frame"
+    ]
+    assert not (tmp_path / "t").exists()
+
+
+def test_pc_header_that_does_not_read_writes_nothing_and_warns(tmp_path):
+    hdr = _header("<", {0: _desc("<", 8, 8, 11, 4)})  # format enum the PC does not use
+    log = []
+    assert texture_carve.carve_texture(bytes(64), hdr, tmp_path / "t", log.append) is False
+    assert len(log) == 1 and log[0].startswith(
+        "      WARNING: texture t: not decoded, the header does not read (slot 0: descriptor"
+    )
+    assert not (tmp_path / "t").exists()
+
+
+def test_console_header_that_does_not_read_writes_nothing_and_warns(tmp_path):
+    hdr = _header(">", {0: _desc(">", 8, 8, 5, 4)})[:-3]  # source path cut short
+    log = []
+    assert texture_carve.carve_texture_console(bytes(64), hdr, tmp_path / "t", log.append) is False
+    assert log == [
+        "      WARNING: texture t: not decoded, the header does not read (source path of 22 bytes)"
+    ]
+    assert not (tmp_path / "t").exists()
+
+
+@pytest.mark.parametrize("order", ["<", ">"])
+def test_alpha_flag_is_the_layer0_descriptor_byte(order):
+    for alpha in (0, 1):
+        hdr = _header(order, {0: _desc(order, 8, 8, 5, 4, alpha=alpha)})
+        assert th.texture_alpha_flag(hdr, order) is bool(alpha)
+    assert th.texture_alpha_flag(_header(order, {0: _desc(order, 8, 8, 5, 4)})[:-3], order) is None
+
+
+def test_source_name():
+    hdr = _header("<", {0: _desc("<", 8, 8, 5, 4)}, path="/data/art/Some Dir/Wall_01.bmp")
+    assert th.source_name(th.read_texture_header(hdr)) == "Wall_01"
+    assert th.source_name(None) == ""

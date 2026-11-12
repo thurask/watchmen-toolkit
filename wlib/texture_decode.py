@@ -136,22 +136,6 @@ def normal_to_png(X, Y, path):
     Image.fromarray(np.stack([X, Y, B], -1)).save(path)
 
 
-def image_coherence(a):
-    if a is None:
-        return 1e9
-    g = a.astype(np.int32).mean(2) if a.ndim == 3 else a.astype(np.int32)
-    return float((np.abs(np.diff(g, axis=1)).mean() + np.abs(np.diff(g, axis=0)).mean()) / 2)
-
-
-def looks_like_normal(XY):
-    if XY is None:
-        return False
-    X, Y = XY
-    if not (112 <= X.mean() <= 144 and 112 <= Y.mean() <= 144):
-        return False
-    return image_coherence(X) < 16 and image_coherence(Y) < 16
-
-
 def unpad_linear(buf, en, w, h):
     """Top mip of a LINEAR layer without the 4-byte row padding (no-op unless the
     row size is not a multiple of 4, i.e. L8 narrower than 4 texels)."""
@@ -374,61 +358,6 @@ def ps3_segments(stream):
         segs.append((p + 36, sz))
         p += 36 + sz
     return segs if segs and p >= len(stream) - 64 else None
-
-
-def console_recover_layers(header, stream, L, last, end, rs):
-    """Recover trailing texture layers the stride walk dropped (serializer
-    drift), using the stream as the size oracle -- the console analogue of the
-    PC dropped-layer recovery in plan_texture_layers. PS3: match each self-
-    describing segment's full-chain byte size to a byte-scanned power-of-two
-    record. X360: byte-scan records and accept only while the platform-padded
-    sizes still tile the stream exactly. Returns the fuller layer list (>= L)."""
-    segs = ps3_segments(stream)
-    # candidate records anywhere in the record area (byte-granular scan)
-    cands = []
-    pos = last + rs
-    while pos + 30 <= end:
-        v = texture_header._valid_rec(header, pos, powtwo=True, order=">")
-        if v:
-            cands.append(v)
-            pos += rs
-        else:
-            pos += 1
-    if not cands:
-        return L
-    if segs is not None:  # ---- PS3: segments are exact
-        if len(segs) <= len(L):
-            return L
-        out = list(L)
-        ci = 0
-        for si in range(len(L), len(segs)):
-            want = segs[si][1]
-            pick = None
-            for k in range(ci, len(cands)):
-                v = cands[k]
-                if (
-                    abs(texture_header.chain_bytes(v["enum"], v["aw"], v["ah"], v["mip"]) - want)
-                    <= 64
-                ):
-                    pick = v
-                    ci = k + 1
-                    break
-            if pick is None:
-                break
-            out.append(pick)
-        return out
-    # ---- X360: accept recovered records only if total padded size == stream
-    base = sum(x360_layer_bytes(x["enum"], x["aw"], x["ah"], x["mip"]) for x in L)
-    add = []
-    acc = 0
-    for v in cands:
-        c = x360_layer_bytes(v["enum"], v["aw"], v["ah"], v["mip"])
-        if base + acc + c <= len(stream) + 64:
-            add.append(v)
-            acc += c
-        if base + acc == len(stream):
-            return L + add
-    return L  # no exact fill -> stay conservative
 
 
 def rsx_unswizzle(buf, w, h, unit=1):

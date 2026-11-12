@@ -312,7 +312,7 @@ def test_x360_cube_below_32_texels_is_marked_not_guessed(tmp_path):
 
 
 def test_x360_sizes_that_do_not_fill_the_stream_warn_and_mark(tmp_path):
-    """The stride walk still writes what it can; the log line and the sheet.json
+    """The frame-0 layers still write what they can; the log line and the sheet.json
     key say that the plan does not cover the stream."""
     hdr, stream, _ = _x360_four_layer()
     stream += bytes(4096)
@@ -321,7 +321,7 @@ def test_x360_sizes_that_do_not_fill_the_stream_warn_and_mark(tmp_path):
     warns = [l for l in log if l.startswith("WARNING: texture Ground_Asphalt:")]
     assert len(warns) == 2
     assert "header layer sizes add up to 40960, the stream is 45056 bytes" in warns[0]
-    assert "stride-walk plan covers" in warns[1]
+    assert "frame-0 plan covers" in warns[1]
     assert "(approx stream 45056)" in log[-1]
     js = json.loads((tmp_path / "t" / "sheet.json").read_text())
     assert len(js[we.TEXTURE_DECODE_KEY]) == 2
@@ -409,7 +409,8 @@ def test_ps3_segment_count_off_the_header_warns_and_marks(tmp_path):
     ok, log = _carve(seg + seg, hdr, tmp_path / "t")
     assert ok
     assert [l for l in log if l.startswith("WARNING:")] == [
-        "WARNING: texture One: 2 stream segments for 1 header layers: layer plan from the stride walk"
+        "WARNING: texture One: 2 stream segments for 1 header layers: layer plan from the "
+        "header's frame-0 layers"
     ]
     assert _pngs(tmp_path / "t") == ["seg0_0_diffuse_8x8_DXT1.png", "seg1_0_diffuse_8x8_DXT1.png"]
     assert we.TEXTURE_DECODE_KEY in json.loads((tmp_path / "t" / "sheet.json").read_text())

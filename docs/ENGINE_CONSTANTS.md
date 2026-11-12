@@ -3107,8 +3107,7 @@ replaced by (1, 1 − v.w, 1 − v.w) of a texcoord.
 ### PC `ATI2` normal maps store Y first [data + bytecode + render test]
 
 Direct3D 9 `ATI2` keeps the Y block first and the X block second. `watchmen_extract.ati2_xy`:
-PC enum 9 decodes X from the second block, Y from the first, on the exact carve and on the
-legacy carve. The per-platform format table at 0x009E8F78 gives the format (normal maps PC 9
+PC enum 9 decodes X from the second block, Y from the first. The per-platform format table at 0x009E8F78 gives the format (normal maps PC 9
 -> X360 10 -> PS3 7), not the channel order: the X360 (enum 10) and PS3 (DXT5) layers are
 X-first. Evidence:
 
