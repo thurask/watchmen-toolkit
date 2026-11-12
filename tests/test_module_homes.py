@@ -34,6 +34,7 @@ HOMES = {
     "texture_carve",
     "material_refs",
     "model_header",
+    "model_mesh",
 }
 
 
