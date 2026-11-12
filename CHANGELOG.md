@@ -53,6 +53,23 @@
   the namespace where the forwarded function `texture_sheet` is served, and Python 3.15 reads
   the namespace before the forwarding property (measured: three tests failed on Windows,
   Python 3.15, none on Python 3.13). Output unchanged. (2026-11-11)
+- **Model, audio and driver code split out of `watchmen_extract`; it is now the shim alone.**
+  Seven flat modules, definitions moved unchanged: `model_header` (`parse_model_header`,
+  `read_meshbuffer`, `model_stream_layout`, the vertex format tables, LOD and part transforms),
+  `model_mesh` (`decode_model_mesh`, the descriptor scan, the console platform and colour
+  order, the restored eyelash UVs), `obj_mtl` (`write_obj_mtl`, `TextureIndex` /
+  `resolve_texture`, the MTL statements of a texture sheet), `model_export` (`decode_model`,
+  `MODEL_STATUS`, `model_meta`, `_RIG`), `sound_header` (`sfx_info`, the PC and console
+  mediastream headers), `audio_decode` (Ogg Vorbis per track, XMA2 / MP3, MS-ADPCM to WAV)
+  and `extract_driver` (`main`, `ModelSpool`). Private helpers another module calls have
+  public names in their home: `pick_vertex_buffer`, `materials_mode`, `console_media_parse`,
+  `xma_frame_count`, `audio_packets`; the old spellings and the private aliases (`_Rd`,
+  `_mr_meshbuffer` among them) stay readable and patchable through `watchmen_extract`
+  (`_HOMES`). `_RIG`, `_rig_load` and `_texture_size_arg` keep their private names in
+  `model_export`. `watchmen_extract.py` holds the docstring, the path setup, `_HOMES` and the
+  forwarding type; run as a script it calls `extract_driver.main`, and `watchmen.py extract
+  --help` calls `extract_driver.main` directly. The usage text is in `extract_driver`'s
+  docstring, each pipeline line in that of its module. Output unchanged. (2026-11-11)
 
 ## 1.7.0 — 2026-11-11
 
