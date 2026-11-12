@@ -948,6 +948,8 @@ def write_glb(
         # every body animation via hierarchy; face poses = local channels on
         # the face joints only.  face = dict(bind, parts, anims, attach_idx,
         # M (3,3), t (3)) with M,t mapping face-model space -> body bind space.
+        # the face bind, read once: the face rig, the face mask, the pose
+        # locals and the face clips below all use fb / NF / B4f / M4
         fb = load_npz(face["bind"])
         fRb, ftb = fb["Rb"], fb["tb"]
         NF = len(fRb)
@@ -1070,9 +1072,8 @@ def write_glb(
             j["skins"][1]["extras"] = {"watchmen": {"face": _sx}}
     _facemask = None
     if face is not None:
-        _fb0 = load_npz(face["bind"])
-        _fn = [str(x) for x in _fb0["names"]]
-        _fp = _fb0["par"]
+        _fn = [str(x) for x in fb["names"]]
+        _fp = fb["par"]
 
         def _below_head(k):
             p = _fp[k]
@@ -1086,27 +1087,18 @@ def write_glb(
         _fhead = _fn.index("Head")
     _faceride = None
     if face is not None and face.get("anims"):
-        _fb = load_npz(face["bind"])
-        _NF = len(_fb["Rb"])
-        _B4f = np.tile(np.eye(4), (_NF, 1, 1))
-        _B4f[:, :3, :3] = _fb["Rb"]
-        _B4f[:, :3, 3] = _fb["tb"]
-        _M4 = np.eye(4)
-        _M4[:3, :3] = face["M"]
-        _M4[:3, 3] = face["t"]
-        _M4Ci = _M4
 
         def _locals_for(_A):
             """pose palettes frame (NF,3,4) -> (quat,(NF,3)) LOCALS under anchor."""
             _A4 = np.concatenate(
                 [
                     _A.astype(np.float64),
-                    np.tile(np.array([0, 0, 0, 1.0]).reshape(1, 1, 4), (_NF, 1, 1)),
+                    np.tile(np.array([0, 0, 0, 1.0]).reshape(1, 1, 4), (NF, 1, 1)),
                 ],
                 axis=1,
             )
-            _W = np.einsum("kab,kbc->kac", _A4, _B4f)
-            _fx = _B4f[_fhead] @ np.linalg.inv(_W[_fhead])
+            _W = np.einsum("kab,kbc->kac", _A4, B4f)
+            _fx = B4f[_fhead] @ np.linalg.inv(_W[_fhead])
             _L = np.einsum("ab,kbc->kac", _fx, _W)
             return batch_m2q(_L[:, :3, :3]), _L[:, :3, 3]
 
@@ -1129,10 +1121,10 @@ def write_glb(
                     print("  ! auto-pose %s failed: %s" % (_pn, _pe))
         # blink data: EyeLid bone locals for neutral vs eyes-closed
         _fblink = None
-        _fn2 = [str(x) for x in _fb["names"]]
+        _fn2 = [str(x) for x in fb["names"]]
         if face.get("blink_closed") is not None and "EyeLid" in _fn2:
             _lidk = [
-                k for k in range(_NF) if "eyelid" in _fn2[k].lower() or _fn2[k] in ("Leye", "Reye")
+                k for k in range(NF) if "eyelid" in _fn2[k].lower() or _fn2[k] in ("Leye", "Reye")
             ]
             _fblink = (_lidk, _locals_for(face["blink_closed"]))
         _faceride = (
@@ -1247,7 +1239,7 @@ def write_glb(
             _pslots = () if _hier else _pslots
             if not _hier:
                 FH = A4[:, _ai]  # (F,4,4)
-                La = np.einsum("fab,bc->fac", FH, _M4Ci)
+                La = np.einsum("fab,bc->fac", FH, M4)
                 Qf = batch_m2q(La[:, :3, :3])
                 for f in range(1, F):
                     if (Qf[f] * Qf[f - 1]).sum() < 0:
@@ -1312,7 +1304,7 @@ def write_glb(
                     _T = np.array([(_tn * (1 - w) + _tc * w) for w in _wts], np.float32)
                     doc.add_trs(sm, chn, facenodes[k], _ta3, _Q, _T)
             for pi, bs in enumerate(_pslots):
-                _MkCi = _palign[pi] if _palign is not None else _M4Ci
+                _MkCi = _palign[pi] if _palign is not None else M4
                 Lp = np.einsum("fab,bc->fac", A4[:, bs], _MkCi)
                 Qf = batch_m2q(Lp[:, :3, :3])
                 for f in range(1, F):
@@ -1321,12 +1313,6 @@ def write_glb(
                 doc.add_trs(sm, chn, proxynodes[pi], ta, Qf, Lp[:, :3, 3])
         j["animations"].append(_anim(animname, sm, chn, F, fps, _finfo))
     if face is not None:
-        fb = load_npz(face["bind"])
-        fRb, ftb = fb["Rb"], fb["tb"]
-        NF = len(fRb)
-        B4f = np.tile(np.eye(4), (NF, 1, 1))
-        B4f[:, :3, :3] = fRb
-        B4f[:, :3, 3] = ftb
         for animname, A, fps in face["anims"]:
             F = len(A)
             times = (np.arange(F) / fps).astype(np.float32)
