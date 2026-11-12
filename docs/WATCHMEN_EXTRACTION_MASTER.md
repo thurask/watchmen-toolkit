@@ -540,7 +540,8 @@ independent, so only the block-header `struct` reads change.
 
 **Auto-detect, no flag.** `detect_block_order(h)` reads `NUM_TABLES` (@352) both
 ways and keeps the plausible asset count (the wrong endianness reads as a huge
-number); `parse_block_toc(h, order=None)` calls it and records `BLOCK_ORDER`.
+number); `parse_block_toc(h, order=None)` calls it and gives every directory
+entry the result as `.order` (`BLOCK_ORDER` mirrors the last call).
 Verified: X360 & PS3 bordello block → auto-picks BIG → **2291 assets, identical to
 PC**; PC bordello auto-picks LITTLE → 2291. Console carve lands 2291
 correctly-named assets on disk (fragments/wav/animation/model/bmp).
@@ -555,7 +556,7 @@ All four parsers (`kapow_fragment`, `kapow_json`, `kapow_props`,
 `to_json(name, data, order=)`, with per-format auto-detect when order is omitted
 (`detect_order()`: fragment = chunk-size walk / schema-record scan; sequence &
 terrain = f32 version plausibility 0.01–1000; propbag = leading
-`[namelen][ClassName\0]` record). `watchmen_extract` passes `order=BLOCK_ORDER`
+`[namelen][ClassName\0]` record). The extract passes each asset's `entry.order`
 through. Key hashes are unchanged integers once read in the right order, so the
 pkl key tables work as-is. **Verified on the bordello block:** PC 433/433 JSON
 byte-identical to the pre-port parser; X360 & PS3 both 433 assets, 0

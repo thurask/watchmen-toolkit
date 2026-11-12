@@ -708,7 +708,7 @@ def block_text_assets(h_data, warn=None):
     out, order = {}, None
     for lang in range(wx.BLOCK_LANGUAGES):
         entries, cur = wx.parse_block_toc(h_data, language=lang)
-        bo = order = wx.BLOCK_ORDER
+        bo = order = entries[0].order if entries else wx.detect_block_order(h_data)
         num = struct.unpack_from(bo + "I", h_data, wx.NUM_TABLES_OFFSET)[0]
         lang_off = struct.unpack_from(bo + "6I", h_data, 364)
         for i, e in enumerate(entries):

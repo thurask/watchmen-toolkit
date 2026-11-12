@@ -580,9 +580,7 @@ class ExtractRun:
                 rep.n_assets += 1
                 # script classes ("ModelEffects(ModelRes)", "TextureEffects(Texture)")
                 # are read by their base class loader -> dispatch on the base name
-                cls = kapow_block.asset_base_class(
-                    kapow_block.asset_class(header, kapow_block.BLOCK_ORDER)
-                )
+                cls = kapow_block.asset_base_class(kapow_block.asset_class(header, e.order))
                 # the name this copy is written under, and whether an earlier block
                 # already wrote the same bytes (OutputNames: "repeat")
                 name, placed = names.place(e.name, stem, header, stream)
@@ -593,10 +591,10 @@ class ExtractRun:
                 # instead of the real channel/rate/sample values).
                 if opts.audio and cls.lower() == "mediastream":
                     try:
-                        mm = sound_header.media_meta_from_header(header, kapow_block.BLOCK_ORDER)
+                        mm = sound_header.media_meta_from_header(header, e.order)
                         if mm:
                             media_meta[mm[0].lower().lstrip("/")] = mm[1:]
-                        md = sound_header.media_desc_from_header(header, kapow_block.BLOCK_ORDER)
+                        md = sound_header.media_desc_from_header(header, e.order)
                         if md:
                             media_desc[md["stream"].lower().lstrip("/")] = (name, md)
                     except (struct.error, ValueError, IndexError, KeyError) as ex:
@@ -605,7 +603,7 @@ class ExtractRun:
                             "rate left to the stream (%s: %s)" % (name, type(ex).__name__, ex)
                         )
                 if opts.audio and low.endswith(".fragment") and b"MusicStreamSlot" in header:
-                    music_frags.append((name, header, kapow_block.BLOCK_ORDER))
+                    music_frags.append((name, header, e.order))
                 # dump EVERY asset raw (header + optional stream) to extracted/ for offline
                 # analysis; a later copy with the same header and stream wrote the same files
                 # under the same name already (raw, JSON, the files beside it), so it is skipped
@@ -651,11 +649,11 @@ class ExtractRun:
                                         header,
                                         stream,
                                         str(_ep),
-                                        kapow_block.BLOCK_ORDER,
+                                        e.order,
                                         glb=bool(opts.glb),
                                     )
                                 else:
-                                    d = kj.to_json(low, header, order=kapow_block.BLOCK_ORDER)
+                                    d = kj.to_json(low, header, order=e.order)
                                 if d and low.endswith(".fragment"):
                                     # never silent: a fragment not decoded exactly, or
                                     # with values typed by guess, is named in the log
@@ -706,7 +704,7 @@ class ExtractRun:
                 # (stream is None) -> handle these before the stream-None skip below.
                 if opts.audio and cls == "sound":
                     try:
-                        if kapow_block.BLOCK_ORDER == "<":
+                        if e.order == "<":
                             r = audio_decode.decode_sfx(header)
                             if r:
                                 wn = name if name.lower().endswith(".wav") else name + ".wav"
@@ -733,7 +731,7 @@ class ExtractRun:
                         else:
                             si = audio_decode.decode_sfx_console(
                                 header,
-                                kapow_block.BLOCK_ORDER,
+                                e.order,
                                 name,
                                 opts.out / "audio",
                                 opts.vgmstream_cli,
@@ -801,7 +799,7 @@ class ExtractRun:
                             header,
                             stream,
                             extract_paths.safe(opts.out / "models", name + ".obj"),
-                            kapow_block.BLOCK_ORDER,
+                            e.order,
                             model_mesh.console_platform_of(stem) or run_platform,
                         )
                     )

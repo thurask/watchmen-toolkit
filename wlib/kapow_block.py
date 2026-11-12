@@ -2,7 +2,8 @@
 `<name>.block_s_z` (per-asset zlib streams); standalone `_h_z` / `_s_z` files
 and `.mediastream_s` too.  The block header, directory and trailer
 (`parse_block_header`, `parse_block_toc`, `parse_block_trailer`), the byte order
-of the block (`detect_block_order`, `BLOCK_ORDER`), language slots and stream
+of the block (`detect_block_order`; each directory entry's `order`, the last
+one mirrored in `BLOCK_ORDER`), language slots and stream
 sets, one asset's header and stream (`extract_block`, `maybe_inflate`,
 `inflate_standalone`), asset types and classes, and the property-bag walk
 (`prop_walk`, `propbag_end`).
@@ -159,6 +160,7 @@ class Toc:
         "inflate_failed",
         "stream_file",
         "stream_note",
+        "order",
     )
 
     def __init__(s):
@@ -167,6 +169,7 @@ class Toc:
         s.inflate_failed = []  # "header" / "stream": blobs extract_block could not inflate
         s.stream_file = None  # stream-set file the stream was read from (not the block's own)
         s.stream_note = None  # why a stream named by a stream set could not be read
+        s.order = "<"  # byte order of the block the record was read from (parse_block_toc)
 
     @property
     def compressed(s):
@@ -243,7 +246,7 @@ class Toc:
 # (names, GUIDs) are byte-order-independent, so ONLY the block-header integer
 # reads need to flip.  detect_block_order() reads NUM_TABLES both ways and keeps
 # the interpretation that is a plausible asset count -- no CLI flag required.
-BLOCK_ORDER = "<"  # last auto-detected block byte order (for downstream use)
+BLOCK_ORDER = "<"  # the byte order of the last parse_block_toc call; each Toc carries its own
 
 
 def detect_block_order(h):
@@ -325,7 +328,9 @@ def parse_block_header(h, order=None):
 
 def parse_block_toc(h, order=None, language=0):
     """-> (entries, data_start).  `entries` holds the `num_entries` main records
-    followed by the `num_localized` per-language ones (`.localized` is True)."""
+    followed by the `num_localized` per-language ones (`.localized` is True);
+    each carries the block's byte order in `.order` ("<" / ">": `order`, else
+    detect_block_order).  BLOCK_ORDER mirrors the order of the last call."""
     global BLOCK_ORDER
     if (
         isinstance(language, bool)
@@ -346,6 +351,7 @@ def parse_block_toc(h, order=None, language=0):
         if pos + 32 > end:
             break
         t = Toc()
+        t.order = bo
         t.language = language
         t.localized = i >= num
         t.sizes = list(struct.unpack_from(bo + "6I", h, pos))
@@ -589,7 +595,7 @@ def extract_block(h_data, s_data, language=0, report=None, stream_files=None):
     """
     try:
         entries, data_start = parse_block_toc(h_data, language=language)
-        bo = BLOCK_ORDER
+        bo = entries[0].order if entries else detect_block_order(h_data)
         num = struct.unpack_from(bo + "I", h_data, NUM_TABLES_OFFSET)[0]
         lang_off = struct.unpack_from(bo + "6I", h_data, 364)
     except (struct.error, ValueError) as ex:

@@ -191,6 +191,18 @@ def test_extract_block_takes_streams_from_the_stream_sets(bo):
     assert msgs == []
 
 
+@pytest.mark.parametrize("bo", ["<", ">"])
+def test_every_directory_entry_carries_its_block_byte_order(bo):
+    h, a, _room = _prison(bo)
+    entries, _start = we.parse_block_toc(h)
+    assert entries and {e.order for e in entries} == {bo}
+    assert {e.order for e, _hd, _st in we.extract_block(h, a)} == {bo}
+    # a later block of the other order leaves the earlier entries as they are
+    other = "<" if bo == ">" else ">"
+    later, _start = we.parse_block_toc(_prison(other)[0])
+    assert {e.order for e in entries} == {bo} and {e.order for e in later} == {other}
+
+
 def test_extract_block_without_a_resolver_is_unchanged():
     h, a, _room = _prison()
     got = [(e.name, st) for e, _hd, st in we.extract_block(h, a)]
