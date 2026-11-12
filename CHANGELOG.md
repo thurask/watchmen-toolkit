@@ -140,6 +140,30 @@
   platform; `texture_header.source_name` gives the asset name from the source path. Neither
   path is taken on the six sets: all six byte-identical to the 1.7.0 export, `_extract_done.txt`
   excluded, 0 `WARNING:` lines (measured). (2026-11-12)
+- **The GLB writers share their common blocks; `write_glb` is a builder object.**
+  `gltf_build.GltfDoc` holds a glTF document (top-level keys in the writer's own order), its
+  `GlbPacker` and the blocks both writers write the same way: `add_trs` (one node's rotation
+  and translation channels: the rotation accessor, the translation accessor, then the two
+  samplers and channels), `add_skinned_primitive` (POSITION, JOINTS_0, WEIGHTS_0, TEXCOORD_0,
+  the indices, then NORMAL / TANGENT / COLOR_0; `material_first` says whether the material is
+  made before or after those, which decides where its images land in the buffer),
+  `add_attributes` and `finish`. `variant_glb.write_glb` keeps its signature and writes
+  `VariantGlb(...).build().glb()` through a temporary file as before; its closures and the
+  blocks between them are `VariantGlb` methods: materials (`vertex_prep`, `blend`,
+  `sheet_material`, `engine_material`, `material`, `image_texture`), meshes (`joint_nodes`,
+  `primitive`, `body_mesh`, `extra_meshes`), skins (`face_rig`, `scene_roots`, `face_poses`,
+  `face_locals`, `below_head`), animation (`body_clip`, `face_ride_channels`,
+  `face_track_channels`, `blink_channels`, `face_clips`, `anim_record`, `time_accessor`) and
+  the file (`asset_records`, `ragdoll_helpers`). The seven rotation + translation sites use
+  `add_trs`, the body, attachment and face primitives `add_skinned_primitive`, and the face
+  bind is read once (was four times). `write_glb` went from 1,206 lines and cyclomatic
+  complexity 190 to 92 lines (most of them its docstring) and 1; the most complex method is
+  `VariantGlb.__init__` at 36. `rig_glb.build_rigged_glb` builds its document and packer
+  through `GltfDoc` and is otherwise unchanged; the two writers keep their own attribute
+  order, `JOINTS_0` type, materials and animation paths. Output unchanged: the golden GLB
+  tests pass unchanged (`GLB_GOLDEN_STRICT=1`, Linux, Python 3.13); every GLB the suite writes
+  is byte-identical to the code before; `pc_p2` and `pc_p1` are byte-identical to the 1.7.0
+  export, `_extract_done.txt` excluded, 0 `WARNING:` lines (measured). (2026-11-12)
 
 ## 1.7.0 — 2026-11-11
 
