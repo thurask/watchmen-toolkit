@@ -143,41 +143,556 @@ class ModelSpool:
             self._f = None
 
 
-@dataclasses.dataclass
-class ExtractRun:
-    """The state of one `extract` run that pass 1 builds and the passes after it
-    read: the options, the log, the block plan and its readers, the model
-    queue, the audio collections, the report counters and the naming state."""
+class BlockPlan:
+    """The blocks of an `extract` run as pass 1 plans them, and their readers.
 
-    a: argparse.Namespace
-    log: object
-    blocks: dict  # stem -> {"h": NazEntry, "s": NazEntry[, "standalone": True]}
-    half: object  # (planned block, "h" / "s") -> bytes of that half, or None
-    entry_bytes: object  # NazEntry -> its bytes, read again
-    stream_only: dict  # stream-only `.block_s_z` file -> its plan
-    stream_used: dict  # stream-set file path -> times read
-    stream_file: object  # stream-set file path -> bytes or None
-    model_jobs: ModelSpool
-    run_platform: object  # console of a big-endian source; None on PC
-    console_audio: list
-    pc_audio: list
-    media_meta: dict
-    media_desc: dict
-    music_frags: list
-    sound_info: dict
-    sfx_failed: list
-    stats: dict
-    name_run: object
-    names: object
-    model_stored: dict
-    text_writer: object
-    no_stream: dict
-    misc: dict
-    raw_only: dict
-    from_sets: dict
-    do_tex: bool
-    do_mdl: bool
-    do_extract_all: bool
+    `blocks`: stem -> {"h": NazEntry, "s": NazEntry[, "standalone": True]} --
+    archive entries only; each half is read again (and inflated) when its block
+    is processed and dropped after it, so the run never holds the archive.
+    `stream_only`: the stream-only `.block_s_z` files (no header half) that the
+    stream sets of another block's header name (Part 1 Prison: four rooms), read
+    when a set first names them, the last `_STREAM_CACHE` of them kept;
+    `stream_used`: stream-set file path -> times read."""
+
+    def __init__(self, naz, log):
+        self.naz = naz
+        self.log = log
+        self.blocks = {}
+        self.stream_only = {}
+        self.stream_used = {}
+        self._stream_cache = {}  # stream-only file -> bytes, most recently used last
+        self._find = None
+
+    def seal(self):
+        """After pass 1: the stream-only files of the plan, and their lookup."""
+        self.stream_only = {
+            k + "_s_z": v for k, v in self.blocks.items() if "h" not in v and "s" in v
+        }
+        self._find = kapow_block.stream_file_lookup({k: k for k in self.stream_only})
+
+    def half(self, hs, k):
+        """Bytes of half `k` ("h" / "s") of a planned block, read now: the
+        archive entry, inflated for a standalone file; None without that half."""
+        ent = hs.get(k)
+        if ent is None:
+            return None
+        raw = naz_archive.naz_read(self.naz, ent)
+        return kapow_block.inflate_standalone(raw) if hs.get("standalone") else raw
+
+    def entry_bytes(self, ent):
+        """An audio entry of pass 1, read again for its post-block pass."""
+        return naz_archive.naz_read(self.naz, ent)
+
+    def stream_file(self, path):
+        """The bytes of the stream-only file a stream set names (`path`), or None
+        when the plan has no such file or it does not read."""
+        key = self._find(path)
+        if key is None:
+            return None
+        blob = self._stream_cache.pop(key, None)
+        if blob is None:
+            try:
+                blob = self.half(self.stream_only[key], "s")
+            except Exception as ex:
+                self.log("  ! %s: %s" % (key, ex))
+                return None
+        self._stream_cache[key] = blob  # most recently used last
+        while len(self._stream_cache) > _STREAM_CACHE:
+            self._stream_cache.pop(next(iter(self._stream_cache)))
+        self.stream_used[path] = self.stream_used.get(path, 0) + 1
+        return blob
+
+
+@dataclasses.dataclass
+class AudioQueue:
+    """What the block pass collects for the audio passes after it."""
+
+    # (name, NazEntry) console mediastream_s, decoded post-blocks
+    console_audio: list = dataclasses.field(default_factory=list)
+    # (name, NazEntry) PC mediastream_s, split per track post-blocks
+    pc_audio: list = dataclasses.field(default_factory=list)
+    # mediastream path (lower, no leading /) -> (ch, rate, samples)
+    media_meta: dict = dataclasses.field(default_factory=dict)
+    # same key -> (descriptor asset name, media_desc_from_header)
+    media_desc: dict = dataclasses.field(default_factory=dict)
+    # (name, header, order) of fragments holding a MusicStreamSlot
+    music_frags: list = dataclasses.field(default_factory=list)
+    # sound asset name -> header facts (audio/sound_info.json)
+    sound_info: dict = dataclasses.field(default_factory=dict)
+    # console sound assets no audio could be written for
+    sfx_failed: list = dataclasses.field(default_factory=list)
+
+
+@dataclasses.dataclass
+class RunReport:
+    """The counts and lists the summary of an `extract` run prints."""
+
+    stats: dict = dataclasses.field(default_factory=lambda: dict(files=0, tex=0, mdl=0, aud=0))
+    # Texture / ModelRes name -> (class, why) left without stream data
+    no_stream: dict = dataclasses.field(default_factory=dict)
+    # JSON kind (".font", ...) -> [assets, not fully decoded]
+    misc: dict = dataclasses.field(default_factory=dict)
+    # class / suffix of assets no decoder of this command reads -> count
+    raw_only: dict = dataclasses.field(default_factory=dict)
+    # stream-set file -> assets whose stream came from it
+    from_sets: dict = dataclasses.field(default_factory=dict)
+    # blocks whose halves did not read or whose parse failed
+    failed_blocks: list = dataclasses.field(default_factory=list)
+    n_assets: int = 0
+    tex_repeats: int = 0
+    mdl_repeats: int = 0
+
+
+class ExtractRun:
+    """One `extract` run: the options (`a`), the log, the block plan, the audio
+    queue, the model queue, the report and the naming state, with one method
+    per pass."""
+
+    def __init__(self, a, log):
+        self.a = a
+        self.log = log
+        self.do_tex = not a.no_textures
+        self.do_mdl = not a.no_models
+        self.do_extract_all = not a.no_extract_all
+        self.block_plan = BlockPlan(a.naz, log)
+        self.audio = AudioQueue()
+        self.report = RunReport()
+        self.platform = None  # the console of a big-endian source; None on PC
+        self.name_run = None  # --names: canonical_names.Run of this run
+        self.names = None  # extract_paths.OutputNames: one output per asset name
+        self.text_writer = None
+        self.model_stored = {}  # model output path -> the archive's spelling of a respelled name
+        # (header, stream, out_path, order, platform) -- deferred until all textures
+        # are dumped; header and stream wait in a spool file under the output folder
+        self.model_jobs = None
+
+    def plan(self):
+        """Pass 1, archive order: files/, the standalone audio streams, and the
+        block plan."""
+        a, log = self.a, self.log
+        blocks = self.block_plan.blocks
+        stats = self.report.stats
+        console_audio, pc_audio = self.audio.console_audio, self.audio.pc_audio
+        entries = list(naz_archive.naz_entries(a.naz, warn=lambda m: log("  ! " + m)))
+        log("NAZ %s : %d entries -> %s" % (a.naz, len(entries), a.out))
+        # the console of a big-endian source, named by its derived root (the path of
+        # a loose tree, or the block paths inside the .naz); None on PC
+        run_platform = model_mesh.console_platform_of(a.naz)
+        for e in entries:
+            if run_platform:
+                break
+            run_platform = model_mesh.console_platform_of(e.name)
+        # --names: the canonical spelling of every output path, and what was respelled
+        name_run = extract_paths.names_module().begin()
+        # extracted/, textures/, models/ and audio/ spell every folder alike
+        extract_paths.names_module().share_folders(a.out)
+        names = extract_paths.OutputNames(
+            log, name_run
+        )  # one output per asset name (repeats, twins, variants)
+        text_writer = None
+        if not a.no_text:
+            try:
+                import text_assets as _ta
+
+                text_writer = _ta.TextWriter(a.out, log)
+            except Exception as ex:
+                log("note: text_assets not importable (%s) -> no text/" % ex)
+
+        # pass 1, archive order: files/, the standalone audio streams, and the plan.
+        # An entry is read here only when its bytes are used here: for files/, or a
+        # standalone audio stream.  With --no-files the block halves and the standalone
+        # texture / model halves are planned from the directory alone (the block pass
+        # reads them), so the archive is read once, not twice.
+        for e in entries:
+            low = e.name.lower()
+            _audio = not a.no_audio and low.endswith(".mediastream_s")
+            if a.no_files and not _audio:
+                data = None  # planned from the directory; read when its block is processed
+            else:
+                try:
+                    data = naz_archive.naz_read(a.naz, e)
+                except Exception as ex:
+                    log("  ! %s: %s" % (e.name, ex))
+                    continue
+            if data is not None and not a.no_files:
+                p = extract_paths.safe(a.out / "files", name_run.name(e.name))
+                p.parent.mkdir(parents=True, exist_ok=True)
+                p.write_bytes(data)
+                stats["files"] += 1
+            # pair block halves; defer processing until both are known
+            if low.endswith(".block_h_z") or low.endswith(".block_s_z"):
+                stem = e.name[: -len("_h_z")] if low.endswith("_h_z") else e.name[: -len("_s_z")]
+                blocks.setdefault(stem, {})["h" if low.endswith("_h_z") else "s"] = e
+                continue
+            # standalone audio (PC = Vorbis packet container; console handled after
+            # the block pass so channel/rate metadata is available)
+            if not a.no_audio and low.endswith(".mediastream_s"):
+                try:
+                    if not a.flat_music and audio_decode.audio_packets(data):
+                        pc_audio.append((e.name, e))  # needs the descriptors
+                    elif audio_decode.decode_audio(
+                        data, extract_paths.safe(a.out / "audio", e.name + ".ogg"), True, log
+                    ):
+                        stats["aud"] += 1
+                    else:
+                        console_audio.append((e.name, e))
+                except Exception as ex:
+                    log("      ! audio %s: %s" % (e.name, ex))
+                continue
+            # standalone texture / model (paired _h_z + _s_z handled via the block dict
+            # path above only for *.block_*; helper textures use *.texture_h_z etc.)
+            if low.endswith(".texture_h_z") or low.endswith(".modelres_h_z"):
+                blocks.setdefault(e.name[: -len("_h_z")], {})["h"] = e
+                blocks[e.name[: -len("_h_z")]]["standalone"] = True
+                continue
+            if low.endswith(".texture_s_z") or low.endswith(".modelres_s_z"):
+                blocks.setdefault(e.name[: -len("_s_z")], {})["s"] = e
+                blocks[e.name[: -len("_s_z")]]["standalone"] = True
+                continue
+        data = None  # pass 1 keeps no entry's bytes
+        self.platform = run_platform
+        self.name_run, self.names, self.text_writer = name_run, names, text_writer
+        self.block_plan.seal()
+        self.model_jobs = ModelSpool(a.out)
+
+    def blocks(self):
+        """The block pass: every asset of every planned block, in a fixed order."""
+        a, log = self.a, self.log
+        plan, rep = self.block_plan, self.report
+        names, name_run, text_writer = self.names, self.name_run, self.text_writer
+        run_platform, model_jobs, model_stored = self.platform, self.model_jobs, self.model_stored
+        do_tex, do_mdl, do_extract_all = self.do_tex, self.do_mdl, self.do_extract_all
+        aq = self.audio
+        media_meta, media_desc, music_frags = aq.media_meta, aq.media_desc, aq.music_frags
+        sound_info, sfx_failed = aq.sound_info, aq.sfx_failed
+        stats, no_stream, misc = rep.stats, rep.no_stream, rep.misc
+        raw_only, from_sets = rep.raw_only, rep.from_sets
+        # blocks in a fixed order that does not depend on the letter case an archive
+        # stores their paths in (OutputNames: the first copy names the output)
+        for stem, hs in sorted(plan.blocks.items(), key=lambda kv: (kv[0].lower(), kv[0])):
+            if "h" not in hs:
+                continue
+            if hs.get("standalone"):
+                low = stem.lower()
+                if hs.get("s") is None:
+                    continue
+                try:
+                    header, stream = plan.half(hs, "h"), plan.half(hs, "s")
+                except Exception as ex:
+                    log("  ! %s: %s" % (stem, ex))
+                    rep.failed_blocks.append(stem)
+                    continue
+                # same registry as the block assets; the folder names a differing copy
+                name, placed = extract_paths.standalone_output_name(names, stem, header, stream)
+                if placed == "repeat":
+                    continue
+                if do_tex and ".texture" in low:
+                    try:
+                        if texture_carve.carve_texture(
+                            stream, header, extract_paths.safe(a.out / "textures", name), log
+                        ):
+                            stats["tex"] += 1
+                            texture_sheet.mark_stored_name(
+                                extract_paths.safe(a.out / "textures", name),
+                                name_run.stored_of(name),
+                            )
+                    except Exception as ex:
+                        log("      ! texture %s: %s" % (name, ex))
+                elif do_mdl and ".modelres" in low:
+                    model_jobs.append(
+                        (
+                            header,
+                            stream,
+                            extract_paths.safe(a.out / "models", name + ".obj"),
+                            None,
+                            model_mesh.console_platform_of(stem) or run_platform,
+                        )
+                    )
+                continue
+            # real block pair
+            if a.limit is not None and rep.n_assets >= a.limit:
+                break  # --limit N: stop after N block assets
+            log("\nBLOCK %s" % stem)
+            try:
+                h_data, s_data = plan.half(hs, "h"), plan.half(hs, "s")
+            except Exception as ex:
+                log("  ! %s: %s" % (stem, ex))
+                rep.failed_blocks.append(stem)
+                continue
+            if text_writer is not None:  # text assets, all six language slots
+                try:
+                    text_writer.add_block(h_data, stem)
+                except Exception as ex:
+                    log("  ! text assets: %s" % ex)
+            _args = (h_data, s_data, a.language) if a.language else (h_data, s_data)
+            try:
+                # check pass: the whole block parses and inflates (what does not inflate is
+                # reported here, before any asset of the block is written).  The
+                # assets are kept for the asset pass while they fit in BLOCK_CACHE_BYTES;
+                # a larger block is parsed again below -- holding a whole level's assets
+                # is what the memory would go on
+                _rep = lambda m: log("  ! " + m)
+                _kept, _size, _cap = [], 0, BLOCK_CACHE_BYTES
+                for _item in kapow_block.extract_block(
+                    *_args, report=_rep, stream_files=plan.stream_file
+                ):
+                    if _kept is not None:
+                        _size += len(_item[1] or b"") + len(_item[2] or b"")
+                        if _size <= _cap:
+                            _kept.append(_item)
+                        else:
+                            _kept = None  # too big: the asset pass parses it again
+                _item = None
+            except Exception as ex:
+                log("  ! parse failed: %s" % ex)
+                rep.failed_blocks.append(stem)
+                continue
+            # the assets one at a time (the same parse; its reports were logged above)
+            if _kept is not None:
+                it = iter(_kept)
+            else:
+                it = kapow_block.extract_block(*_args, report=None, stream_files=plan.stream_file)
+            _kept = None
+            h_data = s_data = _args = None  # the generator holds the block's bytes until done
+            for e, header, stream in it:
+                if a.limit is not None and rep.n_assets >= a.limit:
+                    break
+                rep.n_assets += 1
+                # script classes ("ModelEffects(ModelRes)", "TextureEffects(Texture)")
+                # are read by their base class loader -> dispatch on the base name
+                cls = kapow_block.asset_base_class(
+                    kapow_block.asset_class(header, kapow_block.BLOCK_ORDER)
+                )
+                # the name this copy is written under, and whether an earlier block
+                # already wrote the same bytes (OutputNames: "repeat")
+                name, placed = names.place(e.name, stem, header, stream)
+                low = name.lower()
+                # class-name compare is case-insensitive: the typename is spelled both
+                # "mediastream" and "MediaStream"; a case-sensitive miss here would leave
+                # media_meta empty (console XMA then wrapped with default 2ch/48000
+                # instead of the real channel/rate/sample values).
+                if not a.no_audio and cls.lower() == "mediastream":
+                    try:
+                        mm = sound_header.media_meta_from_header(header, kapow_block.BLOCK_ORDER)
+                        if mm:
+                            media_meta[mm[0].lower().lstrip("/")] = mm[1:]
+                        md = sound_header.media_desc_from_header(header, kapow_block.BLOCK_ORDER)
+                        if md:
+                            media_desc[md["stream"].lower().lstrip("/")] = (name, md)
+                    except (struct.error, ValueError, IndexError, KeyError) as ex:
+                        log(
+                            "      WARNING: music %s: stream description not read, channels and "
+                            "rate left to the stream (%s: %s)" % (name, type(ex).__name__, ex)
+                        )
+                if not a.no_audio and low.endswith(".fragment") and b"MusicStreamSlot" in header:
+                    music_frags.append((name, header, kapow_block.BLOCK_ORDER))
+                # dump EVERY asset raw (header + optional stream) to extracted/ for offline
+                # analysis; a later copy with the same header and stream wrote the same files
+                # under the same name already (raw, JSON, the files beside it), so it is skipped
+                if do_extract_all and not (placed == "repeat" and names.same_bytes):
+                    _ep = extract_paths.safe(a.out / "extracted", name)
+                    _ep.parent.mkdir(parents=True, exist_ok=True)
+                    _ep.write_bytes(header if header else b"")
+                    if stream:
+                        (_ep.parent / (_ep.name + ".stream")).write_bytes(stream)
+                    # human-readable JSON for property-bag / sequence / fragment assets
+                    # (.fragment.json, .pb.json, .sequence.json, .particle.json, ...)
+                    if header and low.endswith(
+                        (
+                            ".fragment",
+                            ".sequence",
+                            ".pb",
+                            ".particle",
+                            ".grass",
+                            ".detailmesh",
+                            ".terrain",
+                            ".scene",
+                            ".font",
+                            ".terraincoloringasset",
+                        )
+                    ):
+                        _kind = "." + low.rsplit(".", 1)[-1]
+                        # counted once per output name (a later copy without the stream the
+                        # first one had is written again but is the same asset)
+                        _one = 1 if placed != "repeat" else 0
+                        _cnt = misc.setdefault(_kind, [0, 0])
+                        _cnt[0] += _one
+                        try:
+                            kj = _kapow_json()
+                            d = None
+                            if kj:
+                                _lines = []
+                                if low.endswith(kj.EXPORT_EXTS):
+                                    # font / scene / terrain / terrain colouring / detail mesh:
+                                    # JSON plus the atlas, maps and terrain GLB beside the asset;
+                                    # what is not decoded comes back as log lines
+                                    d, _lines = kj.export(
+                                        name,
+                                        header,
+                                        stream,
+                                        str(_ep),
+                                        kapow_block.BLOCK_ORDER,
+                                        glb=bool(a.glb),
+                                    )
+                                else:
+                                    d = kj.to_json(low, header, order=kapow_block.BLOCK_ORDER)
+                                if d and low.endswith(".fragment"):
+                                    # never silent: a fragment not decoded exactly, or
+                                    # with values typed by guess, is named in the log
+                                    import kapow_fragment as _kfr
+
+                                    _lines = _kfr.notes(name, d)
+                                _why = kj.undecoded(d)
+                                if _why:
+                                    # one line per asset that is not decoded completely; the
+                                    # same fact is a marker in its JSON (kapow_json.undecoded)
+                                    _cnt[1] += _one
+                                    if not any(_l.startswith("WARNING:") for _l in _lines):
+                                        _lines = list(_lines) + [
+                                            "WARNING: %s %s: not decoded completely: %s"
+                                            % (_kind[1:], name, _why)
+                                        ]
+                                for _ln in _lines:
+                                    log("      " + _ln)
+                                if d:
+                                    import f32json as _f32j
+
+                                    with open(
+                                        _ep.parent / (_ep.name + ".json"),
+                                        "w",
+                                        encoding="utf-8",
+                                        newline="\n",
+                                    ) as _f:
+                                        # exact mode: a NaN or an infinity is null
+                                        _f.write(_f32j.dumps(d, indent=1))
+                            else:
+                                _cnt[1] += _one
+                                log(
+                                    "      WARNING: %s %s: not decoded: kapow_json not importable (%s)"
+                                    % (_kind[1:], name, "; ".join(_KAPOW_JSON_ERROR))
+                                )
+                        except Exception as ex:
+                            _cnt[1] += _one
+                            log("      WARNING: %s %s: not decoded: %s" % (_kind[1:], name, ex))
+                    elif header and not (
+                        cls in _DECODED_CLASSES
+                        or cls.lower() in _DECODED_CLASSES
+                        or low.endswith(_DECODED_SUFFIXES)
+                    ):
+                        # a kind no step of the toolkit reads: kept raw, and counted
+                        _k = cls if cls and cls != "unknown" else "." + low.rsplit(".", 1)[-1]
+                        raw_only[_k] = raw_only.get(_k, 0) + (placed != "repeat")
+                # SFX / voice 'sound' assets keep their PCM INLINE in the header
+                # (stream is None) -> handle these before the stream-None skip below.
+                if not a.no_audio and cls == "sound":
+                    try:
+                        if kapow_block.BLOCK_ORDER == "<":
+                            r = audio_decode.decode_sfx(header)
+                            if r:
+                                wn = name if name.lower().endswith(".wav") else name + ".wav"
+                                si = sound_header.sfx_info(header) or {}
+                                loop = bool(si.get("looping"))
+                                audio_decode.write_wav(
+                                    r[0],
+                                    r[1],
+                                    r[2],
+                                    extract_paths.safe(a.out / "audio", wn),
+                                    a.smpl_loops and loop,
+                                )
+                                stats["aud"] += 1
+                                if si:
+                                    si.pop("_pe", None)
+                                    si["file"] = extract_paths.out_rel(a.out / "audio", wn)
+                                    sound_info[name.replace("\\", "/").lstrip("/")] = si
+                            else:
+                                sfx_failed.append(name)
+                                log(
+                                    "      WARNING: sfx %s: sound header not decoded; no audio written"
+                                    % name
+                                )
+                        else:
+                            si = audio_decode.decode_sfx_console(
+                                header,
+                                kapow_block.BLOCK_ORDER,
+                                name,
+                                a.out / "audio",
+                                a.vgmstream_cli,
+                                log,
+                                a.keep_xma,
+                            )
+                            if si:
+                                stats["aud"] += 1
+                                if isinstance(si, dict):
+                                    sound_info[name.replace("\\", "/").lstrip("/")] = si
+                            else:
+                                sfx_failed.append(name)
+                                log(
+                                    "      WARNING: sfx %s: sound header not decoded; no audio written"
+                                    % name
+                                )
+                    except Exception as ex:
+                        log("      ! sfx %s: %s" % (name, ex))
+                    continue
+                if cls in ("Texture", "Model", "ModelRes"):
+                    # a texture / model without stream data gets no PNG / OBJ: say so,
+                    # once per output name, unless a later block's copy brings the
+                    # stream (OutputNames: "fill")
+                    if stream:
+                        no_stream.pop(name, None)
+                    elif stream is not None and do_mdl and cls != "Texture":
+                        pass  # an empty stream record: decode_model names it with the reason
+                    elif placed != "repeat":
+                        if stream is None:
+                            why = "header only" + (
+                                "" if e.stream_note else ", not in any stream set"
+                            )
+                        else:
+                            why = "its stream record is empty (0 bytes)"
+                        no_stream[name] = (cls, why)
+                if stream is None:
+                    continue
+                if e.stream_file:
+                    from_sets[e.stream_file] = from_sets.get(e.stream_file, 0) + 1
+                if do_tex and cls == "Texture":
+                    if placed == "repeat":  # same bytes as an earlier block's copy
+                        rep.tex_repeats += 1
+                        continue
+                    try:
+                        if texture_carve.carve_texture(
+                            stream, header, extract_paths.safe(a.out / "textures", name), log
+                        ):
+                            stats["tex"] += 1
+                            texture_sheet.mark_stored_name(
+                                extract_paths.safe(a.out / "textures", name),
+                                name_run.stored_of(name),
+                            )
+                    except Exception as ex:
+                        log("      ! texture %s: %s" % (name, ex))
+                elif do_mdl and (cls in ("Model", "ModelRes") or ".modelres" in low):
+                    if placed == "repeat":
+                        rep.mdl_repeats += 1
+                        continue
+                    if name_run.stored_of(name):
+                        model_stored[extract_paths.safe(a.out / "models", name + ".obj")] = (
+                            name_run.stored_of(name)
+                        )
+                    model_jobs.append(
+                        (
+                            header,
+                            stream,
+                            extract_paths.safe(a.out / "models", name + ".obj"),
+                            kapow_block.BLOCK_ORDER,
+                            model_mesh.console_platform_of(stem) or run_platform,
+                        )
+                    )
+                elif not a.no_audio and (cls.lower() == "mediastream" or ".mediastream" in low):
+                    try:
+                        if audio_decode.decode_audio(
+                            stream, extract_paths.safe(a.out / "audio", name + ".ogg"), True, log
+                        ):
+                            stats["aud"] += 1
+                    except Exception as ex:
+                        log("      ! audio %s: %s" % (name, ex))
 
 
 def main(argv):
@@ -335,541 +850,48 @@ def _extract_main(argv):
         )
         model_export._RIG["on"] = False
     log = extract_log.extract_logger(a.quiet)
-    do_tex = not a.no_textures
-    do_mdl = not a.no_models
-    do_extract_all = not a.no_extract_all
-
-    entries = list(naz_archive.naz_entries(a.naz, warn=lambda m: log("  ! " + m)))
-    log("NAZ %s : %d entries -> %s" % (a.naz, len(entries), a.out))
-    # the console of a big-endian source, named by its derived root (the path of
-    # a loose tree, or the block paths inside the .naz); None on PC
-    run_platform = model_mesh.console_platform_of(a.naz)
-    for e in entries:
-        if run_platform:
-            break
-        run_platform = model_mesh.console_platform_of(e.name)
-    # the block plan: stem -> {"h": NazEntry, "s": NazEntry[, "standalone": True]}
-    # -- archive entries only; each half is read again (and inflated) when its
-    # block is processed and dropped after it, so the run never holds the archive
-    blocks = {}
-    console_audio = []  # (name, NazEntry) console mediastream_s, decoded post-blocks
-    pc_audio = []  # (name, NazEntry) PC mediastream_s, split per track post-blocks
-    media_meta = {}  # mediastream path (lower, no leading /) -> (ch, rate, samples)
-    media_desc = {}  # same key -> (descriptor asset name, media_desc_from_header)
-    music_frags = []  # (name, header, order) of fragments holding a MusicStreamSlot
-    sound_info = {}  # sound asset name -> header facts (audio/sound_info.json)
-    sfx_failed = []  # console sound assets no audio could be written for
-    stats = dict(files=0, tex=0, mdl=0, aud=0)
-    # --names: the canonical spelling of every output path, and what was respelled
-    name_run = extract_paths.names_module().begin()
-    # extracted/, textures/, models/ and audio/ spell every folder alike
-    extract_paths.names_module().share_folders(a.out)
-    names = extract_paths.OutputNames(
-        log, name_run
-    )  # one output per asset name (repeats, twins, variants)
-    model_stored = {}  # model output path -> the archive's spelling of a respelled name
-    text_writer = None
-    if not a.no_text:
-        try:
-            import text_assets as _ta
-
-            text_writer = _ta.TextWriter(a.out, log)
-        except Exception as ex:
-            log("note: text_assets not importable (%s) -> no text/" % ex)
-    no_stream = {}  # Texture / ModelRes name -> (class, why) left without stream data
-    misc = {}  # JSON kind (".font", ...) -> [assets, not fully decoded]
-    raw_only = {}  # class / suffix of assets no decoder of this command reads -> count
-    from_sets = {}  # stream-set file -> assets whose stream came from it
-
-    # pass 1, archive order: files/, the standalone audio streams, and the plan.
-    # An entry is read here only when its bytes are used here: for files/, or a
-    # standalone audio stream.  With --no-files the block halves and the standalone
-    # texture / model halves are planned from the directory alone (the block pass
-    # reads them), so the archive is read once, not twice.
-    for e in entries:
-        low = e.name.lower()
-        _audio = not a.no_audio and low.endswith(".mediastream_s")
-        if a.no_files and not _audio:
-            data = None  # planned from the directory; read when its block is processed
-        else:
-            try:
-                data = naz_archive.naz_read(a.naz, e)
-            except Exception as ex:
-                log("  ! %s: %s" % (e.name, ex))
-                continue
-        if data is not None and not a.no_files:
-            p = extract_paths.safe(a.out / "files", name_run.name(e.name))
-            p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_bytes(data)
-            stats["files"] += 1
-        # pair block halves; defer processing until both are known
-        if low.endswith(".block_h_z") or low.endswith(".block_s_z"):
-            stem = e.name[: -len("_h_z")] if low.endswith("_h_z") else e.name[: -len("_s_z")]
-            blocks.setdefault(stem, {})["h" if low.endswith("_h_z") else "s"] = e
-            continue
-        # standalone audio (PC = Vorbis packet container; console handled after
-        # the block pass so channel/rate metadata is available)
-        if not a.no_audio and low.endswith(".mediastream_s"):
-            try:
-                if not a.flat_music and audio_decode.audio_packets(data):
-                    pc_audio.append((e.name, e))  # needs the descriptors
-                elif audio_decode.decode_audio(
-                    data, extract_paths.safe(a.out / "audio", e.name + ".ogg"), True, log
-                ):
-                    stats["aud"] += 1
-                else:
-                    console_audio.append((e.name, e))
-            except Exception as ex:
-                log("      ! audio %s: %s" % (e.name, ex))
-            continue
-        # standalone texture / model (paired _h_z + _s_z handled via the block dict
-        # path above only for *.block_*; helper textures use *.texture_h_z etc.)
-        if low.endswith(".texture_h_z") or low.endswith(".modelres_h_z"):
-            blocks.setdefault(e.name[: -len("_h_z")], {})["h"] = e
-            blocks[e.name[: -len("_h_z")]]["standalone"] = True
-            continue
-        if low.endswith(".texture_s_z") or low.endswith(".modelres_s_z"):
-            blocks.setdefault(e.name[: -len("_s_z")], {})["s"] = e
-            blocks[e.name[: -len("_s_z")]]["standalone"] = True
-            continue
-    data = None  # pass 1 keeps no entry's bytes
-
-    def _half(hs, k):
-        """Bytes of half `k` ("h" / "s") of a planned block, read now: the
-        archive entry, inflated for a standalone file; None without that half."""
-        ent = hs.get(k)
-        if ent is None:
-            return None
-        raw = naz_archive.naz_read(a.naz, ent)
-        return kapow_block.inflate_standalone(raw) if hs.get("standalone") else raw
-
-    def _entry_bytes(ent):
-        """An audio entry of pass 1, read again for its post-block pass."""
-        return naz_archive.naz_read(a.naz, ent)
-
-    # process collected blocks + standalone pairs
-    # stream-only `.block_s_z` files (no header half): the stream sets of another
-    # block's header name them (Part 1 Prison: four rooms).  Read when a set
-    # first names them; the last few stay cached.
-    _stream_only = {k + "_s_z": v for k, v in blocks.items() if "h" not in v and "s" in v}
-    _stream_used = {}
-    _stream_cache = {}  # stream-only file -> bytes, at most _STREAM_CACHE of them
-
-    def _stream_file(path, _find=kapow_block.stream_file_lookup({k: k for k in _stream_only})):  # noqa: B008
-        key = _find(path)
-        if key is None:
-            return None
-        blob = _stream_cache.pop(key, None)
-        if blob is None:
-            try:
-                blob = _half(_stream_only[key], "s")
-            except Exception as ex:
-                log("  ! %s: %s" % (key, ex))
-                return None
-        _stream_cache[key] = blob  # most recently used last
-        while len(_stream_cache) > _STREAM_CACHE:
-            _stream_cache.pop(next(iter(_stream_cache)))
-        _stream_used[path] = _stream_used.get(path, 0) + 1
-        return blob
-
-    # (header, stream, out_path, order, platform) -- deferred until all textures
-    # are dumped; header and stream wait in a spool file under the output folder
-    model_jobs = ModelSpool(a.out)
+    run = ExtractRun(a, log)
+    run.plan()
     extract_log.push(log)
     try:
-        run = ExtractRun(
-            a=a,
-            log=log,
-            blocks=blocks,
-            half=_half,
-            entry_bytes=_entry_bytes,
-            stream_only=_stream_only,
-            stream_used=_stream_used,
-            stream_file=_stream_file,
-            model_jobs=model_jobs,
-            run_platform=run_platform,
-            console_audio=console_audio,
-            pc_audio=pc_audio,
-            media_meta=media_meta,
-            media_desc=media_desc,
-            music_frags=music_frags,
-            sound_info=sound_info,
-            sfx_failed=sfx_failed,
-            stats=stats,
-            name_run=name_run,
-            names=names,
-            model_stored=model_stored,
-            text_writer=text_writer,
-            no_stream=no_stream,
-            misc=misc,
-            raw_only=raw_only,
-            from_sets=from_sets,
-            do_tex=do_tex,
-            do_mdl=do_mdl,
-            do_extract_all=do_extract_all,
-        )
-        return _extract_blocks_and_rest(run)
+        run.blocks()
+        return _extract_after_blocks(run)
     finally:
         extract_log.pop()
-        model_jobs.close()
+        run.model_jobs.close()
 
 
-def _extract_blocks_and_rest(run):
-    """The block pass and everything after it (`extract`, see _extract_main) over
-    `run`, the state pass 1 left (ExtractRun).  Returns 1 when a block could not be
-    read or parsed (its assets are missing), else 0."""
+def _extract_after_blocks(run):
+    """Everything after the block pass (`extract`, see _extract_main) over `run`.
+    Returns 1 when a block could not be read or parsed (its assets are missing),
+    else 0."""
     a = run.a
     log = run.log
-    blocks = run.blocks
-    _half = run.half
-    _entry_bytes = run.entry_bytes
-    _stream_only = run.stream_only
-    _stream_used = run.stream_used
-    _stream_file = run.stream_file
+    blocks = run.block_plan.blocks
+    _entry_bytes = run.block_plan.entry_bytes
+    _stream_only = run.block_plan.stream_only
+    _stream_used = run.block_plan.stream_used
     model_jobs = run.model_jobs
-    run_platform = run.run_platform
-    console_audio = run.console_audio
-    pc_audio = run.pc_audio
-    media_meta = run.media_meta
-    media_desc = run.media_desc
-    music_frags = run.music_frags
-    sound_info = run.sound_info
-    sfx_failed = run.sfx_failed
-    stats = run.stats
+    console_audio = run.audio.console_audio
+    pc_audio = run.audio.pc_audio
+    media_meta = run.audio.media_meta
+    media_desc = run.audio.media_desc
+    music_frags = run.audio.music_frags
+    sound_info = run.audio.sound_info
+    sfx_failed = run.audio.sfx_failed
+    stats = run.report.stats
     name_run = run.name_run
     names = run.names
     model_stored = run.model_stored
     text_writer = run.text_writer
-    no_stream = run.no_stream
-    misc = run.misc
-    raw_only = run.raw_only
-    from_sets = run.from_sets
-    do_tex = run.do_tex
-    do_mdl = run.do_mdl
-    do_extract_all = run.do_extract_all
-    n_assets = 0
-    failed_blocks = []  # blocks whose halves did not read or whose parse failed
-    tex_repeats = mdl_repeats = 0
-    # blocks in a fixed order that does not depend on the letter case an archive
-    # stores their paths in (OutputNames: the first copy names the output)
-    for stem, hs in sorted(blocks.items(), key=lambda kv: (kv[0].lower(), kv[0])):
-        if "h" not in hs:
-            continue
-        if hs.get("standalone"):
-            low = stem.lower()
-            if hs.get("s") is None:
-                continue
-            try:
-                header, stream = _half(hs, "h"), _half(hs, "s")
-            except Exception as ex:
-                log("  ! %s: %s" % (stem, ex))
-                failed_blocks.append(stem)
-                continue
-            # same registry as the block assets; the folder names a differing copy
-            name, placed = extract_paths.standalone_output_name(names, stem, header, stream)
-            if placed == "repeat":
-                continue
-            if do_tex and ".texture" in low:
-                try:
-                    if texture_carve.carve_texture(
-                        stream, header, extract_paths.safe(a.out / "textures", name), log
-                    ):
-                        stats["tex"] += 1
-                        texture_sheet.mark_stored_name(
-                            extract_paths.safe(a.out / "textures", name), name_run.stored_of(name)
-                        )
-                except Exception as ex:
-                    log("      ! texture %s: %s" % (name, ex))
-            elif do_mdl and ".modelres" in low:
-                model_jobs.append(
-                    (
-                        header,
-                        stream,
-                        extract_paths.safe(a.out / "models", name + ".obj"),
-                        None,
-                        model_mesh.console_platform_of(stem) or run_platform,
-                    )
-                )
-            continue
-        # real block pair
-        if a.limit is not None and n_assets >= a.limit:
-            break  # --limit N: stop after N block assets
-        log("\nBLOCK %s" % stem)
-        try:
-            h_data, s_data = _half(hs, "h"), _half(hs, "s")
-        except Exception as ex:
-            log("  ! %s: %s" % (stem, ex))
-            failed_blocks.append(stem)
-            continue
-        if text_writer is not None:  # text assets, all six language slots
-            try:
-                text_writer.add_block(h_data, stem)
-            except Exception as ex:
-                log("  ! text assets: %s" % ex)
-        _args = (h_data, s_data, a.language) if a.language else (h_data, s_data)
-        try:
-            # check pass: the whole block parses and inflates (what does not inflate is
-            # reported here, before any asset of the block is written).  The
-            # assets are kept for the asset pass while they fit in BLOCK_CACHE_BYTES;
-            # a larger block is parsed again below -- holding a whole level's assets
-            # is what the memory would go on
-            _rep = lambda m: log("  ! " + m)
-            _kept, _size, _cap = [], 0, BLOCK_CACHE_BYTES
-            for _item in kapow_block.extract_block(*_args, report=_rep, stream_files=_stream_file):
-                if _kept is not None:
-                    _size += len(_item[1] or b"") + len(_item[2] or b"")
-                    if _size <= _cap:
-                        _kept.append(_item)
-                    else:
-                        _kept = None  # too big: the asset pass parses it again
-            _item = None
-        except Exception as ex:
-            log("  ! parse failed: %s" % ex)
-            failed_blocks.append(stem)
-            continue
-        # the assets one at a time (the same parse; its reports were logged above)
-        if _kept is not None:
-            it = iter(_kept)
-        else:
-            it = kapow_block.extract_block(*_args, report=None, stream_files=_stream_file)
-        _kept = None
-        h_data = s_data = _args = None  # the generator holds the block's bytes until done
-        for e, header, stream in it:
-            if a.limit is not None and n_assets >= a.limit:
-                break
-            n_assets += 1
-            # script classes ("ModelEffects(ModelRes)", "TextureEffects(Texture)")
-            # are read by their base class loader -> dispatch on the base name
-            cls = kapow_block.asset_base_class(
-                kapow_block.asset_class(header, kapow_block.BLOCK_ORDER)
-            )
-            # the name this copy is written under, and whether an earlier block
-            # already wrote the same bytes (OutputNames: "repeat")
-            name, placed = names.place(e.name, stem, header, stream)
-            low = name.lower()
-            # class-name compare is case-insensitive: the typename is spelled both
-            # "mediastream" and "MediaStream"; a case-sensitive miss here would leave
-            # media_meta empty (console XMA then wrapped with default 2ch/48000
-            # instead of the real channel/rate/sample values).
-            if not a.no_audio and cls.lower() == "mediastream":
-                try:
-                    mm = sound_header.media_meta_from_header(header, kapow_block.BLOCK_ORDER)
-                    if mm:
-                        media_meta[mm[0].lower().lstrip("/")] = mm[1:]
-                    md = sound_header.media_desc_from_header(header, kapow_block.BLOCK_ORDER)
-                    if md:
-                        media_desc[md["stream"].lower().lstrip("/")] = (name, md)
-                except (struct.error, ValueError, IndexError, KeyError) as ex:
-                    log(
-                        "      WARNING: music %s: stream description not read, channels and "
-                        "rate left to the stream (%s: %s)" % (name, type(ex).__name__, ex)
-                    )
-            if not a.no_audio and low.endswith(".fragment") and b"MusicStreamSlot" in header:
-                music_frags.append((name, header, kapow_block.BLOCK_ORDER))
-            # dump EVERY asset raw (header + optional stream) to extracted/ for offline
-            # analysis; a later copy with the same header and stream wrote the same files
-            # under the same name already (raw, JSON, the files beside it), so it is skipped
-            if do_extract_all and not (placed == "repeat" and names.same_bytes):
-                _ep = extract_paths.safe(a.out / "extracted", name)
-                _ep.parent.mkdir(parents=True, exist_ok=True)
-                _ep.write_bytes(header if header else b"")
-                if stream:
-                    (_ep.parent / (_ep.name + ".stream")).write_bytes(stream)
-                # human-readable JSON for property-bag / sequence / fragment assets
-                # (.fragment.json, .pb.json, .sequence.json, .particle.json, ...)
-                if header and low.endswith(
-                    (
-                        ".fragment",
-                        ".sequence",
-                        ".pb",
-                        ".particle",
-                        ".grass",
-                        ".detailmesh",
-                        ".terrain",
-                        ".scene",
-                        ".font",
-                        ".terraincoloringasset",
-                    )
-                ):
-                    _kind = "." + low.rsplit(".", 1)[-1]
-                    # counted once per output name (a later copy without the stream the
-                    # first one had is written again but is the same asset)
-                    _one = 1 if placed != "repeat" else 0
-                    _cnt = misc.setdefault(_kind, [0, 0])
-                    _cnt[0] += _one
-                    try:
-                        kj = _kapow_json()
-                        d = None
-                        if kj:
-                            _lines = []
-                            if low.endswith(kj.EXPORT_EXTS):
-                                # font / scene / terrain / terrain colouring / detail mesh:
-                                # JSON plus the atlas, maps and terrain GLB beside the asset;
-                                # what is not decoded comes back as log lines
-                                d, _lines = kj.export(
-                                    name,
-                                    header,
-                                    stream,
-                                    str(_ep),
-                                    kapow_block.BLOCK_ORDER,
-                                    glb=bool(a.glb),
-                                )
-                            else:
-                                d = kj.to_json(low, header, order=kapow_block.BLOCK_ORDER)
-                            if d and low.endswith(".fragment"):
-                                # never silent: a fragment not decoded exactly, or
-                                # with values typed by guess, is named in the log
-                                import kapow_fragment as _kfr
-
-                                _lines = _kfr.notes(name, d)
-                            _why = kj.undecoded(d)
-                            if _why:
-                                # one line per asset that is not decoded completely; the
-                                # same fact is a marker in its JSON (kapow_json.undecoded)
-                                _cnt[1] += _one
-                                if not any(_l.startswith("WARNING:") for _l in _lines):
-                                    _lines = list(_lines) + [
-                                        "WARNING: %s %s: not decoded completely: %s"
-                                        % (_kind[1:], name, _why)
-                                    ]
-                            for _ln in _lines:
-                                log("      " + _ln)
-                            if d:
-                                import f32json as _f32j
-
-                                with open(
-                                    _ep.parent / (_ep.name + ".json"),
-                                    "w",
-                                    encoding="utf-8",
-                                    newline="\n",
-                                ) as _f:
-                                    # exact mode: a NaN or an infinity is null
-                                    _f.write(_f32j.dumps(d, indent=1))
-                        else:
-                            _cnt[1] += _one
-                            log(
-                                "      WARNING: %s %s: not decoded: kapow_json not importable (%s)"
-                                % (_kind[1:], name, "; ".join(_KAPOW_JSON_ERROR))
-                            )
-                    except Exception as ex:
-                        _cnt[1] += _one
-                        log("      WARNING: %s %s: not decoded: %s" % (_kind[1:], name, ex))
-                elif header and not (
-                    cls in _DECODED_CLASSES
-                    or cls.lower() in _DECODED_CLASSES
-                    or low.endswith(_DECODED_SUFFIXES)
-                ):
-                    # a kind no step of the toolkit reads: kept raw, and counted
-                    _k = cls if cls and cls != "unknown" else "." + low.rsplit(".", 1)[-1]
-                    raw_only[_k] = raw_only.get(_k, 0) + (placed != "repeat")
-            # SFX / voice 'sound' assets keep their PCM INLINE in the header
-            # (stream is None) -> handle these before the stream-None skip below.
-            if not a.no_audio and cls == "sound":
-                try:
-                    if kapow_block.BLOCK_ORDER == "<":
-                        r = audio_decode.decode_sfx(header)
-                        if r:
-                            wn = name if name.lower().endswith(".wav") else name + ".wav"
-                            si = sound_header.sfx_info(header) or {}
-                            loop = bool(si.get("looping"))
-                            audio_decode.write_wav(
-                                r[0],
-                                r[1],
-                                r[2],
-                                extract_paths.safe(a.out / "audio", wn),
-                                a.smpl_loops and loop,
-                            )
-                            stats["aud"] += 1
-                            if si:
-                                si.pop("_pe", None)
-                                si["file"] = extract_paths.out_rel(a.out / "audio", wn)
-                                sound_info[name.replace("\\", "/").lstrip("/")] = si
-                        else:
-                            sfx_failed.append(name)
-                            log(
-                                "      WARNING: sfx %s: sound header not decoded; no audio written"
-                                % name
-                            )
-                    else:
-                        si = audio_decode.decode_sfx_console(
-                            header,
-                            kapow_block.BLOCK_ORDER,
-                            name,
-                            a.out / "audio",
-                            a.vgmstream_cli,
-                            log,
-                            a.keep_xma,
-                        )
-                        if si:
-                            stats["aud"] += 1
-                            if isinstance(si, dict):
-                                sound_info[name.replace("\\", "/").lstrip("/")] = si
-                        else:
-                            sfx_failed.append(name)
-                            log(
-                                "      WARNING: sfx %s: sound header not decoded; no audio written"
-                                % name
-                            )
-                except Exception as ex:
-                    log("      ! sfx %s: %s" % (name, ex))
-                continue
-            if cls in ("Texture", "Model", "ModelRes"):
-                # a texture / model without stream data gets no PNG / OBJ: say so,
-                # once per output name, unless a later block's copy brings the
-                # stream (OutputNames: "fill")
-                if stream:
-                    no_stream.pop(name, None)
-                elif stream is not None and do_mdl and cls != "Texture":
-                    pass  # an empty stream record: decode_model names it with the reason
-                elif placed != "repeat":
-                    if stream is None:
-                        why = "header only" + ("" if e.stream_note else ", not in any stream set")
-                    else:
-                        why = "its stream record is empty (0 bytes)"
-                    no_stream[name] = (cls, why)
-            if stream is None:
-                continue
-            if e.stream_file:
-                from_sets[e.stream_file] = from_sets.get(e.stream_file, 0) + 1
-            if do_tex and cls == "Texture":
-                if placed == "repeat":  # same bytes as an earlier block's copy
-                    tex_repeats += 1
-                    continue
-                try:
-                    if texture_carve.carve_texture(
-                        stream, header, extract_paths.safe(a.out / "textures", name), log
-                    ):
-                        stats["tex"] += 1
-                        texture_sheet.mark_stored_name(
-                            extract_paths.safe(a.out / "textures", name), name_run.stored_of(name)
-                        )
-                except Exception as ex:
-                    log("      ! texture %s: %s" % (name, ex))
-            elif do_mdl and (cls in ("Model", "ModelRes") or ".modelres" in low):
-                if placed == "repeat":
-                    mdl_repeats += 1
-                    continue
-                if name_run.stored_of(name):
-                    model_stored[extract_paths.safe(a.out / "models", name + ".obj")] = (
-                        name_run.stored_of(name)
-                    )
-                model_jobs.append(
-                    (
-                        header,
-                        stream,
-                        extract_paths.safe(a.out / "models", name + ".obj"),
-                        kapow_block.BLOCK_ORDER,
-                        model_mesh.console_platform_of(stem) or run_platform,
-                    )
-                )
-            elif not a.no_audio and (cls.lower() == "mediastream" or ".mediastream" in low):
-                try:
-                    if audio_decode.decode_audio(
-                        stream, extract_paths.safe(a.out / "audio", name + ".ogg"), True, log
-                    ):
-                        stats["aud"] += 1
-                except Exception as ex:
-                    log("      ! audio %s: %s" % (name, ex))
+    no_stream = run.report.no_stream
+    misc = run.report.misc
+    raw_only = run.report.raw_only
+    from_sets = run.report.from_sets
+    n_assets = run.report.n_assets
+    failed_blocks = run.report.failed_blocks
+    tex_repeats = run.report.tex_repeats
+    mdl_repeats = run.report.mdl_repeats
 
     if from_sets or _stream_only:
         log("\nSTREAM SETS: %d stream-only block file(s)" % len(_stream_only))

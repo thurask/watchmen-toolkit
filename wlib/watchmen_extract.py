@@ -414,7 +414,6 @@ _HOMES = {
     "ModelSpool": ("extract_driver", "ModelSpool"),
     "main": ("extract_driver", "main"),
     "_extract_main": ("extract_driver", "_extract_main"),
-    "_extract_blocks_and_rest": ("extract_driver", "_extract_blocks_and_rest"),
 }
 
 
