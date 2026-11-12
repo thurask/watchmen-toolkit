@@ -106,6 +106,18 @@
   the `error:` line of `watchmen.py` prints the message only. Argument and environment errors
   (`WATCHMEN_MAX_INFLATE`, a language slot, a model LOD) stay plain `ValueError`. `pc_p2`
   byte-identical to the 1.7.0 export, `_extract_done.txt` excluded (measured). (2026-11-11)
+- **One reader of the texture descriptor and the Texture header.**
+  `texture_header.read_texture_header` reads the header on `ByteReader` and raises
+  `TextureHeaderError` where it does not read; `parse_texture_frames` returns its result, or
+  `None` where it raises, as before (a test holds the two to a struct-based reading of the
+  layout on cut and mutated headers). `read_descriptor` / `pack_descriptor` read and write the
+  29-byte descriptor, `descriptor_ok` is the loaders' range test, `layer_bytes` the stored
+  length of a layer by platform (PC mip chain, Xbox 360 stored size, PS3 RSX descriptor and
+  chain), and `texture_decode.layer_image` its top mip on any platform. `ByteReader` takes the
+  error class to raise (`ByteReader(data, order, TextureHeaderError)`). On the six sets the
+  reader gives the same result as before on all 6,441 carved Texture headers, and `pc_p2`,
+  `ps3_p2`, `x360_p2` and `pc_p1` are byte-identical to the 1.7.0 export, `_extract_done.txt`
+  excluded (measured). (2026-11-12)
 
 ## 1.7.0 — 2026-11-11
 

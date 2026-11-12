@@ -13,14 +13,15 @@ class ReadError(ValueError):
 
 
 class ByteReader:
-    """Bounds-checked sequential reader (raises ReadError past the end)."""
+    """Bounds-checked sequential reader.  A read that does not fit raises `error`
+    (ReadError, or the typed error of the module that reads)."""
 
-    def __init__(s, b, order="<"):
-        s.b, s.p, s.o = b, 0, order
+    def __init__(s, b, order="<", error=ReadError):
+        s.b, s.p, s.o, s.err = b, 0, order, error
 
     def _need(s, n):
         if n < 0 or s.p + n > len(s.b):
-            raise ReadError("read past end")
+            raise s.err("read past end")
 
     def u32(s):
         s._need(4)
@@ -37,7 +38,7 @@ class ByteReader:
     def boolean(s):
         v = s.u8()
         if v > 1:
-            raise ReadError("bool %d" % v)
+            raise s.err("bool %d" % v)
         return v
 
     def floats(s, n):
@@ -54,13 +55,13 @@ class ByteReader:
         """u32 element count, rejected when the elements cannot fit."""
         n = s.u32()
         if n * item_bytes > len(s.b) - s.p:
-            raise ReadError("count %d" % n)
+            raise s.err("count %d" % n)
         return n
 
     def string(s):
         n = s.count()
         if n > 65536:  # merged-mesh names run to a few KB (TwilightMansion_Attic)
-            raise ReadError("string %d" % n)
+            raise s.err("string %d" % n)
         v = s.b[s.p : s.p + n]
         s.p += n
         return v.split(b"\0", 1)[0].decode("latin1")

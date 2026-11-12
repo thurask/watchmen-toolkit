@@ -3,7 +3,8 @@ decoders (`decode_dxt_base`, `decode_bc5_base`, `ati2_xy`, `normal_to_png`),
 one stored layer to an image (`decode_one_layer`), and the console layouts:
 Xbox 360 tiling and 16-bit byte swap (`xg2d_offset`, `bswap16`,
 `x360_layer_bytes`, `x360_base_level`) and the PS3 per-layer segments and
-swizzle (`ps3_segments`, `rsx_unswizzle`, `ps3_layer_image`).
+swizzle (`ps3_segments`, `rsx_unswizzle`, `ps3_layer_image`); the top mip of
+one layer named by its descriptor on any platform (`layer_image`).
 """
 
 import io
@@ -540,3 +541,21 @@ def ps3_layer_image(data, lay, normal):
         if unit == 4:  # 32bpp: BE ARGB -> PC BGRA
             data = _texel32_to_pc(data, "ps3")
     return decode_one_layer(data, lay["enum"], lay["aw"], lay["ah"], normal=normal)
+
+
+def layer_image(desc, data, order):
+    """Top mip of the one layer of a texture descriptor (texture_header.
+    read_descriptor) as an image array, or None for a format enum without a
+    decoder, a type other than 2D, or data the decoder cannot use.  `data`
+    starts at the layer: PC (order '<') the mip chain, linear rows padded to 4
+    bytes; Xbox 360 (big-endian, descriptor `size` set) the tiled, 16-bit
+    swapped chain; PS3 (big-endian, `size` 0) the 36-byte RSX descriptor and
+    the chain (texture_header.layer_bytes gives the stored length)."""
+    en, w, h = desc["enum"], desc["width"], desc["height"]
+    if en not in texture_header.TEX_FMT or desc["type"] != 1:
+        return None
+    if order == "<":
+        return decode_one_layer(unpad_linear(data, en, w, h), en, w, h)
+    if desc["size"]:
+        return x360_base_level(data, en, w, h)
+    return ps3_layer_image(data[36:], {"enum": en, "aw": w, "ah": h}, False)

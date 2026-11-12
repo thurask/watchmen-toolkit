@@ -142,25 +142,15 @@ def _parse_texture_anim_tail(hdr, p, order="<"):
     "sub_cycles": [Cycle]}.  A step that is not a sub-cycle plays item `index`: a
     random frame in [frame_min, frame_max] for a random time in [time_min_ms,
     time_max_ms] ms (0x52929b, 0x5292bb).  The name `id` is inferred (the code
-    only stores it).  Raises TextureHeaderError / struct.error when it does not read."""
-
-    def u32():
-        nonlocal p
-        (v,) = struct.unpack_from(order + "I", hdr, p)
-        p += 4
-        return v
-
-    def count(item):
-        n = u32()
-        if n * item > len(hdr) - p:
-            raise TextureHeaderError("count %d" % n)
-        return n
+    only stores it).  Raises TextureHeaderError when it does not read."""
+    r = byte_reader.ByteReader(hdr, order, TextureHeaderError)
+    r.p = p
 
     def cycle(depth):
         if depth > 8:
             raise TextureHeaderError("cycle depth")
-        c = {"head": [u32(), u32(), u32()]}
-        c["steps"] = [{"sub_cycle": bool(u32()), "index": u32()} for _ in range(count(8))]
+        c = {"head": [r.u32(), r.u32(), r.u32()]}
+        c["steps"] = [{"sub_cycle": bool(r.u32()), "index": r.u32()} for _ in range(r.count(8))]
         c["items"] = [
             dict(
                 zip(
@@ -169,13 +159,13 @@ def _parse_texture_anim_tail(hdr, p, order="<"):
                     strict=True,
                 )
             )
-            for vals in ([u32() for _ in range(5)] for _ in range(count(20)))
+            for vals in ([r.u32() for _ in range(5)] for _ in range(r.count(20)))
         ]
-        c["sub_cycles"] = [cycle(depth + 1) for _ in range(count(20))]
+        c["sub_cycles"] = [cycle(depth + 1) for _ in range(r.count(20))]
         return c
 
-    serial = u32()
-    return {"serial": serial, "cycle": cycle(0)}, p
+    serial = r.u32()
+    return {"serial": serial, "cycle": cycle(0)}, r.p
 
 
 def texture_frame_ms(anim_tail, frames):
@@ -209,8 +199,81 @@ def chain_bytes_exact(en, w, h, mip):
     return total
 
 
-def parse_texture_frames(hdr, order="<"):
-    """ENGINE-EXACT Texture header (FUN_005382aa / FUN_00429e77), or None.
+def read_descriptor(data, offset=0, order="<"):
+    """The 29-byte texture descriptor at `offset` (FUN_00429e77): u32 width,
+    height, format enum, usage, type; u8 alpha; u32 mips, size -> dict with
+    those names (`alpha` the raw byte).  `usage` is TextureBuffer +0x10
+    (0x456d46).  `size` is 0 on PC and PS3; on Xbox 360 the stored byte size of
+    the layer (all mips; all six faces of a cube).  Read in every Texture
+    header frame slot, in `.font` assets and in `.terraincoloringasset`
+    headers.  Raises TextureHeaderError when the record runs past the data."""
+    if offset < 0 or offset + _TEX_DESC > len(data):
+        raise TextureHeaderError(
+            "texture descriptor at %d runs past %d bytes" % (offset, len(data))
+        )
+    w, h, en, usage, typ, alpha, mips, size = struct.unpack_from(order + "5IBII", data, offset)
+    return {
+        "width": w,
+        "height": h,
+        "enum": en,
+        "usage": usage,
+        "type": typ,
+        "alpha": alpha,
+        "mips": mips,
+        "size": size,
+    }
+
+
+def pack_descriptor(d, order="<"):
+    """The 29 bytes of a read_descriptor() dict (`alpha` a bool or the byte)."""
+    return struct.pack(
+        order + "5IBII",
+        d["width"],
+        d["height"],
+        d["enum"],
+        d["usage"],
+        d["type"],
+        int(d["alpha"]),
+        d["mips"],
+        d["size"],
+    )
+
+
+def descriptor_ok(d):
+    """A descriptor the loaders accept: 1..8192 texels each way, type 1 (2D) or 2
+    (cube), alpha 0 or 1, 1..14 mips.  The format enum is the caller's test."""
+    return (
+        0 < d["width"] <= 8192
+        and 0 < d["height"] <= 8192
+        and d["type"] in (1, 2)
+        and d["alpha"] <= 1
+        and 1 <= d["mips"] <= 14
+    )
+
+
+def layer_bytes(desc, order, data, offset=0):
+    """Stored bytes of the one layer of `desc` that starts at data[offset]: PC
+    (order '<') the full mip chain, linear rows padded to 4 bytes
+    (chain_bytes_exact); Xbox 360 (big-endian, `size` set) the descriptor's
+    `size`; PS3 (big-endian, `size` 0) a 36-byte RSX descriptor whose u32 at +8
+    is the byte count of the chain that follows, plus those bytes.  Raises
+    TextureHeaderError for a PC format enum without a size rule or a PS3 RSX
+    descriptor past the data."""
+    if order == "<":
+        if desc["enum"] not in TEX_FMT:
+            raise TextureHeaderError("texture format id %d" % desc["enum"])
+        return chain_bytes_exact(desc["enum"], desc["width"], desc["height"], desc["mips"])
+    if desc["size"]:
+        return desc["size"]
+    if offset + 36 > len(data):
+        raise TextureHeaderError("truncated RSX descriptor")
+    (n,) = struct.unpack_from(">I", data, offset + 8)
+    return 36 + n
+
+
+def read_texture_header(hdr, order="<"):
+    """ENGINE-EXACT Texture header (FUN_005382aa / FUN_00429e77) on ByteReader;
+    TextureHeaderError when `hdr` does not read as one.
     order '<' PC / '>' X360 + PS3: the same fields, big-endian (all 937 + 1,190
     headers of each console set parse to the end of the source path).
 
@@ -225,61 +288,55 @@ def parse_texture_frames(hdr, order="<"):
     byte size of the layer (all mips; all six faces of a cube) -- the sizes of a
     header add up to the stream length on 937/937 and 1,190/1,190 textures."""
     if not is_texture_header(hdr, order):
-        return None
+        raise TextureHeaderError("not a Texture header")
     enums = TEX_ENUMS if order == "<" else TEX_FMT
-    try:
-        (tlen,) = struct.unpack_from(order + "I", hdr, 0)
-        (nd,) = struct.unpack_from(order + "I", hdr, 4 + tlen)
-        p = 4 + tlen + 4 + 4 * nd  # FUN_00511f96: bag = nd dwords
-        (nf,) = struct.unpack_from(order + "I", hdr, p)
-        anim = hdr[p + 4]
-        p += 5
-        if not 1 <= nf <= 1024 or anim > 1:
-            return None
-        frames = []
-        for _ in range(nf):
-            slots = []
-            for k in range(TEXTURE_SLOTS):
-                if k:
-                    present = hdr[p]
-                    p += 1
-                    if present > 1:
-                        return None
-                    if not present:
-                        slots.append(None)
-                        continue
-                w, h, en, usage, typ, alpha, mip, size = struct.unpack_from(order + "5IBII", hdr, p)
-                p += _TEX_DESC
-                if en not in enums or typ not in (1, 2) or alpha > 1:
-                    return None
-                if not (0 < w <= 8192 and 0 < h <= 8192 and 1 <= mip <= 14):
-                    return None
-                slots.append(
-                    {
-                        "slot": k,
-                        "enum": en,
-                        "fmt": TEX_FMT[en][0],
-                        "aw": w,
-                        "ah": h,
-                        "mip": mip,
-                        "type": typ,
-                        "alpha": bool(alpha),
-                        "usage": usage,
-                        # slot 7 is the record the stride walk reaches through
-                        # a 4-byte "drift" (four absent-slot bytes): the specSize map
-                        "drift": k == 7,
-                        "chain": chain_bytes_exact(en, w, h, mip),
-                        "size": size,
-                    }
-                )
-            (sl,) = struct.unpack_from(order + "I", hdr, p)
-            if sl > 1024 or p + 4 + sl > len(hdr):
-                return None
-            path = hdr[p + 4 : p + 4 + sl].split(b"\0", 1)[0].decode("latin1")
-            p += 4 + sl
-            frames.append({"slots": slots, "path": path})
-    except (struct.error, IndexError):
-        return None
+    r = byte_reader.ByteReader(hdr, order, TextureHeaderError)
+    r.skip(r.u32())  # type name
+    r.skip(4 * r.u32())  # FUN_00511f96: bag = nd dwords
+    nf = r.u32()
+    anim = r.u8()
+    if not 1 <= nf <= 1024 or anim > 1:
+        raise TextureHeaderError("%d frames, hasAnim %d" % (nf, anim))
+    frames = []
+    for _ in range(nf):
+        slots = []
+        for k in range(TEXTURE_SLOTS):
+            if k:
+                present = r.u8()
+                if present > 1:
+                    raise TextureHeaderError("slot %d: present byte %d" % (k, present))
+                if not present:
+                    slots.append(None)
+                    continue
+            d = read_descriptor(hdr, r.p, order)
+            r.skip(_TEX_DESC)
+            if d["enum"] not in enums or not descriptor_ok(d):
+                raise TextureHeaderError("slot %d: descriptor %r" % (k, d))
+            slots.append(
+                {
+                    "slot": k,
+                    "enum": d["enum"],
+                    "fmt": TEX_FMT[d["enum"]][0],
+                    "aw": d["width"],
+                    "ah": d["height"],
+                    "mip": d["mips"],
+                    "type": d["type"],
+                    "alpha": bool(d["alpha"]),
+                    "usage": d["usage"],
+                    # slot 7 is the record the stride walk reaches through
+                    # a 4-byte "drift" (four absent-slot bytes): the specSize map
+                    "drift": k == 7,
+                    "chain": chain_bytes_exact(d["enum"], d["width"], d["height"], d["mips"]),
+                    "size": d["size"],
+                }
+            )
+        sl = r.u32()
+        if sl > 1024 or r.p + sl > len(hdr):
+            raise TextureHeaderError("source path of %d bytes" % sl)
+        path = hdr[r.p : r.p + sl].split(b"\0", 1)[0].decode("latin1")
+        r.p += sl
+        frames.append({"slots": slots, "path": path})
+    p = r.p
     tail = None
     if anim:
         try:
@@ -287,6 +344,14 @@ def parse_texture_frames(hdr, order="<"):
         except (struct.error, ValueError, RecursionError):
             tail = None  # the frames stand; the block is reported as not read
     return {"frames": frames, "anim": bool(anim), "anim_tail": tail, "end": p}
+
+
+def parse_texture_frames(hdr, order="<"):
+    """read_texture_header(hdr, order), or None when it raises TextureHeaderError."""
+    try:
+        return read_texture_header(hdr, order)
+    except TextureHeaderError:
+        return None
 
 
 def _exact_texture_plan(hdr, stream_len):
