@@ -37,6 +37,7 @@ HOMES = {
     "model_mesh",
     "obj_mtl",
     "model_export",
+    "sound_header",
 }
 
 
