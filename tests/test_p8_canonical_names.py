@@ -289,7 +289,16 @@ def writers(monkeypatch):
         return True
 
     def decode(
-        header, stream, out_path, tex_index=None, log=None, order=None, lod=0, glb=None, **kw
+        header,
+        stream,
+        out_path,
+        tex_index=None,
+        log=None,
+        order=None,
+        lod=0,
+        status=None,
+        glb=None,
+        **kw,
     ):
         seen["mdl"][out_path.name] = kw
         out_path.parent.mkdir(parents=True, exist_ok=True)

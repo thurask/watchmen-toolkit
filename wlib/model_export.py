@@ -324,6 +324,7 @@ def _model_skipped(log, out_path, reason):
 
 
 #: what the last decode_model call recorded when it was given no `status` dict
+#: (the extract driver passes its own)
 MODEL_STATUS = {}
 
 

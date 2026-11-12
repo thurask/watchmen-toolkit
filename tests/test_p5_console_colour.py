@@ -131,18 +131,18 @@ def test_part1_layout_means_xbox_360_when_nothing_else_decides():
 def test_model_sidecar_and_log_carry_no_marker_once_the_console_is_known(tmp_path, monkeypatch):
     monkeypatch.setattr(we, "write_obj_mtl", lambda *a: None)
     h, s = open_model("ps3")
-    logs = []
-    assert we.decode_model(h, s, tmp_path / "a.obj", log=lambda *a: logs.append(a[0])) is True
+    logs, st = [], {}
+    assert we.decode_model(h, s, tmp_path / "a.obj", log=lambda *a: logs.append(a[0]), status=st)
     meta = json.loads((tmp_path / "a.model.json").read_text())
     assert meta["not_decoded"] == ["COLOR_0"] and "WATCHMEN_CONSOLE" in meta["not_decoded_note"]
     assert sum("vertex colours not decoded" in l for l in logs) == 1
-    assert we.MODEL_STATUS["color_not_decoded"] is True
+    assert st["color_not_decoded"] is True
     we.set_console_platform("ps3")
-    logs = []
-    assert we.decode_model(h, s, tmp_path / "b.obj", log=lambda *a: logs.append(a[0])) is True
+    logs, st = [], {}
+    assert we.decode_model(h, s, tmp_path / "b.obj", log=lambda *a: logs.append(a[0]), status=st)
     meta = json.loads((tmp_path / "b.model.json").read_text())
     assert "not_decoded" not in meta and not any("note:" in l for l in logs)
-    assert we.MODEL_STATUS["color_not_decoded"] is False
+    assert st["color_not_decoded"] is False
 
 
 @pytest.mark.parametrize("console", ["x360", "ps3"])
@@ -250,7 +250,9 @@ def test_extract_passes_the_block_path_console_to_every_model(tmp_path, monkeypa
     (files / "derived_pc").rename(files / "derived_ps3")
     seen = []
 
-    def decode(header, stream, out_path, tex_index=None, log=None, order=None, lod=0, glb=None):
+    def decode(
+        header, stream, out_path, tex_index=None, log=None, order=None, lod=0, status=None, glb=None
+    ):
         seen.append(we.console_platform())
         return True
 

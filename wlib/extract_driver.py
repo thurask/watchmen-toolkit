@@ -1070,8 +1070,7 @@ class ExtractRun:
         _platform_before = model_mesh.CONSOLE_PLATFORM
         for header, stream, out_path, mo, mplat in model_jobs:
             try:
-                _st = model_export.MODEL_STATUS
-                _st.clear()
+                _st = {}  # what decode_model records about this model
                 model_mesh.set_console_platform(mplat)
                 # stored_name only for a respelled model (--names canonical)
                 _kw = {"stored_name": model_stored[out_path]} if out_path in model_stored else {}
@@ -1083,6 +1082,7 @@ class ExtractRun:
                     log,
                     order=mo,
                     lod=model_lod,
+                    status=_st,
                     glb=opts.model_glb,
                     **_kw,
                 ):

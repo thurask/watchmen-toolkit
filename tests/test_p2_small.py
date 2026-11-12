@@ -157,10 +157,22 @@ def recorded(monkeypatch):
         (out_dir / "0.png").write_bytes(stream)
         return True
 
-    def decode(header, stream, out_path, tex_index=None, log=None, order=None, lod=0, glb=None):
+    def decode(
+        header, stream, out_path, tex_index=None, log=None, order=None, lod=0, status=None, glb=None
+    ):
         calls["mdl"].append(out_path.name)
         if not stream:
-            return real(header, stream, out_path, tex_index, log, order=order, lod=lod, glb=glb)
+            return real(
+                header,
+                stream,
+                out_path,
+                tex_index,
+                log,
+                order=order,
+                lod=lod,
+                status=status,
+                glb=glb,
+            )
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_bytes(out_path.stem.encode() + b"|" + stream)
         return True

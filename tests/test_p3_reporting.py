@@ -184,11 +184,23 @@ def test_extract_summary_counts_models_without_glb(tmp_path, monkeypatch, capsys
     files = ps._two_block_tree(tmp_path)
     real = wx.decode_model
 
-    def decode(header, stream, out_path, tex_index=None, log=None, order=None, lod=0, glb=None):
+    def decode(
+        header, stream, out_path, tex_index=None, log=None, order=None, lod=0, status=None, glb=None
+    ):
         if not stream:
-            return real(header, stream, out_path, tex_index, log, order=order, lod=lod, glb=glb)
+            return real(
+                header,
+                stream,
+                out_path,
+                tex_index,
+                log,
+                order=order,
+                lod=lod,
+                status=status,
+                glb=glb,
+            )
         rock = out_path.name.startswith("Rock")
-        wx.MODEL_STATUS.update(
+        status.update(
             glb=not rock,
             glb_reason="the mesh came from the descriptor scan" if rock else None,
             color_not_decoded=out_path.name == "Rock.model.obj",
