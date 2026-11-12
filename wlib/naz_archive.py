@@ -8,7 +8,22 @@ at a time (`block_plan`, `iter_blocks`).
 
 import os
 import struct
+import sys
 import zlib
+
+# the flat wlib modules import each other by name (`import kapow_props`); one path
+# setup for this module, also when it is run as a script or loaded by file path.
+# Append, never insert(0): flat module names must not shadow the stdlib.
+_WLIB = os.path.dirname(os.path.abspath(__file__))
+if _WLIB not in sys.path:
+    sys.path.append(_WLIB)
+import byte_reader  # noqa: E402
+
+
+class ArchiveError(byte_reader.ReadError):
+    """An archive or one of its entries that does not read: not a `.naz`, a bad
+    central-directory record, an unknown compression method, an entry that does
+    not inflate to its stated size, a blob past the inflate ceiling."""
 
 
 NAZ_HEAD = 0x16ED5B50  # EOCD magic (vs ZIP 0x06054B50)
@@ -110,13 +125,13 @@ def naz_entries(path, warn=None):
         f.seek(0, os.SEEK_END)
         fsize = f.tell()
         if fsize < _EOCD:
-            ex = ValueError("not a NAZ archive (%d bytes, shorter than the EOCD record)" % fsize)
+            ex = ArchiveError("not a NAZ archive (%d bytes, shorter than the EOCD record)" % fsize)
             ex.add_note("archive %s" % (path,))
             raise ex
         f.seek(fsize - _EOCD)
         magic, _dk, _dkc, _di, titem, _ds, doffs, _cs = struct.unpack(_EOCD_FMT, f.read(_EOCD))
         if magic != NAZ_HEAD:
-            ex = ValueError("not a NAZ archive (EOCD magic 0x%08X)" % magic)
+            ex = ArchiveError("not a NAZ archive (EOCD magic 0x%08X)" % magic)
             ex.add_note(
                 "archive %s: EOCD record at 0x%X of %d bytes" % (path, fsize - _EOCD, fsize)
             )
@@ -146,7 +161,7 @@ def naz_entries(path, warn=None):
                     compr,
                 ) = rec
                 if cmagic != NAZ_LIST:
-                    raise ValueError("bad central-dir magic at 0x%X" % cur)
+                    raise ArchiveError("bad central-dir magic at 0x%X" % cur)
                 f.seek(cur + _CD)
                 name = _decrypt_name(f.read(nsize))
             except (struct.error, ValueError) as ex:
@@ -167,7 +182,7 @@ def naz_entries(path, warn=None):
 
 #: ceiling on the inflated size of one zlib blob (an archive entry, a block
 #: asset's header or stream, a standalone `_h_z` / `_s_z` file); a blob that
-#: inflates past it is refused with ValueError instead of filling the memory
+#: inflates past it is refused with ArchiveError instead of filling the memory
 #: (a decompression bomb).  The largest blob of the shipped archives inflates to
 #: MAX_INFLATE_MEASURED bytes; $WATCHMEN_MAX_INFLATE (bytes) overrides the
 #: ceiling.
@@ -192,7 +207,7 @@ def max_inflate():
 def inflate(blob, wbits=zlib.MAX_WBITS, limit=None):
     """zlib.decompress(blob, wbits) with a size ceiling: the same bytes, or the
     same zlib.error, for a blob that inflates to at most `limit` bytes (default
-    max_inflate()); ValueError for one that inflates past it -- decided after
+    max_inflate()); ArchiveError for one that inflates past it -- decided after
     inflating at most limit + 1 bytes, so the memory stays bounded."""
     cap = max_inflate() if limit is None else limit
     d = zlib.decompressobj(wbits)
@@ -204,7 +219,7 @@ def inflate(blob, wbits=zlib.MAX_WBITS, limit=None):
         # stream may still be pending in the unconsumed input)
         more = d.decompress(d.unconsumed_tail, 1)
         if more:
-            raise ValueError(
+            raise ArchiveError(
                 "zlib blob inflates past %d bytes (the inflate ceiling, "
                 "$WATCHMEN_MAX_INFLATE)" % cap
             )
@@ -228,7 +243,7 @@ def naz_read(path, e):
                 return raw
             case 8:
                 return _naz_inflate(e, raw)
-        raise ValueError("unsupported compression %d for %s" % (e.compr, e.name))
+        raise ArchiveError("unsupported compression %d for %s" % (e.compr, e.name))
     except (zlib.error, ValueError) as ex:
         ex.add_note(
             "archive %s: entry %s, %d bytes stored at 0x%X, method %d, %d bytes inflated"
@@ -243,7 +258,7 @@ def _naz_inflate(e, raw):
     the output (and must not pass the inflate ceiling)."""
     cap = max_inflate()
     if e.usize > cap:
-        raise ValueError(
+        raise ArchiveError(
             "%s: the archive says it inflates to %d bytes, past the "
             "inflate ceiling %d ($WATCHMEN_MAX_INFLATE)" % (e.name, e.usize, cap)
         )
@@ -254,7 +269,7 @@ def _naz_inflate(e, raw):
         got = "more than %d bytes" % len(out) if more else "%d bytes" % len(out)
         if not more and not d.eof:
             got += " (the deflate stream ends early)"
-        raise ValueError("%s: inflates to %s, the archive says %d" % (e.name, got, e.usize))
+        raise ArchiveError("%s: inflates to %s, the archive says %d" % (e.name, got, e.usize))
     return out
 
 

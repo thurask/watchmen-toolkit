@@ -376,7 +376,10 @@ options. When an option is given twice the last one counts.
 - **Errors.** An `OSError`, `ValueError`, `struct.error` or `ImportError`
   (a disk that is full, a file that is not what its name says, a truncated
   asset, a data table that is missing) ends the run with one `error: ...`
-  line on stderr. When the error comes from reading an archive or a file, an
+  line on stderr. Bytes that do not read raise a `ValueError` subclass named
+  for the reader (`ArchiveError`, `BlockError`, `TextureHeaderError`,
+  `ModelHeaderError`, `SoundHeaderError`, all `byte_reader.ReadError`); the
+  `error:` line carries the message, the traceback the class. When the error comes from reading an archive or a file, an
   indented line under it names what was being read (the archive entry, the
   offset, the asset, the byte order or platform). With `WATCHMEN_DEBUG` set
   (`WATCHMEN_DEBUG=1`, or anything but `0`) the traceback is printed first,

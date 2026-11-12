@@ -25,8 +25,13 @@ if _WLIB not in sys.path:
     sys.path.append(_WLIB)
 from wutil import order_name  # noqa: E402
 
+import byte_reader  # noqa: E402
 import extract_log  # noqa: E402
 import naz_archive  # noqa: E402
+
+
+class BlockError(byte_reader.ReadError):
+    """A block header or trailer that does not read."""
 
 
 # Fixed header = exactly 400 bytes (one read of 0x190 bytes, engine 0x4ae315);
@@ -275,7 +280,7 @@ def parse_block_header(h, order=None):
     """The fixed 400-byte block_h_z header as a dict (engine FUN_004a36d8 /
     FUN_0049dd0e; field names follow what the loader does with each value)."""
     if len(h) < BLOCK_HEADER_SIZE:
-        raise ValueError("not a block header: %d bytes, need %d" % (len(h), BLOCK_HEADER_SIZE))
+        raise BlockError("not a block header: %d bytes, need %d" % (len(h), BLOCK_HEADER_SIZE))
     bo = order or detect_block_order(h)
     (
         _raw328,
@@ -395,20 +400,20 @@ def parse_block_trailer(h, order=None):
     two 3-float vectors (all zero there) and shows the u32 before the count
     equal to the count; the code reading gave two 4-float vectors, which is
     tried only when the 3-float layout does not end exactly at the blob's end.
-    Each set carries "bounds_floats" (6 or 8).  Raises ValueError when the blob
-    follows neither layout."""
+    Each set carries "bounds_floats" (6 or 8).  Raises BlockError (a ValueError)
+    when the blob follows neither layout."""
     hd = parse_block_header(h, order)
     bo = hd["order"]
     p, size = hd["fragment_offset"], hd["fragment_size"]
     end = p + size
     if end > len(h):
-        raise ValueError("block trailer runs past the file (%d + %d > %d)" % (p, size, len(h)))
+        raise BlockError("block trailer runs past the file (%d + %d > %d)" % (p, size, len(h)))
 
     def take(fmt):
         nonlocal p
         n = struct.calcsize(fmt)
         if p + n > end:
-            raise ValueError("block trailer: read past its end")
+            raise BlockError("block trailer: read past its end")
         v = struct.unpack_from(bo + fmt, h, p)
         p += n
         return v
@@ -417,7 +422,7 @@ def parse_block_trailer(h, order=None):
         nonlocal p
         (n,) = take("I")
         if p + n > end:
-            raise ValueError("block trailer: string runs past its end")
+            raise BlockError("block trailer: string runs past its end")
         v = h[p : p + n].split(b"\0", 1)[0].decode("latin1")
         p += n
         return v
@@ -450,7 +455,7 @@ def parse_block_trailer(h, order=None):
         for _ in range(n_manual):
             (n,) = take("I")
             if n * 4 > end - p:
-                raise ValueError("block trailer: node path runs past its end")
+                raise BlockError("block trailer: node path runs past its end")
             ids = ["%08x" % x for x in take("%dI" % n)]
             st = stream_set()
             st["node_path"] = ids

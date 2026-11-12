@@ -18,7 +18,12 @@ import sys
 _WLIB = os.path.dirname(os.path.abspath(__file__))
 if _WLIB not in sys.path:
     sys.path.append(_WLIB)
+import byte_reader  # noqa: E402
 import kapow_block  # noqa: E402
+
+
+class SoundHeaderError(byte_reader.ReadError):
+    """A sound or music-stream header record that does not read."""
 
 
 # ---------------------------------------------------------------------------
@@ -405,10 +410,10 @@ def media_desc_from_header(header, order="<"):
 
     def string(o):
         if o + 4 > len(header):
-            raise ValueError("descriptor ends inside a string")
+            raise SoundHeaderError("descriptor ends inside a string")
         n = u(o)
         if not (1 <= n <= 512) or o + 4 + n > len(header):
-            raise ValueError("bad string length")
+            raise SoundHeaderError("bad string length")
         return header[o + 4 : o + 4 + n].split(b"\x00")[0].decode("latin1"), o + 4 + n
 
     try:

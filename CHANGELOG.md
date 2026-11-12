@@ -94,6 +94,18 @@
   remains a mirror of the last call. Output unchanged: `pc_p2` after steps 21 and 24, `pc_p1`
   and `ps3_p2` byte-identical to the 1.7.0 export, `_extract_done.txt` excluded (measured).
   (2026-11-11)
+- **Typed read errors.** `byte_reader.ReadError` is a `ValueError`; each reading module raises
+  its own subclass where its bytes do not read: `naz_archive.ArchiveError` (not a `.naz`, a bad
+  central-directory record, an unknown compression method, an entry that does not inflate to
+  its stated size, a blob past the inflate ceiling), `kapow_block.BlockError` (block header
+  and trailer), `texture_header.TextureHeaderError`, `model_header.ModelHeaderError`,
+  `sound_header.SoundHeaderError`; `ByteReader` raises `ReadError`. Messages are unchanged,
+  and every `except ValueError` still catches them. The class name shows in a traceback
+  (`WATCHMEN_DEBUG=1`) and in the `characters` line `bind <key>: not built before the
+  animation table (<class>: ...)` when a bind is built from an archive that does not read;
+  the `error:` line of `watchmen.py` prints the message only. Argument and environment errors
+  (`WATCHMEN_MAX_INFLATE`, a language slot, a model LOD) stay plain `ValueError`. `pc_p2`
+  byte-identical to the 1.7.0 export, `_extract_done.txt` excluded (measured). (2026-11-11)
 
 ## 1.7.0 — 2026-11-11
 

@@ -1,19 +1,26 @@
 """Bounds-checked sequential reader of engine records: little- or big-endian
 u32 / u8 / bool / f32 runs, counted arrays and length-prefixed strings.  A read
-past the end raises ValueError."""
+past the end raises ReadError, the base of the typed errors of the reading
+modules (ArchiveError, BlockError, TextureHeaderError, ModelHeaderError,
+SoundHeaderError).  ReadError is a ValueError, so `except ValueError` catches
+every one of them."""
 
 import struct
 
 
+class ReadError(ValueError):
+    """Bytes that do not read as the record they should be."""
+
+
 class ByteReader:
-    """Bounds-checked sequential reader (raises ValueError past the end)."""
+    """Bounds-checked sequential reader (raises ReadError past the end)."""
 
     def __init__(s, b, order="<"):
         s.b, s.p, s.o = b, 0, order
 
     def _need(s, n):
         if n < 0 or s.p + n > len(s.b):
-            raise ValueError("read past end")
+            raise ReadError("read past end")
 
     def u32(s):
         s._need(4)
@@ -30,7 +37,7 @@ class ByteReader:
     def boolean(s):
         v = s.u8()
         if v > 1:
-            raise ValueError("bool %d" % v)
+            raise ReadError("bool %d" % v)
         return v
 
     def floats(s, n):
@@ -47,13 +54,13 @@ class ByteReader:
         """u32 element count, rejected when the elements cannot fit."""
         n = s.u32()
         if n * item_bytes > len(s.b) - s.p:
-            raise ValueError("count %d" % n)
+            raise ReadError("count %d" % n)
         return n
 
     def string(s):
         n = s.count()
         if n > 65536:  # merged-mesh names run to a few KB (TwilightMansion_Attic)
-            raise ValueError("string %d" % n)
+            raise ReadError("string %d" % n)
         v = s.b[s.p : s.p + n]
         s.p += n
         return v.split(b"\0", 1)[0].decode("latin1")

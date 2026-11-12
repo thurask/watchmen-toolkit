@@ -28,6 +28,10 @@ import byte_reader  # noqa: E402
 import kapow_block  # noqa: E402
 
 
+class ModelHeaderError(byte_reader.ReadError):
+    """A ModelRes header record that does not read."""
+
+
 # ---------------------------------------------------------------------------
 # ENGINE-EXACT ModelRes header (PC).  Reader chain, all read from the exe:
 #   FUN_00547006 ModelRes::Read -> FUN_00545927 (part / pivot node)
@@ -127,7 +131,7 @@ def read_meshbuffer(r):
     # the last u32 is the primitive type: 0 triangle strip, 1 triangle list (table 0xc7f398)
     m["primitive_type"] = m["ix"]
     if m["format"] >= len(VERTEX_STRIDES) or m["index_bytes"] % 2:
-        raise ValueError("vertex format %d" % m["format"])
+        raise ModelHeaderError("vertex format %d" % m["format"])
     return m
 
 
@@ -143,7 +147,7 @@ def index_triangles(idx, primitive_type):
     if primitive_type == 1:
         return [idx[i : i + 3] for i in range(0, len(idx) - 2, 3)]
     if primitive_type != 0:
-        raise ValueError("primitive type %d" % primitive_type)
+        raise ModelHeaderError("primitive type %d" % primitive_type)
     out = []
     for i in range(len(idx) - 2):
         t = (idx[i], idx[i + 1], idx[i + 2]) if i % 2 == 0 else (idx[i + 2], idx[i + 1], idx[i])
@@ -175,7 +179,7 @@ def _mr_part(r, pi, buffers, layout="part2"):
             # the fifth bool is "the buffer has a cloth mesh" (writer 0x53f736)
             sm["has_cloth_mesh"] = sm["no_defer"]
             if inline:  # FUN_00433ef4 inline bulk: never seen in shipped data
-                raise ValueError("inline mesh buffer")
+                raise ModelHeaderError("inline mesh buffer")
             mb = read_meshbuffer(r)
             r.skip(r.count())  # cooked physics blob
             sm.update(mb, kind="render", part=pi, lod=li)
@@ -213,7 +217,7 @@ def _mr_part(r, pi, buffers, layout="part2"):
                 r.skip(r.count(12) * 12)
                 r.skip(r.count(4) * 4)
             else:
-                raise ValueError("volume type %d" % t)
+                raise ModelHeaderError("volume type %d" % t)
             r.floats(7)
             r.skip(r.count())
     P["surface_count"] = r.count(12)  # MeshParticleData list (FUN_00561d1c)

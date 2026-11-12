@@ -18,8 +18,13 @@ import sys
 _WLIB = os.path.dirname(os.path.abspath(__file__))
 if _WLIB not in sys.path:
     sys.path.append(_WLIB)
+import byte_reader  # noqa: E402
 import extract_log  # noqa: E402
 import kapow_block  # noqa: E402
+
+
+class TextureHeaderError(byte_reader.ReadError):
+    """A Texture header that does not read."""
 
 
 def texture_alpha_flag(header, order="<", name=None):
@@ -137,7 +142,7 @@ def _parse_texture_anim_tail(hdr, p, order="<"):
     "sub_cycles": [Cycle]}.  A step that is not a sub-cycle plays item `index`: a
     random frame in [frame_min, frame_max] for a random time in [time_min_ms,
     time_max_ms] ms (0x52929b, 0x5292bb).  The name `id` is inferred (the code
-    only stores it).  Raises ValueError / struct.error when it does not read."""
+    only stores it).  Raises TextureHeaderError / struct.error when it does not read."""
 
     def u32():
         nonlocal p
@@ -148,12 +153,12 @@ def _parse_texture_anim_tail(hdr, p, order="<"):
     def count(item):
         n = u32()
         if n * item > len(hdr) - p:
-            raise ValueError("count %d" % n)
+            raise TextureHeaderError("count %d" % n)
         return n
 
     def cycle(depth):
         if depth > 8:
-            raise ValueError("cycle depth")
+            raise TextureHeaderError("cycle depth")
         c = {"head": [u32(), u32(), u32()]}
         c["steps"] = [{"sub_cycle": bool(u32()), "index": u32()} for _ in range(count(8))]
         c["items"] = [
