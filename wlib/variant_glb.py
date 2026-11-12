@@ -577,9 +577,6 @@ class VariantGlb:
             {"magFilter": 9729, "minFilter": 9987, "wrapS": 10497, "wrapT": 10497},
         )
         self.j = self.doc.j
-        # outfit nodes of the same model: identical data is written once and the
-        # ACCESSOR is shared (doc.packer.share; a buffer view shared by two
-        # accessors would need a byteStride; a shared accessor needs nothing)
         self.va = vertex_attrs_enabled()
         # everything below is built from engine numbers (binds, bakes, meshes);
         # _frame.finish_gltf reflects the finished document for the "true" frame
@@ -811,6 +808,118 @@ class VariantGlb:
         )
         return len(j["materials"]) - 1
 
+    # ---------------------------------------------------------------- meshes
+    @staticmethod
+    def node_trs(L):
+        """4x4 -> glTF node TRS dict (rotation is XYZW, same as glTF)."""
+        q = batch_m2q(np.ascontiguousarray(L[:3, :3])[None])[0]
+        return {"rotation": [float(x) for x in q], "translation": [float(x) for x in L[:3, 3]]}
+
+    def joint_nodes(self):
+        """The body joint nodes (`bnode`, joint k -> node index) and the
+        inverse-bind-matrix accessor (`ibmacc`).
+
+        Joint nodes carry the BIND pose, not identity (identity joints with real
+        IBMs render the mesh in bind-LOCAL space in every viewer that shows the
+        scene before an animation is picked: measured 0.72 m mean vertex
+        displacement).  Flat rig: children of an identity `root`, so node-local ==
+        node-global and B4[k] goes straight in.  Hierarchy: B4[k] relative to the
+        parent joint (local_from_world); the product down the chain gives B4[k]
+        back, so the IBMs are the same in both."""
+        j, NB, hier = self.j, self.NB, self.hier
+        bnames, bpar, jnames = self.bnames, self.bpar, self.jnames
+        bnode = self.bnode = [len(j["nodes"]) + k for k in range(NB)]
+        B4n = local_from_world(self.B4, bpar) if hier else self.B4
+        for k in range(NB):
+            nd = {"name": jnames[k] if hier else "b%d" % k}
+            nd.update(self.node_trs(B4n[k]))
+            if self.skel:
+                nd["extras"] = {"bone": bnames[k], "parent": bpar[k]}
+                if hier:
+                    nd["extras"]["index"] = k
+            j["nodes"].append(nd)
+        if hier:
+            for k in range(NB):
+                if bpar[k] >= 0:
+                    j["nodes"][bnode[bpar[k]]].setdefault("children", []).append(bnode[k])
+        doc = self.doc
+        self.ibmacc = doc.accessor(
+            doc.view(np.array([m.T.reshape(16) for m in self.IBM], np.float32).tobytes()),
+            5126,
+            NB,
+            "MAT4",
+        )
+
+    def primitive(self, part, material_first):
+        """The skinned primitive of one part (V, SI, SW, T, UV, material name).
+        material_first: the part's material is made before its NORMAL / TANGENT /
+        COLOR_0 views (body and face parts) or after them (attachment, alternative
+        and outfit parts); a material's images land in the buffer where it is made
+        first."""
+        V, SI, SW, T, UV, nm = part
+        Vg = np.ascontiguousarray(V, np.float32)
+        T, pend, vblend = self.vertex_prep(part, Vg, T)
+        return self.doc.add_skinned_primitive(
+            Vg,
+            used_joints(SI, SW),
+            SW,
+            T,
+            UV,
+            pend,
+            lambda: self.blend(self.material(nm), vblend),
+            material_first,
+        )
+
+    def body_mesh(self):
+        """Mesh 0 ("variant") of the body parts, its node (`mnode`) and skin 0."""
+        j = self.j
+        prims = []
+        for part in self.parts:
+            prims.append(self.primitive(part, True))
+        j["meshes"].append({"name": "variant", "primitives": prims})
+        self.mnode = len(j["nodes"])
+        j["nodes"].append({"name": "mesh", "mesh": 0, "skin": 0})
+        j["skins"].append({"joints": self.bnode, "inverseBindMatrices": self.ibmacc})
+        if self.skel:
+            j["skins"][0]["extras"] = {"watchmen": self.skel}
+
+    def extra_meshes(self):
+        """One mesh node on skin 0 per attachment, alternative and outfit model
+        (`attnodes`); `hidden`: the node indices that go under "alternatives".
+
+        Outfit nodes of the same model: identical data is written once and the
+        ACCESSOR is shared (GlbPacker.share; a buffer view shared by two accessors
+        would need a byteStride; a shared accessor needs nothing)."""
+        j, pk = self.j, self.doc.packer
+        parts_record = self.parts_record
+        self.attnodes = []
+        self.hidden = set()  # node indices that go to the "alternatives" scene only
+        _wshown = set(((parts_record or {}).get("weapons") or {}).get("shown") or [])
+        _extra = [
+            (a, p, parts_record is not None and a not in _wshown, False)
+            for a, p in self.attachments or []
+        ]
+        _extra += [(a, p, True, False) for a, p in self.alt_parts or []]
+        _extra += [(a, p, not sh, True) for a, p, sh in self.outfit_parts or []]
+        for aname, aparts, _hide, _shared in _extra:
+            pk.share = _shared
+            # each attachment = its OWN mesh node sharing skin 0 (verts already in
+            # body bind space, weighted to the attach bone slot) -> imports as a
+            # separate object, individually hideable.
+            aprims = []
+            for part in aparts:
+                # the material after the pending attributes, as this site always wrote it
+                aprims.append(self.primitive(part, False))
+            if not aprims:
+                continue
+            mi_ = len(j["meshes"])
+            j["meshes"].append({"name": aname, "primitives": aprims})
+            if _hide:
+                self.hidden.add(len(j["nodes"]))
+            self.attnodes.append(len(j["nodes"]))
+            j["nodes"].append({"name": aname, "mesh": mi_, "skin": 0})
+        pk.share = False
+
 
 def write_glb(
     parts,
@@ -901,7 +1010,7 @@ def write_glb(
     _engine, _idle = g.engine, g.idle
     parts, attachments, alt_parts = g.parts, g.attachments, g.alt_parts
     outfit_parts, face, meta = g.outfit_parts, g.face, g.meta
-    NB, B4, IBM = g.NB, g.B4, g.IBM
+    NB, B4 = g.NB, g.B4
     _bnames, _bpar, _skel, _jnames, _hier = g.bnames, g.bpar, g.skel, g.jnames, g.hier
     doc = g.doc
     j = doc.j
@@ -911,65 +1020,10 @@ def write_glb(
     av = _pk.view  # (data, target=None) -> bufferView index
     ac = _pk.accessor  # (bv, ct, count, type, mn=None, mx=None)
 
-    def _node_trs(L):
-        """4x4 -> glTF node TRS dict (rotation is XYZW, same as glTF)."""
-        q = batch_m2q(np.ascontiguousarray(L[:3, :3])[None])[0]
-        return {"rotation": [float(x) for x in q], "translation": [float(x) for x in L[:3, 3]]}
-
-    # Joint nodes carry the BIND pose, not identity (identity joints with real
-    # IBMs render the mesh in bind-LOCAL space in every viewer that shows the
-    # scene before an animation is picked: measured 0.72 m mean vertex
-    # displacement).  Flat rig: children of an identity `root`, so node-local ==
-    # node-global and B4[k] goes straight in.  Hierarchy: B4[k] relative to the
-    # parent joint (local_from_world); the product down the chain gives B4[k]
-    # back, so the IBMs are the same in both.
-    bnode = [len(j["nodes"]) + k for k in range(NB)]
-    B4n = local_from_world(B4, _bpar) if _hier else B4
-    for k in range(NB):
-        nd = {"name": _jnames[k] if _hier else "b%d" % k}
-        nd.update(_node_trs(B4n[k]))
-        if _skel:
-            nd["extras"] = {"bone": _bnames[k], "parent": _bpar[k]}
-            if _hier:
-                nd["extras"]["index"] = k
-        j["nodes"].append(nd)
-    if _hier:
-        for k in range(NB):
-            if _bpar[k] >= 0:
-                j["nodes"][bnode[_bpar[k]]].setdefault("children", []).append(bnode[k])
-    ibmacc = ac(
-        av(np.array([m.T.reshape(16) for m in IBM], np.float32).tobytes()), 5126, NB, "MAT4"
-    )
-
-    def _primitive(part, material_first):
-        """The skinned primitive of one part (V, SI, SW, T, UV, material name).
-        material_first: the part's material is made before its NORMAL / TANGENT /
-        COLOR_0 views (body and face parts) or after them (attachment, alternative
-        and outfit parts); a material's images land in the buffer where it is made
-        first."""
-        V, SI, SW, T, UV, nm = part
-        Vg = np.ascontiguousarray(V, np.float32)
-        T, pend, vblend = g.vertex_prep(part, Vg, T)
-        return doc.add_skinned_primitive(
-            Vg,
-            _used_joints(SI, SW),
-            SW,
-            T,
-            UV,
-            pend,
-            lambda: g.blend(g.material(nm), vblend),
-            material_first,
-        )
-
-    prims = []
-    for _part in parts:
-        prims.append(_primitive(_part, True))
-    j["meshes"].append({"name": "variant", "primitives": prims})
-    mnode = len(j["nodes"])
-    j["nodes"].append({"name": "mesh", "mesh": 0, "skin": 0})
-    j["skins"].append({"joints": bnode, "inverseBindMatrices": ibmacc})
-    if _skel:
-        j["skins"][0]["extras"] = {"watchmen": _skel}
+    g.joint_nodes()
+    g.body_mesh()
+    g.extra_meshes()
+    bnode, mnode, attnodes, _hidden = g.bnode, g.mnode, g.attnodes, g.hidden
 
     def _anim(animname, sm, chn, frames, fps, finfo=None):
         a = {"name": animname, "samplers": sm, "channels": chn}
@@ -982,32 +1036,6 @@ def write_glb(
             a["extras"] = {"watchmen": ex}
         return a
 
-    attnodes = []
-    _hidden = set()  # node indices that go to the "alternatives" scene only
-    _wshown = set(((parts_record or {}).get("weapons") or {}).get("shown") or [])
-    _extra = [
-        (a, p, parts_record is not None and a not in _wshown, False) for a, p in attachments or []
-    ]
-    _extra += [(a, p, True, False) for a, p in alt_parts or []]
-    _extra += [(a, p, not sh, True) for a, p, sh in outfit_parts or []]
-    for aname, aparts, _hide, _shared in _extra:
-        _pk.share = _shared
-        # each attachment = its OWN mesh node sharing skin 0 (verts already in
-        # body bind space, weighted to the attach bone slot) -> imports as a
-        # separate object, individually hideable.
-        aprims = []
-        for _part in aparts:
-            # the material after the pending attributes, as this site always wrote it
-            aprims.append(_primitive(_part, False))
-        if not aprims:
-            continue
-        mi_ = len(j["meshes"])
-        j["meshes"].append({"name": aname, "primitives": aprims})
-        if _hide:
-            _hidden.add(len(j["nodes"]))
-        attnodes.append(len(j["nodes"]))
-        j["nodes"].append({"name": aname, "mesh": mi_, "skin": 0})
-    _pk.share = False
     facenodes = []
     if face is not None:
         # SECOND SKIN: face rig parented under the body's Head joint -- rides
@@ -1027,10 +1055,6 @@ def write_glb(
         M4[:3, 3] = face["t"]
         ai = face["attach_idx"]
 
-        def _trs(L):
-            q = batch_m2q(L[:3, :3][None])[0]
-            return {"rotation": [float(x) for x in q], "translation": [float(x) for x in L[:3, 3]]}
-
         # Flat rig: `face_root` is a scene root; f_anchor and the proxies
         # under it carry WORLD channels, A4[Head]·M4 and A4[bs]·Mk, on every body
         # clip.  Hierarchy: no face_root; f_anchor is a child of the attach
@@ -1046,7 +1070,7 @@ def write_glb(
             j["nodes"].append({"name": "face_root"})
         anchor = len(j["nodes"])
         nd = {"name": "f_anchor"}
-        nd.update(_trs(np.linalg.inv(B4[ai]) @ M4 if _hier else M4))
+        nd.update(g.node_trs(np.linalg.inv(B4[ai]) @ M4 if _hier else M4))
         j["nodes"].append(nd)
         if _hier:
             j["nodes"][bnode[ai]].setdefault("children", []).append(anchor)
@@ -1056,7 +1080,7 @@ def write_glb(
             _Mk = _palign[pi] if _palign is not None else M4
             Lp = np.linalg.inv(B4[bs]) @ _Mk if _hier else _Mk
             nd = {"name": "face_proxy_b%d_%d" % (bs, pi)}
-            nd.update(_trs(Lp))
+            nd.update(g.node_trs(Lp))
             pn = len(j["nodes"])
             j["nodes"].append(nd)
             proxynodes.append(pn)
@@ -1065,7 +1089,7 @@ def write_glb(
         for k in range(NF):
             L = B4f[k]  # LOCAL under f_anchor
             nd = {"name": "f_%s" % str(fb["names"][k])}
-            nd.update(_trs(L))
+            nd.update(g.node_trs(L))
             facenodes.append(len(j["nodes"]))
             j["nodes"].append(nd)
         j["nodes"][anchor]["children"] = facenodes[:]
@@ -1084,7 +1108,7 @@ def write_glb(
         )
         fprims = []
         for _part in face["parts"]:
-            fprims.append(_primitive(_part, True))
+            fprims.append(g.primitive(_part, True))
         fmi = len(j["meshes"])
         j["meshes"].append({"name": "face", "primitives": fprims})
         fmnode = len(j["nodes"])
