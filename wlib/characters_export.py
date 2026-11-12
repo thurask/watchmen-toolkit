@@ -451,17 +451,18 @@ def _asset_file(extract_out, rel):
 
 
 def _texture_sheets(extract_out, path):
-    """watchmen_extract.texture_sheets of the Texture asset `path` ([] if missing)."""
-    import watchmen_extract as we
+    """texture_sheet.texture_sheets of the Texture asset `path` ([] if missing)."""
+    import material_refs
+    import texture_sheet
 
-    key = (os.path.abspath(extract_out), we.texture_key(path))
+    key = (os.path.abspath(extract_out), material_refs.texture_key(path))
     if key not in _TEX_SHEETS:
         rel = [x for x in path.replace("\\", "/").split("/") if x not in ("", ".", "..")]
         got = []
         try:
             with open(_asset_file(extract_out, rel), "rb") as fh:
                 hdr = fh.read()
-            got = we.texture_sheets(hdr, "<") or we.texture_sheets(hdr, ">")
+            got = texture_sheet.texture_sheets(hdr, "<") or texture_sheet.texture_sheets(hdr, ">")
         except OSError:
             pass
         _TEX_SHEETS[key] = got
@@ -479,7 +480,8 @@ def variant_sheets(extract_out, stem, vname, node=None):
     node: index among the nodes named `vname` -- that outfit only.  None: every
     model takes its sheets from the first node (file order) that lists it, which
     is what a GLB holding all the variant's models needs."""
-    import watchmen_extract as we
+    import material_refs
+    import texture_sheet
 
     nodes = [n for n in variant_nodes(extract_out, stem) if n["name"] == vname]
     if node is not None:
@@ -492,7 +494,7 @@ def variant_sheets(extract_out, stem, vname, node=None):
                 continue
             mdl = os.path.basename(n["models"][slot].replace("\\", "/"))
             mdl = mdl.rsplit(".", 1)[0].lower()
-            per.setdefault(mdl, {})[we.texture_key(path)] = (path, sid)
+            per.setdefault(mdl, {})[material_refs.texture_key(path)] = (path, sid)
         for m in n["models"]:
             mdl = os.path.basename(m.replace("\\", "/")).rsplit(".", 1)[0].lower()
             if not mdl or mdl in seen:
@@ -500,7 +502,7 @@ def variant_sheets(extract_out, stem, vname, node=None):
             seen.add(mdl)
             for tkey, (path, sid) in sorted(per.get(mdl, {}).items()):
                 sheets = _texture_sheets(extract_out, path)
-                sh = we.select_sheet(sheets, sid)
+                sh = texture_sheet.select_sheet(sheets, sid)
                 if sheets and sh is not sheets[0] and sh.get("name"):
                     out.setdefault(mdl, {})[tkey] = sh["name"]
     sv = SYNTH_VARIANTS.get((stem, vname))
@@ -511,7 +513,7 @@ def variant_sheets(extract_out, stem, vname, node=None):
                 mdl = os.path.basename(m.replace("\\", "/")).rsplit(".", 1)[0].lower()
                 for path, name in sv["sheets"].items():
                     if mdl:
-                        out.setdefault(mdl, {})[we.texture_key(path)] = name
+                        out.setdefault(mdl, {})[material_refs.texture_key(path)] = name
     return out
 
 
@@ -1851,14 +1853,14 @@ def _rigid_parts(model_base, M, t, slot, fallback_name, positional):
     """Every piece of `model_base` (mesh_loader.load_submeshes, no skin) moved
     rigidly into the body's bind space (V' = M V + t, its normal / tangent frame
     turned by M) with all weight on bind slot `slot`."""
-    import watchmen_extract as we
+    import model_mesh
     import variant_glb as _vga
     import char_lib as _cl
     import mesh_loader as ml
 
     mh = _read_bytes(model_base + ".model")
     ms = _read_bytes(model_base + ".model.stream")
-    plat = we.console_platform_for(model_base + ".model")  # the console colour order
+    plat = model_mesh.console_platform_for(model_base + ".model")  # the console colour order
     name = os.path.basename(model_base)
     # the header states the byte order (the descriptor-count rule tied on
     # single-submesh console models: WPN_2x4_2H was lost on Xbox 360 / PS3)
@@ -2053,7 +2055,7 @@ def _face_textures(face, texroots, extract_out):
     import char_lib
     import face_rule
     import variant_glb as vg
-    import watchmen_extract as we
+    import material_refs
 
     gh = face.get("game_head") or {}
     over = face_rule.sheet_overrides(extract_out, gh.get("texture_sheets"))
@@ -2061,9 +2063,9 @@ def _face_textures(face, texroots, extract_out):
         used, parts = [], []
         for pt in face["parts"]:
             nm = pt[5]
-            o = over.get(we.texture_key(getattr(nm, "path", None) or ""))
+            o = over.get(material_refs.texture_key(getattr(nm, "path", None) or ""))
             if o:
-                new = we.TexRef(str(nm), "%s#sheet=%s" % (nm.path, o["sheet"]))
+                new = material_refs.TexRef(str(nm), "%s#sheet=%s" % (nm.path, o["sheet"]))
                 pt = vg.keep_attrs(pt, (pt[0], pt[1], pt[2], pt[3], pt[4], new))
                 pt_over = dict(o, texture=nm.path)
                 if pt_over not in used:
@@ -2078,11 +2080,13 @@ def _face_textures(face, texroots, extract_out):
             continue
         path = getattr(nm, "path", None) or ""
         base, _, sheet = path.partition("#sheet=")
-        layers = char_lib.find_layers(we.TexRef(str(nm), base) if sheet else nm, texroots)
+        layers = char_lib.find_layers(
+            material_refs.TexRef(str(nm), base) if sheet else nm, texroots
+        )
         if layers and sheet:
             layers = dict(layers)
-            for layer, opath in over[we.texture_key(base)]["overrides"].items():
-                src = char_lib.find_layers(we.texture_ref(opath), texroots) or {}
+            for layer, opath in over[material_refs.texture_key(base)]["overrides"].items():
+                src = char_lib.find_layers(material_refs.texture_ref(opath), texroots) or {}
                 if layer in src:
                     layers[layer] = src[layer]
                     if layer == "diffuse":

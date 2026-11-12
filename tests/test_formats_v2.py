@@ -19,7 +19,13 @@ import pytest
 
 import decode_sequence as ds
 import parse_model_nodes as pmn
-import watchmen_extract as we
+import kapow_block
+import model_export
+import model_header
+import model_mesh
+import obj_mtl
+import texture_carve
+import texture_header
 
 
 def _str(s):
@@ -105,7 +111,7 @@ def test_block_stream_belongs_to_its_own_record_including_the_last():
             ("/c.bmp", _TEX, b"HDR-CCC", b"stream-c!"),
         ]
     )
-    got = [(e.name, hd, st) for e, hd, st in we.extract_block(h, s)]
+    got = [(e.name, hd, st) for e, hd, st in kapow_block.extract_block(h, s)]
     assert got == [
         ("/a.bmp", b"HDR-A", b"stream-a"),
         ("/b.fragment", b"HDR-BB", None),
@@ -115,7 +121,7 @@ def test_block_stream_belongs_to_its_own_record_including_the_last():
 
 def test_block_directory_record_fields_and_legacy_aliases():
     h, _s = _block([("/a.bmp", _TEX, b"HDR-A", b"stream-a"), ("/b.x", 0x41764525, b"B", None)])
-    entries, data_start = we.parse_block_toc(h)
+    entries, data_start = kapow_block.parse_block_toc(h)
     a, b = entries
     assert (a.has_stream, a.type_hash, a.sizes) == (True, _TEX, [5] * 6)
     assert a.streams == [(i * 8, 8) for i in range(6)]
@@ -128,7 +134,7 @@ def test_block_directory_record_fields_and_legacy_aliases():
 
 def test_block_header_fields_and_fingerprint():
     h, _s = _block([("/a.bmp", _TEX, b"HDR-A" * 3, b"x"), ("/b.bmp", _TEX, b"B", None)])
-    hd = we.parse_block_header(h)
+    hd = kapow_block.parse_block_header(h)
     assert hd["guid"] == "DB851B2E-F452-47f7-9C7D-0BD4918F6F07"
     assert hd["fingerprint"] == "THIS IS THE DEFAULT FING"  # LFSR cipher, FUN_00405b1e
     assert hd["entry0_size"] == 15 and hd["num_entries"] == 2 and hd["num_streams"] == 1
@@ -151,13 +157,13 @@ def test_block_localized_entries_follow_the_language_slot():
         ],
     )
     for lang in (0, 3, 5):
-        got = [(e.name, e.localized, hd, st) for e, hd, st in we.extract_block(h, s, lang)]
+        got = [(e.name, e.localized, hd, st) for e, hd, st in kapow_block.extract_block(h, s, lang)]
         assert got == [
             ("/main.bmp", False, b"MAIN", b"main-stream"),
             ("/Localize/Cut_uk.txt", True, texts[lang], None),
             ("/logo_uk.bmp", True, b"LOGO", streams[lang]),
         ]
-    assert len(list(we.extract_block(h, s))) == 3  # default language 0
+    assert len(list(kapow_block.extract_block(h, s))) == 3  # default language 0
 
 
 # ---------------------------------------------------------------------------
@@ -166,12 +172,12 @@ def test_block_localized_entries_follow_the_language_slot():
 
 
 def test_script_asset_type_hashes_and_base_class():
-    assert we.asset_type_name(0x41764525) == "ModelEffects(ModelRes)"
-    assert we.asset_type_name(0x96EA413F) == "TextureEffects(Texture)"
-    assert we.asset_type_name(_TEX) == "Texture"
-    assert we.asset_base_class("ModelEffects(ModelRes)") == "ModelRes"
-    assert we.asset_base_class("TextureEffects(Texture)") == "Texture"
-    assert we.asset_base_class("sound") == "sound"
+    assert kapow_block.asset_type_name(0x41764525) == "ModelEffects(ModelRes)"
+    assert kapow_block.asset_type_name(0x96EA413F) == "TextureEffects(Texture)"
+    assert kapow_block.asset_type_name(_TEX) == "Texture"
+    assert kapow_block.asset_base_class("ModelEffects(ModelRes)") == "ModelRes"
+    assert kapow_block.asset_base_class("TextureEffects(Texture)") == "Texture"
+    assert kapow_block.asset_base_class("sound") == "sound"
 
 
 # ---------------------------------------------------------------------------
@@ -204,29 +210,29 @@ def test_texture_frames_slots_and_linear_row_padding():
             )
         ]
     )
-    ex = we.parse_texture_frames(hdr)
+    ex = texture_header.parse_texture_frames(hdr)
     slots = ex["frames"][0]["slots"]
     assert [d["slot"] if d else None for d in slots] == [0, 1, None, None, None, None, None, 7]
     assert ex["frames"][0]["path"] == "/data/art/x/Thing.bmp" and ex["anim"] is False
     assert (slots[1]["fmt"], slots[1]["aw"], slots[1]["mip"]) == ("ATI2", 8, 2)
     # DXT1 8x8 x4 mips = 32+8+8+8 ; ATI2 x2 = 64+16 ; L8 rows padded to 4: 64+16+8+4
     assert [d["chain"] for d in slots if d] == [56, 80, 92]
-    assert we.chain_bytes(3, 8, 8, 4) == 85  # the unpadded count is 7 bytes short
-    plan = we.plan_texture_layers(hdr, 56 + 80 + 92)
+    assert texture_header.chain_bytes(3, 8, 8, 4) == 85  # the unpadded count is 7 bytes short
+    plan = texture_header.plan_texture_layers(hdr, 56 + 80 + 92)
     assert plan["kind"] == "single" and plan.get("exact") and len(plan["layers"]) == 3
-    labels = [we.texture_layer_label(plan["layers"], j) for j in range(3)]
+    labels = [texture_header.texture_layer_label(plan["layers"], j) for j in range(3)]
     assert labels == ["diffuse", "normal", "specSize"]
 
 
 def test_texture_exact_plan_cube_and_animation():
     cube = _tex_header([({0: _tex_desc(4, 4, 5, 1, typ=2)}, "/data/c_cubemap.bmp")])
-    assert we.plan_texture_layers(cube, 6 * 8)["kind"] == "cube"
+    assert texture_header.plan_texture_layers(cube, 6 * 8)["kind"] == "cube"
     fr = {0: _tex_desc(4, 4, 1, 1, alpha=1)}
     anim = _tex_header([(fr, "/data/f0.bmp"), (fr, "/data/f1.bmp"), (fr, "/data/f2.bmp")], anim=1)
-    plan = we.plan_texture_layers(anim, 3 * 64)
+    plan = texture_header.plan_texture_layers(anim, 3 * 64)
     assert (plan["kind"], plan["count"], plan.get("exact")) == ("anim", 3, True)
     # a stream the header does not tile exactly is left to the older planner
-    assert not we.plan_texture_layers(anim, 3 * 64 + 1).get("exact")
+    assert not texture_header.plan_texture_layers(anim, 3 * 64 + 1).get("exact")
 
 
 def test_texture_effects_header_is_a_texture(tmp_path):
@@ -239,9 +245,9 @@ def test_texture_effects_header_is_a_texture(tmp_path):
         typename="TextureEffects(Texture)",
         bag_dwords=55,
     )
-    assert we.asset_class(hdr) == "TextureEffects(Texture)"
-    assert we.parse_texture_frames(hdr)["frames"][0]["slots"][0]["alpha"] is True
-    assert we.carve_texture(px, hdr, tmp_path / "Burn") is True
+    assert kapow_block.asset_class(hdr) == "TextureEffects(Texture)"
+    assert texture_header.parse_texture_frames(hdr)["frames"][0]["slots"][0]["alpha"] is True
+    assert texture_carve.carve_texture(px, hdr, tmp_path / "Burn") is True
     assert [p.name for p in (tmp_path / "Burn").glob("*.png")] == ["0_diffuse_4x4_A8R8G8B8.png"]
 
 
@@ -259,7 +265,7 @@ def test_texture_layer_after_a_padded_l8_layer_is_read_at_the_right_offset(tmp_p
             )
         ]
     )
-    assert we.carve_texture(l8_a + l8_b, hdr, tmp_path / "g") is True
+    assert texture_carve.carve_texture(l8_a + l8_b, hdr, tmp_path / "g") is True
     out = sorted((tmp_path / "g").glob("1_*.png"))
     assert len(out) == 1
     got = np.asarray(Image.open(out[0]))
@@ -357,7 +363,7 @@ def obj_capture(monkeypatch):
     def fake(path, name, v, n, uv, tris, subs, mats, tex_index, log):
         cap.update(v=list(v), n=n, uv=uv, tris=list(tris), subs=list(subs), mats=list(mats))
 
-    monkeypatch.setattr(we, "write_obj_mtl", fake)
+    monkeypatch.setattr(obj_mtl, "write_obj_mtl", fake)
     return cap
 
 
@@ -382,9 +388,9 @@ def _lod_model():
 
 def test_model_header_lists_every_buffer_in_stream_order():
     h, s = _lod_model()
-    M = we.parse_model_header(h)
+    M = model_header.parse_model_header(h)
     assert M["textures"] == _TEXTURES and len(M["parts"]) == 1
-    bufs = we.model_stream_layout(M, s)
+    bufs = model_header.model_stream_layout(M, s)
     assert [(b["kind"], b["lod"], b["format"], b["stride"]) for b in bufs] == [
         ("render", 0, 5, 44),
         ("render", 0, 5, 44),
@@ -394,8 +400,8 @@ def test_model_header_lists_every_buffer_in_stream_order():
     ]
     assert [b["name"] for b in bufs[:3]] == ["Body", "Leaf", "BodyLow"]
     assert [b["vb"] for b in bufs] == [0, 197, 394, 591, 692]
-    assert we.model_stream_layout(M, s + b"\0") is None  # must tile the stream exactly
-    assert we.parse_model_header(h[: len(h) // 2]) is None
+    assert model_header.model_stream_layout(M, s + b"\0") is None  # must tile the stream exactly
+    assert model_header.parse_model_header(h[: len(h) // 2]) is None
 
 
 def test_decode_model_writes_lod0_only_with_file_materials(tmp_path, obj_capture):
@@ -403,7 +409,7 @@ def test_decode_model_writes_lod0_only_with_file_materials(tmp_path, obj_capture
     indices are read as a triangle strip (0x431206); the material comes from the
     submesh record's texture-list index."""
     h, s = _lod_model()
-    assert we.decode_model(h, s, tmp_path / "m.obj") is True
+    assert model_export.decode_model(h, s, tmp_path / "m.obj") is True
     assert obj_capture["mats"] == ["Trim_02", "Leaf_03"]
     assert [sub[:4] for sub in obj_capture["subs"]] == [(0, 4, 0, 2), (4, 4, 2, 3)]
     assert sorted({v[2] for v in obj_capture["v"]}) == [0.0, 1.0]
@@ -414,13 +420,13 @@ def test_decode_model_writes_lod0_only_with_file_materials(tmp_path, obj_capture
 
 def test_decode_model_lod_selection(tmp_path, obj_capture):
     h, s = _lod_model()
-    assert we.decode_model(h, s, tmp_path / "m.obj", lod=1) is True
+    assert model_export.decode_model(h, s, tmp_path / "m.obj", lod=1) is True
     assert obj_capture["mats"] == ["Trim_02"] and {v[2] for v in obj_capture["v"]} == {2.0}
-    assert we.decode_model(h, s, tmp_path / "m.obj", lod="all") is True
+    assert model_export.decode_model(h, s, tmp_path / "m.obj", lod="all") is True
     assert obj_capture["mats"] == ["Trim_02", "Leaf_03", "Trim_02"]
     assert sorted({v[2] for v in obj_capture["v"]}) == [0.0, 1.0, 2.0]  # never 5.0 / 9.0
     # a part with fewer LODs keeps its last one
-    assert we.decode_model(h, s, tmp_path / "m.obj", lod=7) is True
+    assert model_export.decode_model(h, s, tmp_path / "m.obj", lod=7) is True
     assert {v[2] for v in obj_capture["v"]} == {2.0}
 
 
@@ -434,7 +440,7 @@ def test_decode_model_finds_a_buffer_far_behind_a_shadow_hull(tmp_path, obj_capt
         ],
         _TEXTURES,
     )
-    M = we.parse_model_header(h)
+    M = model_header.parse_model_header(h)
     pad = 70000  # grow the first part's shadow hull: nv x 20 bytes of vertices
     nv = pad // 20
     big_v = b"".join(_vertex(9, (i, 0, 5.0)) for i in range(nv))
@@ -443,8 +449,11 @@ def test_decode_model_finds_a_buffer_far_behind_a_shadow_hull(tmp_path, obj_capt
     assert s.count(old_hull) == 1
     s2 = s.replace(old_hull, new_hull)
     h2 = h.replace(_meshbuffer(9, 4, 12), _meshbuffer(9, nv, 12))
-    assert h2 != h and we.model_stream_layout(we.parse_model_header(h2), s2) is not None
-    assert we.decode_model(h2, s2, tmp_path / "m.obj") is True
+    assert (
+        h2 != h
+        and model_header.model_stream_layout(model_header.parse_model_header(h2), s2) is not None
+    )
+    assert model_export.decode_model(h2, s2, tmp_path / "m.obj") is True
     assert obj_capture["mats"] == ["Wall_01", "Trim_02"]
     assert sorted({v[2] for v in obj_capture["v"]}) == [0.0, 3.0]
     assert M["parts"][1]["name"] == "Part2"
@@ -452,7 +461,7 @@ def test_decode_model_finds_a_buffer_far_behind_a_shadow_hull(tmp_path, obj_capt
 
 def test_decode_model_mesh_exposes_colour_tangents_and_skin():
     h, s = _model([{"lods": [[("Skin", 0, 6, 0.0, 1)]], "shadow": [1.0], "proxy": 2.0}], _TEXTURES)
-    mesh = we.decode_model_mesh(h, s)
+    mesh = model_mesh.decode_model_mesh(h, s)
     assert [m["name"] for m in mesh["submeshes"]] == ["Skin"]
     m = mesh["submeshes"][0]
     assert (m["format"], m["stride"], m["material"], m["texture"]) == (
@@ -469,13 +478,15 @@ def test_decode_model_mesh_exposes_colour_tangents_and_skin():
     assert m["triangles"] == [(0, 1, 2), (0, 2, 3)]
     # cross(n, t) = +y, stored bitangent = -y: s = -1.  For the engine-oriented
     # texture w = s; for the green-inverted glTF texture (the default since 1.4.0) w = -s
-    t = we.gltf_tangents(m["normals"], m["tangent"], m["bitangent"], green_up=False)
+    t = model_mesh.gltf_tangents(m["normals"], m["tangent"], m["bitangent"], green_up=False)
     assert t.tolist() == [[1.0, 0.0, 0.0, -1.0]] * 4
-    t = we.gltf_tangents(m["normals"], m["tangent"], m["bitangent"])
+    t = model_mesh.gltf_tangents(m["normals"], m["tangent"], m["bitangent"])
     assert t.tolist() == [[1.0, 0.0, 0.0, 1.0]] * 4
     kinds = [
         x["kind"]
-        for x in we.decode_model_mesh(h, s, kinds=("render", "shadow", "proxy"))["submeshes"]
+        for x in model_mesh.decode_model_mesh(h, s, kinds=("render", "shadow", "proxy"))[
+            "submeshes"
+        ]
     ]
     assert kinds == ["render", "shadow", "occluder"]  # "proxy" = old name of "occluder"
 
@@ -488,10 +499,10 @@ def test_console_format_10_joints_are_bytes_17_18_19_16():
     vb += struct.pack(">4e", 1, 0, 0, 0)
     assert len(vb) == 28
     buf = {"format": 10, "vertex_count": 1, "stride": 28, "vb": 0}
-    got = we.decode_vertex_attributes(vb, buf, ">")
+    got = model_mesh.decode_vertex_attributes(vb, buf, ">")
     assert got["joints"][0].tolist() == [0, 1, 2, 3]
     assert got["weights"][0].tolist() == [1.0, 0.0, 0.0, 0.0]
-    assert we.CONSOLE_VERTEX_FORMATS[10]["joints"] == 16
+    assert model_header.CONSOLE_VERTEX_FORMATS[10]["joints"] == 16
 
 
 def test_model_effects_header_is_a_modelres(tmp_path, obj_capture):
@@ -501,17 +512,17 @@ def test_model_effects_header_is_a_modelres(tmp_path, obj_capture):
         typename="ModelEffects(ModelRes)",
         bag_dwords=96,
     )
-    assert we.parse_model_header(h)["type"] == "ModelEffects(ModelRes)"
-    assert we.decode_model(h, s, tmp_path / "m.obj") is True
+    assert model_header.parse_model_header(h)["type"] == "ModelEffects(ModelRes)"
+    assert model_export.decode_model(h, s, tmp_path / "m.obj") is True
     assert obj_capture["mats"] == ["Leaf_03"]
 
 
 def test_headers_outside_the_engine_layout_fall_back_to_the_scan():
-    assert we.parse_model_header(b"") is None
-    assert we.parse_model_header(_str("Texture") + b"\0" * 64) is None
+    assert model_header.parse_model_header(b"") is None
+    assert model_header.parse_model_header(_str("Texture") + b"\0" * 64) is None
     h, s = _lod_model()
-    assert we.parse_model_header(h, ">") is None
-    assert we.decode_model_mesh(h, s[:-1]) is None
+    assert model_header.parse_model_header(h, ">") is None
+    assert model_mesh.decode_model_mesh(h, s[:-1]) is None
 
 
 # ---------------------------------------------------------------------------

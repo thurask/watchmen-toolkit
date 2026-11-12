@@ -24,7 +24,8 @@ import build_bind_file as bbf
 import ragdoll_rig as rr
 import rig_glb
 import variant_glb as vg
-import watchmen_extract as we
+import extract_driver
+import texture_decode
 from conftest import (
     axis_angle,
     build_model_header,
@@ -619,19 +620,19 @@ def test_extract_glb_embeds_textures_at_full_size_unless_asked(tmp_path):
 
 
 def test_glb_texture_size_option():
-    assert we.texture_size_arg("512") == 512
+    assert extract_driver.texture_size_arg("512") == 512
     import argparse
 
     for bad in ("0", "-3", "big"):
         with pytest.raises(argparse.ArgumentTypeError):
-            we.texture_size_arg(bad)
+            extract_driver.texture_size_arg(bad)
 
 
 def test_extract_options_set_the_rig_and_texture_size(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("WATCHMEN_RIG", "hierarchy")
     missing = str(tmp_path / "missing.naz")
     assert (
-        we.main(
+        extract_driver.main(
             [
                 missing,
                 "-o",
@@ -647,7 +648,7 @@ def test_extract_options_set_the_rig_and_texture_size(tmp_path, monkeypatch, cap
     )
     # the archive is looked for before the options are applied; parse them alone
     with pytest.raises(SystemExit):
-        we.main([missing, "-o", str(tmp_path / "o"), "--glb-texture-size", "0"])
+        extract_driver.main([missing, "-o", str(tmp_path / "o"), "--glb-texture-size", "0"])
     assert "must be at least 1" in capsys.readouterr().err
 
 
@@ -709,14 +710,14 @@ def test_dxt3_block_decodes_its_explicit_alpha():
     blk = alpha.to_bytes(8, "little") + _dxt1_colour_block(
         0xFFFF, 0x0000, [i % 4 for i in range(16)]
     )
-    rgba = we.decode_dxt_base(blk, 4, 4, "DXT3")
+    rgba = texture_decode.decode_dxt_base(blk, 4, 4, "DXT3")
     grey = [255, 0, 170, 85]  # c0, c1, 2/3 c0 + 1/3 c1, 1/3 c0 + 2/3 c1
     for i in range(16):
         y, x = divmod(i, 4)
         assert rgba[y, x].tolist() == [grey[i % 4]] * 3 + [17 * i], i
     # a layer of enum 6 goes through it (1.4.0 decoded it as DXT5)
-    assert np.array_equal(we.decode_one_layer(blk, 6, 4, 4), rgba)
-    assert we.FOURCC["DXT3"] == b"DXT3"
+    assert np.array_equal(texture_decode.decode_one_layer(blk, 6, 4, 4), rgba)
+    assert texture_decode.FOURCC["DXT3"] == b"DXT3"
 
 
 def test_dxt5_block_decodes_its_interpolated_alpha():
@@ -725,7 +726,7 @@ def test_dxt5_block_decodes_its_interpolated_alpha():
     for i, v in enumerate(idx):
         bits |= v << (3 * i)
     blk = bytes([40, 200]) + bits.to_bytes(6, "little") + _dxt1_colour_block(0xFFFF, 0, [0] * 16)
-    rgba = we.decode_dxt_base(blk, 4, 4, "DXT5")
+    rgba = texture_decode.decode_dxt_base(blk, 4, 4, "DXT5")
     want = {0: 40, 1: 200, 6: 0, 7: 255}
     for i in range(16):
         y, x = divmod(i, 4)
@@ -752,7 +753,7 @@ def _d3d_bc4(e0, e1):
 def test_bc4_palette_is_rounded_like_d3d(e0, e1):
     idx = [i % 8 for i in range(16)]
     blk = np.frombuffer(_bc4(e0, e1, idx), np.uint8).reshape(1, 8)
-    got = we._bc4_channel(blk, 4, 4).reshape(-1).tolist()
+    got = texture_decode._bc4_channel(blk, 4, 4).reshape(-1).tolist()
     pal = _d3d_bc4(e0, e1)
     assert got == [pal[i % 8] for i in range(16)]
     if (e0, e1) == (200, 10):
@@ -762,15 +763,15 @@ def test_bc4_palette_is_rounded_like_d3d(e0, e1):
 def test_bc5_blocks_and_the_pc_channel_order():
     first = _bc4(200, 10, [0] * 16)  # every texel 200
     second = _bc4(30, 60, [0] * 16)  # every texel 30
-    a, b = we.decode_bc5_base(first + second, 4, 4)
+    a, b = texture_decode.decode_bc5_base(first + second, 4, 4)
     assert (a == 200).all() and (b == 30).all()
-    X, Y = we.ati2_xy((a, b))  # PC ATI2 keeps Y first
+    X, Y = texture_decode.ati2_xy((a, b))  # PC ATI2 keeps Y first
     assert (X == 30).all() and (Y == 200).all()
-    rgb = we.decode_one_layer(first + second, 9, 4, 4)  # PC enum 9: swapped
+    rgb = texture_decode.decode_one_layer(first + second, 9, 4, 4)  # PC enum 9: swapped
     assert rgb[0, 0, :2].tolist() == [30, 200]
-    rgb = we.decode_one_layer(first + second, 10, 4, 4)  # X360 enum 10: file order
+    rgb = texture_decode.decode_one_layer(first + second, 10, 4, 4)  # X360 enum 10: file order
     assert rgb[0, 0, :2].tolist() == [200, 30]
-    assert we.decode_bc5_base(first, 4, 4) is None  # too short
+    assert texture_decode.decode_bc5_base(first, 4, 4) is None  # too short
 
 
 # ---------------------------------------------------------------- batch_m2q

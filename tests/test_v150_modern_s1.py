@@ -20,7 +20,18 @@ import pytest
 
 import watchmen
 import kapow_props
-import watchmen_extract as we
+import audio_decode
+import extract_driver
+import extract_paths
+import kapow_block
+import model_export
+import model_header
+import model_mesh
+import naz_archive
+import obj_mtl
+import texture_carve
+import texture_header
+import texture_sheet
 from test_formats_v2 import _TEX, _block
 
 
@@ -35,18 +46,20 @@ def _notes(ei):
 
 def _restored_lashes():
     """72 UV pairs in the restored layout: four strips at the upper strip's mean."""
-    _mean, s, (du, dv) = we.LASH_RESTORE["strips"]["upper"]
-    stored = [(0.01 + 0.001 * k, 0.4137) for k in range(we.LASH_RESTORE["strip_vertices"])] * 4
+    _mean, s, (du, dv) = model_mesh.LASH_RESTORE["strips"]["upper"]
+    stored = [
+        (0.01 + 0.001 * k, 0.4137) for k in range(model_mesh.LASH_RESTORE["strip_vertices"])
+    ] * 4
     return [(s * u + du, s * v + dv) for u, v in stored]
 
 
 def test_lash_is_restored_refuses_a_round_trip_of_another_length(monkeypatch):
     uvs = _restored_lashes()
-    monkeypatch.setattr(we, "lash_restored_uvs", lambda back: list(uvs[:-1]))
+    monkeypatch.setattr(model_mesh, "lash_restored_uvs", lambda back: list(uvs[:-1]))
     with pytest.raises(ValueError, match="zip"):
-        we.lash_is_restored(uvs)
-    monkeypatch.setattr(we, "lash_restored_uvs", lambda back: list(uvs))
-    assert we.lash_is_restored(uvs) is True
+        model_mesh.lash_is_restored(uvs)
+    monkeypatch.setattr(model_mesh, "lash_restored_uvs", lambda back: list(uvs))
+    assert model_mesh.lash_is_restored(uvs) is True
 
 
 def test_mtl_writer_refuses_names_that_do_not_pair_with_the_materials(tmp_path, monkeypatch):
@@ -54,11 +67,11 @@ def test_mtl_writer_refuses_names_that_do_not_pair_with_the_materials(tmp_path, 
     list of another length used to leave materials out of the .mtl."""
     v = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)]
     args = (v, None, None, [(0, 1, 2)], [(0, 3, 0, 1, 44)], ["a", "b"], None, None)
-    we.write_obj_mtl(tmp_path / "ok.obj", "ok", *args)
+    obj_mtl.write_obj_mtl(tmp_path / "ok.obj", "ok", *args)
     assert (tmp_path / "ok.mtl").read_text().count("newmtl") == 2
-    monkeypatch.setattr(we, "unique_material_names", lambda mats: [str(m) for m in mats][:1])
+    monkeypatch.setattr(obj_mtl, "unique_material_names", lambda mats: [str(m) for m in mats][:1])
     with pytest.raises(ValueError, match="zip"):
-        we.write_obj_mtl(tmp_path / "bad.obj", "bad", *args)
+        obj_mtl.write_obj_mtl(tmp_path / "bad.obj", "bad", *args)
 
 
 def test_rows3_refuses_ragged_columns():
@@ -69,8 +82,8 @@ def test_rows3_refuses_ragged_columns():
             return 2
 
     with pytest.raises(ValueError, match="zip"):
-        we._rows3(Ragged())
-    assert we._rows3(np.arange(6.0).reshape(2, 3)) == [(0.0, 1.0, 2.0), (3.0, 4.0, 5.0)]
+        model_mesh._rows3(Ragged())
+    assert model_mesh._rows3(np.arange(6.0).reshape(2, 3)) == [(0.0, 1.0, 2.0), (3.0, 4.0, 5.0)]
 
 
 # ---------------------------------------------------------------------------
@@ -79,14 +92,14 @@ def test_rows3_refuses_ragged_columns():
 
 
 def _eocd(titem, doffs):
-    return struct.pack("<IHHHHIIH", we.NAZ_HEAD, 0, 0, titem, titem, 0, doffs, 0)
+    return struct.pack("<IHHHHIIH", naz_archive.NAZ_HEAD, 0, 0, titem, titem, 0, doffs, 0)
 
 
 def test_naz_entries_notes_the_central_directory_record(tmp_path):
     p = tmp_path / "bad.naz"
     p.write_bytes(b"\0" * 64 + _eocd(3, 0))
     with pytest.raises(ValueError, match="bad central-dir magic at 0x0") as ei:
-        list(we.naz_entries(p))
+        list(naz_archive.naz_entries(p))
     assert "central-directory record 0 of 3 at 0x0" in _notes(ei)
     assert str(p) in _notes(ei)
     assert str(ei.value) == "bad central-dir magic at 0x0"  # the message is unchanged
@@ -96,39 +109,39 @@ def test_naz_entries_notes_the_archive_that_is_not_one(tmp_path):
     p = tmp_path / "plain.zip"
     p.write_bytes(b"PK" + b"\0" * 40)
     with pytest.raises(ValueError, match="not a NAZ archive") as ei:
-        list(we.naz_entries(p))
+        list(naz_archive.naz_entries(p))
     assert str(p) in _notes(ei) and "EOCD record at 0x14 of 42 bytes" in _notes(ei)
 
 
 def test_naz_read_notes_the_entry(tmp_path):
     p = tmp_path / "x.naz"
     p.write_bytes(b"\0" * 16 + b"\xff\xfe\xfd\xfc not deflate")
-    bad = we.NazEntry("/levels/x.block_h_z", 8, 16, 100, 16)
+    bad = naz_archive.NazEntry("/levels/x.block_h_z", 8, 16, 100, 16)
     with pytest.raises(zlib.error) as ei:
-        we.naz_read(p, bad)
+        naz_archive.naz_read(p, bad)
     n = _notes(ei)
     assert "entry /levels/x.block_h_z, 16 bytes stored at 0x10, method 8" in n and str(p) in n
-    other = we.NazEntry("/levels/y.bin", 9, 4, 4, 0)
+    other = naz_archive.NazEntry("/levels/y.bin", 9, 4, 4, 0)
     with pytest.raises(ValueError, match="unsupported compression 9") as ei:
-        we.naz_read(p, other)
+        naz_archive.naz_read(p, other)
     assert "entry /levels/y.bin, 4 bytes stored at 0x0, method 9" in _notes(ei)
-    stored = we.NazEntry("/levels/z.bin", 0, 4, 4, 0)
-    assert we.naz_read(p, stored) == b"\0" * 4  # the good paths are untouched
+    stored = naz_archive.NazEntry("/levels/z.bin", 0, 4, 4, 0)
+    assert naz_archive.naz_read(p, stored) == b"\0" * 4  # the good paths are untouched
 
 
 def test_extract_block_notes_a_short_header():
     with pytest.raises(struct.error) as ei:
-        list(we.extract_block(b"\0" * 100, None))
+        list(kapow_block.extract_block(b"\0" * 100, None))
     assert "block header: 100 bytes, language slot 0" in _notes(ei)
 
 
 def test_extract_block_notes_the_asset_whose_blob_fails(monkeypatch):
     blob = zlib.compress(b"\x08\0\0\0Texture\0" + b"\0" * 200)
     h, s = _block([("tex_a", _TEX, blob, None)])
-    assert [e.name for e, _h, _s in we.extract_block(h, s)] == ["tex_a"]
+    assert [e.name for e, _h, _s in kapow_block.extract_block(h, s)] == ["tex_a"]
     monkeypatch.setenv("WATCHMEN_MAX_INFLATE", "64")
     with pytest.raises(ValueError, match="inflate ceiling") as ei:
-        list(we.extract_block(h, s))
+        list(kapow_block.extract_block(h, s))
     n = _notes(ei)
     assert "block asset tex_a (record 0, type Texture, little-endian (PC))" in n
     assert "header blob at 0x%X, %d bytes" % (400 + 24 + 4 + 4 + 6 + 1, len(blob)) in n
@@ -145,22 +158,22 @@ def _trailer_block(blob):
 def test_block_trailer_notes_both_layouts_and_keeps_the_report_text():
     h = _trailer_block(struct.pack("<I", 1))  # one automatic set, then the blob ends
     with pytest.raises(ValueError, match="read past its end") as ei:
-        we.parse_block_trailer(h)
+        kapow_block.parse_block_trailer(h)
     assert (
         "block trailer at 0x190, 4 bytes, little-endian (PC): read with 3-float and with "
         "4-float stream-set bounds" in _notes(ei)
     )
     # block_stream_sets reports the message alone (what the extract log shows)
-    assert we.block_stream_sets(h) == ([], "block trailer: read past its end")
+    assert kapow_block.block_stream_sets(h) == ([], "block trailer: read past its end")
 
 
 def test_carve_texture_notes_the_texture(tmp_path, monkeypatch):
     def boom(*a, **k):
         raise struct.error("unpack_from requires a buffer of at least 8 bytes")
 
-    monkeypatch.setattr(we, "_is_texture", boom)
+    monkeypatch.setattr(texture_header, "is_texture_header", boom)
     with pytest.raises(struct.error) as ei:
-        we.carve_texture(b"\0" * 32, b"\0" * 6, tmp_path / "Wall.bmp")
+        texture_carve.carve_texture(b"\0" * 32, b"\0" * 6, tmp_path / "Wall.bmp")
     assert "texture Wall.bmp: header 6 bytes, stream 32 bytes, byte order not known" in _notes(ei)
 
 
@@ -168,10 +181,10 @@ def test_decode_model_notes_the_model_and_the_console(tmp_path, monkeypatch):
     def boom(*a, **k):
         raise ValueError("vertex format 99")
 
-    monkeypatch.setattr(we, "_header_model_plan", boom)
+    monkeypatch.setattr(model_header, "console_header_decode", boom)  # the plan's first step
     monkeypatch.setenv("WATCHMEN_CONSOLE", "ps3")
     with pytest.raises(ValueError, match="vertex format 99") as ei:
-        we.decode_model(b"\0" * 12, b"\0" * 40, tmp_path / "Crate.obj", order=">")
+        model_export.decode_model(b"\0" * 12, b"\0" * 40, tmp_path / "Crate.obj", order=">")
     assert (
         "model Crate.obj: header 12 bytes, stream 40 bytes, big-endian (Xbox 360 / PS3), "
         "platform ps3" in _notes(ei)
@@ -203,11 +216,14 @@ def test_cli_prints_the_notes_under_the_error(monkeypatch, capsys):
 def test_batched_pairs_and_cached_tables_match_the_loops():
     v = tuple(range(12))
     assert list(itertools.batched(v, 2)) == [(v[2 * k], v[2 * k + 1]) for k in range(6)]
-    assert we.ADPCM_COEF_PAIRS == tuple(zip(we._C1, we._C2))
-    assert we.asset_type_name(kapow_props.name_hash("Texture")) == "Texture"
-    assert we.asset_type_name(0) == ""
-    assert we.sheet_keys() is we.sheet_keys() and we.sheet_hashes() is we.sheet_hashes()
-    assert we._names_mod() is we._names_mod()
+    assert audio_decode.ADPCM_COEF_PAIRS == tuple(zip(audio_decode._C1, audio_decode._C2))
+    assert kapow_block.asset_type_name(kapow_props.name_hash("Texture")) == "Texture"
+    assert kapow_block.asset_type_name(0) == ""
+    assert (
+        texture_sheet.sheet_keys() is texture_sheet.sheet_keys()
+        and texture_sheet.sheet_hashes() is texture_sheet.sheet_hashes()
+    )
+    assert extract_paths.names_module() is extract_paths.names_module()
 
 
 def test_move_out_option_strips_the_prefix_only():
@@ -227,30 +243,35 @@ def test_cached_tables_hold_what_their_sources_give():
     import kapow_json
     import level_meta
 
-    wlib = os.path.dirname(os.path.abspath(we.__file__))
+    wlib = os.path.dirname(os.path.abspath(kapow_block.__file__))
 
     def shipped(name):
         with open(os.path.join(wlib, name), encoding="utf-8") as fh:
             return json.load(fh)
 
-    assert we._asset_types() == {kapow_props.name_hash(n): n for n in we.ASSET_TYPE_NAMES}
-    sheet_names = [*we.TEXTURE_SHEET_PROPS, "integer", "truth", "number"]
-    assert we.sheet_hashes() == {n: kapow_props.name_hash(n) for n in sheet_names}
+    assert kapow_block._asset_types() == {
+        kapow_props.name_hash(n): n for n in kapow_block.ASSET_TYPE_NAMES
+    }
+    sheet_names = [*texture_sheet.TEXTURE_SHEET_PROPS, "integer", "truth", "number"]
+    assert texture_sheet.sheet_hashes() == {n: kapow_props.name_hash(n) for n in sheet_names}
     types = ("number", "integer", "truth", "string", "vector", "color")
-    assert we.sheet_keys() == (
-        {kapow_props.name_hash(n): n for n in we.SHEET_PROPERTIES}
+    assert texture_sheet.sheet_keys() == (
+        {kapow_props.name_hash(n): n for n in texture_sheet.SHEET_PROPERTIES}
         | {("type", kapow_props.name_hash(t)): t for t in types}
-        | {("type", we._T_UNIQUE_ID): "id"}
+        | {("type", texture_sheet._T_UNIQUE_ID): "id"}
     )
-    assert we._names_mod() is canonical_names and we._kapow_json() is kapow_json
+    assert (
+        extract_paths.names_module() is canonical_names
+        and extract_driver._kapow_json() is kapow_json
+    )
     assert canonical_names.table() == dict(shipped("canonical_names.json")["names"])
     assert engine_enums.data() == shipped("engine_enums.json")
     assert level_meta.input_codes() == shipped("input_code_enums.json")
     assert engine_schema.prop_names() == gen_data.derive_prop_names(engine_schema.reg())
     for table in (
-        we._asset_types,
-        we.sheet_hashes,
-        we.sheet_keys,
+        kapow_block._asset_types,
+        texture_sheet.sheet_hashes,
+        texture_sheet.sheet_keys,
         canonical_names.table,
         engine_enums.data,
         level_meta.input_codes,

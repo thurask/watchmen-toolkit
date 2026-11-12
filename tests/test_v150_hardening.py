@@ -375,20 +375,20 @@ def test_rows_csv_guards_keys_and_texts_and_the_json_stays_verbatim():
     ],
 )
 def test_no_trailing_dots(part, out):
-    import watchmen_extract as we
+    import extract_paths
 
-    assert we._no_trailing_dots(part) == out
+    assert extract_paths._no_trailing_dots(part) == out
 
 
 def test_safe_replaces_trailing_dots_and_spaces_on_every_system(tmp_path):
-    import watchmen_extract as we
+    import extract_paths
 
-    assert we.safe(tmp_path, "Art/Foo. /x.png") == tmp_path / "Art" / "Foo__" / "x.png"
-    assert we.safe(tmp_path, "Art/Foo/x.png") == tmp_path / "Art" / "Foo" / "x.png"
+    assert extract_paths.safe(tmp_path, "Art/Foo. /x.png") == tmp_path / "Art" / "Foo__" / "x.png"
+    assert extract_paths.safe(tmp_path, "Art/Foo/x.png") == tmp_path / "Art" / "Foo" / "x.png"
     # two names Windows would put in one folder stay apart
-    assert we.safe(tmp_path, "a/Foo./b") != we.safe(tmp_path, "a/Foo/b")
-    assert we.safe(tmp_path, "CON. /x") == tmp_path / "CON__" / "x"
-    assert we.out_rel(tmp_path, "Art/Foo. /x.png") == "Art/Foo__/x.png"
+    assert extract_paths.safe(tmp_path, "a/Foo./b") != extract_paths.safe(tmp_path, "a/Foo/b")
+    assert extract_paths.safe(tmp_path, "CON. /x") == tmp_path / "CON__" / "x"
+    assert extract_paths.out_rel(tmp_path, "Art/Foo. /x.png") == "Art/Foo__/x.png"
 
 
 def test_long_path_only_on_windows_and_only_when_long():
@@ -417,10 +417,10 @@ def test_plain_path_and_rel_path():
 
 def test_safe_is_unchanged_here(tmp_path):
     """On this system (not Windows) safe() gives the plain path even when it is long."""
-    import watchmen_extract as we
+    import extract_paths
 
     name = "/".join(["folder_%02d_xxxxxxxxxxxxxxxxxxxxxxxx" % i for i in range(10)]) + "/x.png"
-    out = we.safe(tmp_path, name)
+    out = extract_paths.safe(tmp_path, name)
     if os.name != "nt":
         assert out == tmp_path.joinpath(*name.split("/"))
         assert len(str(out)) >= wutil.LONG_PATH_LIMIT

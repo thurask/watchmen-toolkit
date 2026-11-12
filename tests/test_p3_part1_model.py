@@ -16,7 +16,10 @@ import parse_model_nodes as pmn
 import ragdoll_rig as rr
 import skeleton_records as sr
 import variant_glb as vg
-import watchmen_extract as we
+import model_export
+import model_header
+import model_mesh
+import obj_mtl
 
 TEXTURES = ["/art/t/Wall_01.bmp", "/art/t/Trim_02.bmp"]
 _BODY_KEYS = (
@@ -224,10 +227,10 @@ def build(bo="<", layout="part1", meshes=True, typed_bag=None, extra=(), console
 def test_header_is_read_in_its_own_layout_only(bo, layout):
     h, _s = build(bo, layout)
     other = "part2" if layout == "part1" else "part1"
-    M = we.parse_model_header(h, bo)
+    M = model_header.parse_model_header(h, bo)
     assert M is not None and M["layout"] == layout
-    assert we.model_header_layout_hint(h, bo) == layout
-    assert we.parse_model_header(h, bo, layout=other) is None
+    assert model_header.model_header_layout_hint(h, bo) == layout
+    assert model_header.parse_model_header(h, bo, layout=other) is None
     assert [P["name"] for P in M["parts"]] == ["", "Pelvis", "Spine"]
     kinds = [(b["kind"], b["lod"], b["name"]) for b in M["buffers"]]
     assert kinds == [
@@ -243,8 +246,8 @@ def test_header_is_read_in_its_own_layout_only(bo, layout):
 
 
 def test_both_layouts_give_the_same_model():
-    a = we.parse_model_header(build("<", "part1")[0], "<")
-    b = we.parse_model_header(build("<", "part2")[0], "<")
+    a = model_header.parse_model_header(build("<", "part1")[0], "<")
+    b = model_header.parse_model_header(build("<", "part2")[0], "<")
     strip = lambda buf: {k: v for k, v in buf.items() if k not in ("no_defer", "has_cloth_mesh")}
     assert [strip(x) for x in a["buffers"]] == [strip(x) for x in b["buffers"]]
     assert [P["pos"] for P in a["parts"]] == [P["pos"] for P in b["parts"]]
@@ -257,22 +260,22 @@ def test_a_header_without_submeshes_takes_the_layout_of_its_bag(typed):
     layout = "part2" if typed else "part1"
     h, s = build("<", layout, meshes=False)
     assert s == b""
-    assert we.parse_model_header(h, "<", layout="part1") is not None
-    assert we.parse_model_header(h, "<", layout="part2") is not None
-    assert we.parse_model_header(h, "<")["layout"] == layout
+    assert model_header.parse_model_header(h, "<", layout="part1") is not None
+    assert model_header.parse_model_header(h, "<", layout="part2") is not None
+    assert model_header.parse_model_header(h, "<")["layout"] == layout
 
 
 def test_layout_comes_from_the_records_when_the_bag_points_the_other_way():
     """The hint is tried first, not trusted: the submesh records decide."""
     h, _s = build("<", "part1", typed_bag=True)
-    assert we.model_header_layout_hint(h, "<") == "part2"
-    assert we.parse_model_header(h, "<")["layout"] == "part1"
+    assert model_header.model_header_layout_hint(h, "<") == "part2"
+    assert model_header.parse_model_header(h, "<")["layout"] == "part1"
 
 
 def test_stream_of_a_part1_pc_model_tiles_exactly():
     h, s = build("<", "part1")
-    M = we.parse_model_header(h, "<")
-    bufs = we.model_stream_layout(M, s, "<")
+    M = model_header.parse_model_header(h, "<")
+    bufs = model_header.model_stream_layout(M, s, "<")
     assert [(b["format"], b["stride"], b["vb"]) for b in bufs] == [
         (5, 44, 0),
         (5, 44, 237),
@@ -280,7 +283,7 @@ def test_stream_of_a_part1_pc_model_tiles_exactly():
         (5, 44, 615),
     ]
     assert bufs[0]["clusters"] == (192, 1)
-    assert we.model_stream_layout(M, s + b"\0", "<") is None
+    assert model_header.model_stream_layout(M, s + b"\0", "<") is None
 
 
 # ---------------------------------------------------------------------------
@@ -290,7 +293,7 @@ def test_stream_of_a_part1_pc_model_tiles_exactly():
 def test_sidecar_of_a_part1_header_is_complete_and_says_its_layout(bo):
     h1, _ = build(bo, "part1")
     h2, _ = build(bo, "part2")
-    m1, m2 = we.model_meta(h1, order=bo), we.model_meta(h2, order=bo)
+    m1, m2 = model_export.model_meta(h1, order=bo), model_export.model_meta(h2, order=bo)
     assert m1["header_layout"] == "part1" and "header_layout" not in m2
     assert m1["lod_count"] == 2 and [l["max_distance"] for l in m1["lods"]] == [30.0, 60.0]
     assert m1["not_exported"] == {"shadow_hull": 1, "occluder": 0}
@@ -304,7 +307,7 @@ def test_scan_decoded_console_part1_model_gets_the_full_sidecar():
     """Xbox 360 Part 1: the mesh still comes from the descriptor scan, the header
     is read (it was the reduced sidecar with lod_count null and five LOD slots)."""
     h, _s = build(">", "part1")
-    meta = we.model_meta_scanned(h, ">")
+    meta = model_export.model_meta_scanned(h, ">")
     assert meta["header_decoded"] is True and meta["mesh_source"] == "descriptor scan"
     assert meta["header_layout"] == "part1" and meta["lod_count"] == 2 and len(meta["lods"]) == 2
     assert "not_decoded" not in meta
@@ -312,8 +315,8 @@ def test_scan_decoded_console_part1_model_gets_the_full_sidecar():
 
 def test_header_of_neither_layout_keeps_the_reduced_sidecar_with_its_marker():
     h = _str("ModelRes", "<") + _bag("<", False) + bytes(40)
-    assert we.parse_model_header(h, "<") is None
-    meta = we.model_meta_scanned(h, "<")
+    assert model_header.parse_model_header(h, "<") is None
+    meta = model_export.model_meta_scanned(h, "<")
     assert meta["header_decoded"] is False and meta["lod_count"] is None
     assert "lod_count" in meta["not_decoded"] and "neither" in meta["not_decoded_note"]
 
@@ -327,16 +330,16 @@ def test_pc_part1_model_is_decoded_header_driven(tmp_path, monkeypatch):
     def fake(path, name, v, n, uv, tris, subs, mats, tex_index, log):
         cap.update(v=list(v), tris=list(tris), subs=list(subs), mats=list(mats))
 
-    monkeypatch.setattr(we, "write_obj_mtl", fake)
+    monkeypatch.setattr(obj_mtl, "write_obj_mtl", fake)
     h, s = build("<", "part1")
-    assert we.decode_model(h, s, tmp_path / "m.obj") is True
+    assert model_export.decode_model(h, s, tmp_path / "m.obj") is True
     # LOD 0 only, no shadow hull, materials from the submesh records
     assert sorted({v[2] for v in cap["v"]}) == [0.0, 1.0]
     assert cap["mats"] == ["Wall_01", "Trim_02"] and len(cap["tris"]) == 4
     meta = json.loads((tmp_path / "m.model.json").read_text())
     assert meta["header_layout"] == "part1" and meta["lod_count"] == 2
     assert "mesh_source" not in meta and "not_decoded" not in meta
-    mesh = we.decode_model_mesh(h, s, lod="all")
+    mesh = model_mesh.decode_model_mesh(h, s, lod="all")
     assert [m["name"] for m in mesh["submeshes"]] == ["Body", "BodyLow", "Spine"]
     assert mesh["submeshes"][0]["color"][0].tolist() == [10, 20, 30, 255]
     assert np.allclose(mesh["submeshes"][0]["tangent"][0], [1, 0, 0])
@@ -344,7 +347,7 @@ def test_pc_part1_model_is_decoded_header_driven(tmp_path, monkeypatch):
 
 def test_character_piece_of_a_pc_part1_model_gets_its_vertex_attributes():
     h, s = build("<", "part1")
-    b = we.model_stream_layout(we.parse_model_header(h, "<"), s, "<")[0]
+    b = model_header.model_stream_layout(model_header.parse_model_header(h, "<"), s, "<")[0]
     at = vg.buffer_vertex_attrs(h, s, "<", b["vb"], b["vertex_count"], b["stride"])
     assert at is not None and at["has_color"] is True
     assert np.allclose(at["normal"][0], [0, 0, 1]) and np.allclose(at["tangent"][0], [1, 0, 0])
@@ -467,8 +470,8 @@ def test_node_tail_walks_the_mesh_section_of_either_layout(bo):
 @pytest.mark.parametrize("console", ["x360", "ps3"])
 def test_console_stream_tiles_with_the_console_strides_and_cluster_size(layout, console):
     h, s = build(">", layout, console=console)
-    M = we.parse_model_header(h, ">")
-    bufs = we.model_stream_layout(M, s, ">")
+    M = model_header.parse_model_header(h, ">")
+    bufs = model_header.model_stream_layout(M, s, ">")
     assert [(b["format"], b["stride"], b["vb"]) for b in bufs] == [
         (5, 32, 0),
         (5, 32, 197),
@@ -476,19 +479,24 @@ def test_console_stream_tiles_with_the_console_strides_and_cluster_size(layout, 
         (5, 32, 527),
     ]
     assert bufs[0]["clusters"] == (144, 1)  # one 48-byte record
-    assert we.model_stream_layout(M, s + b"\0", ">") is None
-    assert we.model_stream_layout(M, s, "<") is None
-    assert we.vertex_strides(">")[5] == 32 and we.vertex_strides("<")[5] == 44
+    assert model_header.model_stream_layout(M, s + b"\0", ">") is None
+    assert model_header.model_stream_layout(M, s, "<") is None
+    assert model_header.vertex_strides(">")[5] == 32 and model_header.vertex_strides("<")[5] == 44
     # the PC stream of the same model does not tile as a console one
-    assert we.model_stream_layout(we.parse_model_header(h, ">"), build(">", layout)[1], ">") is None
+    assert (
+        model_header.model_stream_layout(
+            model_header.parse_model_header(h, ">"), build(">", layout)[1], ">"
+        )
+        is None
+    )
 
 
 @pytest.mark.parametrize("console", ["x360", "ps3"])
 def test_console_mesh_equals_the_pc_mesh_vertex_for_vertex(console):
-    pc = we.decode_model_mesh(*build("<", "part2"), lod="all")
-    co = we.decode_model_mesh(*build(">", "part2", console=console), lod="all")
+    pc = model_mesh.decode_model_mesh(*build("<", "part2"), lod="all")
+    co = model_mesh.decode_model_mesh(*build(">", "part2", console=console), lod="all")
     assert co["order"] == ">" and pc["order"] == "<" and "not_decoded" not in co
-    assert we.console_color_order(
+    assert model_mesh.console_color_order(
         build(">", "part2", console=console)[1], co["model"]["buffers"]
     ) == ("argb" if console == "x360" else "rgba")
     for a, b in zip(pc["submeshes"], co["submeshes"]):
@@ -510,10 +518,13 @@ def test_console_model_is_decoded_header_driven(tmp_path, monkeypatch):
     def fake(path, name, v, n, uv, tris, subs, mats, tex_index, log):
         cap.update(v=list(v), tris=list(tris), mats=list(mats))
 
-    monkeypatch.setattr(we, "write_obj_mtl", fake)
+    monkeypatch.setattr(obj_mtl, "write_obj_mtl", fake)
     h, s = build(">", "part1", console="x360")
     logs = []
-    assert we.decode_model(h, s, tmp_path / "m.obj", log=lambda *a: logs.append(a[0])) is True
+    assert (
+        model_export.decode_model(h, s, tmp_path / "m.obj", log=lambda *a: logs.append(a[0]))
+        is True
+    )
     assert sorted({v[2] for v in cap["v"]}) == [0.0, 1.0]  # LOD 0, no LOD 1, no shadow hull
     assert cap["mats"] == ["Wall_01", "Trim_02"] and len(cap["tris"]) == 4
     meta = json.loads((tmp_path / "m.model.json").read_text())
@@ -529,35 +540,38 @@ def test_console_colour_is_not_guessed_when_the_model_does_not_show_the_order(
     consoles, so the alpha byte cannot be told -- no colour, a marker, a log line."""
     h, s = build(">", "part2", console="x360")
     s = s.replace(bytes([255, 10, 20, 30]), bytes([255, 255, 20, 255]))
-    M = we.parse_model_header(h, ">")
-    we.model_stream_layout(M, s, ">")
-    assert we.console_color_order(s, M["buffers"]) is None
-    assert len(we.console_color_undecoded(s, M["buffers"])) == 3
-    mesh = we.decode_model_mesh(h, s, lod="all")
+    M = model_header.parse_model_header(h, ">")
+    model_header.model_stream_layout(M, s, ">")
+    assert model_mesh.console_color_order(s, M["buffers"]) is None
+    assert len(model_mesh.console_color_undecoded(s, M["buffers"])) == 3
+    mesh = model_mesh.decode_model_mesh(h, s, lod="all")
     assert mesh["not_decoded"] == ["COLOR_0"] and "color" not in mesh["submeshes"][0]
     assert [b["has_color"] for b in mesh["model"]["buffers"]] == [0, 0, 0, 0]
     assert mesh["model"]["buffers"][0]["has_color_file"] == 1
     b = M["buffers"][0]
     at = vg.buffer_vertex_attrs(h, s, ">", b["vb"], b["vertex_count"], b["stride"])
     assert at["color_not_decoded"] is True and at["has_color"] is False  # frame kept
-    monkeypatch.setattr(we, "write_obj_mtl", lambda *a: None)
+    monkeypatch.setattr(obj_mtl, "write_obj_mtl", lambda *a: None)
     logs = []
-    assert we.decode_model(h, s, tmp_path / "m.obj", log=lambda *a: logs.append(a[0])) is True
+    assert (
+        model_export.decode_model(h, s, tmp_path / "m.obj", log=lambda *a: logs.append(a[0]))
+        is True
+    )
     meta = json.loads((tmp_path / "m.model.json").read_text())
     assert meta["not_decoded"] == ["COLOR_0"] and "order" in meta["not_decoded_note"]
     assert sum("vertex colours not decoded" in l for l in logs) == 1
     # plain white is the same in either order: decoded, no marker
     white = build(">", "part2", console="ps3")[1].replace(bytes([10, 20, 30, 255]), b"\xff" * 4)
-    assert we.console_color_order(white, M["buffers"]) is None
-    assert we.console_color_undecoded(white, M["buffers"]) == []
-    mesh = we.decode_model_mesh(h, white, lod=0)
+    assert model_mesh.console_color_order(white, M["buffers"]) is None
+    assert model_mesh.console_color_undecoded(white, M["buffers"]) == []
+    mesh = model_mesh.decode_model_mesh(h, white, lod=0)
     assert "not_decoded" not in mesh and mesh["submeshes"][0]["color"].tolist() == [[255] * 4] * 4
 
 
 @pytest.mark.parametrize("console", ["x360", "ps3"])
 def test_console_character_piece_gets_its_vertex_attributes(console):
     h, s = build(">", "part1", console=console)
-    b = we.model_stream_layout(we.parse_model_header(h, ">"), s, ">")[3]
+    b = model_header.model_stream_layout(model_header.parse_model_header(h, ">"), s, ">")[3]
     at = vg.buffer_vertex_attrs(h, s, ">", b["vb"], b["vertex_count"], b["stride"])
     assert at["color"].tolist() == [[10, 20, 30, 255]] * 4 and at["has_color"] is True
     assert np.allclose(at["normal"][0], [0, 0, 1], atol=2e-3)
@@ -567,19 +581,22 @@ def test_console_character_piece_gets_its_vertex_attributes(console):
 
 
 def test_console_stream_that_does_not_tile_falls_back_to_the_scan_sidecar(tmp_path, monkeypatch):
-    monkeypatch.setattr(we, "write_obj_mtl", lambda *a: None)
+    monkeypatch.setattr(obj_mtl, "write_obj_mtl", lambda *a: None)
     h, s = build(">", "part2", console="ps3")
-    assert we._header_model_plan(h, s + b"\0", 0, ">") is None
-    assert we.decode_model_mesh(h, s + b"\0") is None
+    assert model_export._header_model_plan(h, s + b"\0", 0, ">") is None
+    assert model_mesh.decode_model_mesh(h, s + b"\0") is None
 
 
 def test_console_models_can_be_sent_back_to_the_scan(monkeypatch):
     h, s = build(">", "part2", console="x360")
-    b = we.model_stream_layout(we.parse_model_header(h, ">"), s, ">")[0]
-    assert we.console_header_decode() is True
+    b = model_header.model_stream_layout(model_header.parse_model_header(h, ">"), s, ">")[0]
+    assert model_header.console_header_decode() is True
     monkeypatch.setenv("WATCHMEN_CONSOLE_MODELS", "scan")
-    assert we.console_header_decode() is False
-    assert we._header_model_plan(h, s, 0, ">") is None and we.decode_model_mesh(h, s) is None
+    assert model_header.console_header_decode() is False
+    assert (
+        model_export._header_model_plan(h, s, 0, ">") is None
+        and model_mesh.decode_model_mesh(h, s) is None
+    )
     assert vg.buffer_vertex_attrs(h, s, ">", b["vb"], b["vertex_count"], b["stride"]) is None
     # PC models are not affected by the switch
-    assert we.decode_model_mesh(*build("<", "part1")) is not None
+    assert model_mesh.decode_model_mesh(*build("<", "part1")) is not None

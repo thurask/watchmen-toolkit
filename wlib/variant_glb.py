@@ -15,7 +15,11 @@ from wutil import load_npz, order_name, platform_name, restricted_load
 _D = os.path.dirname(os.path.abspath(__file__))
 if _D not in sys.path:
     sys.path.append(_D)  # append, never insert(0): flat module names must not shadow the stdlib
-import watchmen_extract as we  # noqa: E402
+import kapow_block  # noqa: E402
+import model_header  # noqa: E402
+import model_mesh  # noqa: E402
+import naz_archive  # noqa: E402
+import texture_sheet  # noqa: E402
 import rig_glb  # noqa: E402
 import gltf_build  # noqa: E402
 
@@ -254,34 +258,42 @@ _LAYOUT_CACHE = {}
 def buffer_vertex_attrs(mh, ms, order, vbo, nv, stride, platform=None):
     """Per-vertex attributes for the vertex buffer the descriptor scan located at
     stream offset `vbo` -- taken from the header-driven decode
-    (watchmen_extract.parse_model_header + model_stream_layout), so nothing is
+    (model_header.parse_model_header + model_stream_layout), so nothing is
     guessed: the buffer must be a format 5/6 render buffer whose computed
     offset, vertex count and stride equal the scan's.  None otherwise (a buffer
     the header does not account for).
 
     platform: the console of a big-endian model ("x360" / "ps3"; None = what
-    watchmen_extract.console_platform gives).  It decides the colour byte order
-    (watchmen_extract.console_color_order).  A console model whose colour order stays unknown
-    (watchmen_extract.console_color_undecoded) still gets its normal and tangent
+    model_mesh.console_platform gives).  It decides the colour byte order
+    (model_mesh.console_color_order).  A console model whose colour order stays unknown
+    (model_mesh.console_color_undecoded) still gets its normal and tangent
     frame: the result then has "color_not_decoded": True, a white `color` and
     has_color / has_alpha False for every buffer of the model, like the static
     model path."""
     if order not in ("<", ">") or ms is None:
         return None
-    if order == ">" and not we.console_header_decode():
+    if order == ">" and not model_header.console_header_decode():
         return None
     # the stream is part of the key: the Xbox 360 and PS3 copies of a model share
     # the header and the stream length and differ in the colour bytes
-    key = (zlib.crc32(mh), len(mh), len(ms), zlib.crc32(ms), order, platform, we.console_platform())
+    key = (
+        zlib.crc32(mh),
+        len(mh),
+        len(ms),
+        zlib.crc32(ms),
+        order,
+        platform,
+        model_mesh.console_platform(),
+    )
     bufs = _LAYOUT_CACHE.get(key)
     if bufs is None:
         bufs = {}
         try:
-            M = we.parse_model_header(mh, order)
-            if M is not None and we.model_stream_layout(M, ms, order) is not None:
+            M = model_header.parse_model_header(mh, order)
+            if M is not None and model_header.model_stream_layout(M, ms, order) is not None:
                 cargs = (ms, M["buffers"], platform, M.get("layout"))
-                corder = we.console_color_order(*cargs) if order == ">" else None
-                lost = order == ">" and bool(we.console_color_undecoded(*cargs))
+                corder = model_mesh.console_color_order(*cargs) if order == ">" else None
+                lost = order == ">" and bool(model_mesh.console_color_undecoded(*cargs))
                 for b in M["buffers"]:
                     if b["format"] in (5, 6) and b.get("kind") == "render":
                         bufs[b["vb"]] = (b, corder, lost)
@@ -293,7 +305,7 @@ def buffer_vertex_attrs(mh, ms, order, vbo, nv, stride, platform=None):
     b, corder, lost = bufs.get(vbo) or (None, None, False)
     if b is None or b["vertex_count"] != nv or b["stride"] != stride:
         return None
-    a = we.decode_vertex_attributes(ms, b, order, corder)
+    a = model_mesh.decode_vertex_attributes(ms, b, order, corder)
     if "tangent" not in a:
         return None
     if lost or "color" not in a:
@@ -330,11 +342,11 @@ def load_parts(mesh_names, palette_names, naz=None):
     import mesh_loader as ml
 
     found = {}
-    for st, hs in we.iter_blocks(naz):
+    for st, hs in naz_archive.iter_blocks(naz):
         if "h" not in hs:
             continue
         try:
-            it = list(we.extract_block(hs["h"], hs.get("s")))
+            it = list(kapow_block.extract_block(hs["h"], hs.get("s")))
         except Exception as ex:  # one unreadable block is logged, the walk goes on
             print("  ! block %s: %s" % (st.rsplit("/", 1)[-1], ex))
             continue
@@ -342,7 +354,7 @@ def load_parts(mesh_names, palette_names, naz=None):
             nm = e.name.rsplit("/", 1)[-1].replace(".model", "")
             if nm in mesh_names:
                 # the block path names the console (derived_x360 / derived_ps3)
-                found.setdefault(nm, []).append((h, s, we.console_platform_of(st)))
+                found.setdefault(nm, []).append((h, s, model_mesh.console_platform_of(st)))
     parts = []
     for nm in mesh_names:
         if nm not in found:
@@ -612,7 +624,7 @@ class VariantGlb:
         has_nmap = isinstance(lay, dict) and bool(lay.get("normal"))  # else TANGENT is unused
         if has_nmap and np.isfinite(tg).all() and (np.linalg.norm(tg, axis=1) > 1e-6).all():
             Tp = rig_glb.well_formed_tangents(
-                we.gltf_tangents(
+                model_mesh.gltf_tangents(
                     Np,
                     tg,
                     at["bitangent"],
@@ -682,7 +694,7 @@ class VariantGlb:
         if layers.get("blend_info"):
             # the texture is ink / light with its coverage in alpha (char_lib._blend_layer)
             bct = mat.get("pbrMetallicRoughness", {}).get("baseColorTexture", {})
-            we.blend_material(
+            texture_sheet.blend_material(
                 mat,
                 layers["blend_info"],
                 bct.get("index"),
@@ -1424,9 +1436,11 @@ class VariantGlb:
         _pieces += [p for _a, p in self.attachments or []]
         _pieces += [p for _a, p in self.alt_parts or []]
         _pieces += [p for _a, p, _s in self.outfit_parts or []]
-        if any(we.lash_is_restored(pt[4]) for _pl in _pieces for pt in _pl or ()):
+        if any(model_mesh.lash_is_restored(pt[4]) for _pl in _pieces for pt in _pl or ()):
             _w = j["asset"].setdefault("extras", {}).setdefault("watchmen", {})
-            _w["reconstruction"] = (_w.get("reconstruction") or {}) | we.lash_reconstruction_note()
+            _w["reconstruction"] = (
+                _w.get("reconstruction") or {}
+            ) | model_mesh.lash_reconstruction_note()
 
     def ragdoll_helpers(self):
         """The ragdoll rig (ragdoll_rig.glb_helpers) as helper nodes under a node
@@ -1591,7 +1605,7 @@ def write_glb(
     "alternatives".  Nodes of the same model share their vertex
     data (identical data is written once and the accessor shared), only the
     materials differ.  asset_extras: merged into asset.extras.watchmen.  A piece with restored
-    eyelash UVs (watchmen_extract.LASH_RESTORE) adds reconstruction.eyelash_uvs there.
+    eyelash UVs (model_mesh.LASH_RESTORE) adds reconstruction.eyelash_uvs there.
     ragdoll: ragdoll_rig.glb_helpers(...) -- the character's ragdoll rig as helper
     nodes under a node "ragdoll" that is in no scene (hidden like "alternatives"):
     `RB.<bone>.<i>` proxy meshes skinned rigidly to the bone's joint, `RJ.<child

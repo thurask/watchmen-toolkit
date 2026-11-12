@@ -25,7 +25,8 @@ import kapow_json as kj
 import kapow_props as kp
 import skeleton_records as sr
 import terrain_asset as ta
-import watchmen_extract as we
+import model_header
+import texture_header
 from test_interp_v2 import node
 
 
@@ -272,7 +273,7 @@ def test_model_header_names_the_bone_count_the_hidden_flag_and_the_cloth_link():
     import test_p3_part1_model as tm
 
     h, _s = tm.build("<", "part2")
-    M = we.parse_model_header(h)
+    M = model_header.parse_model_header(h)
     assert M["has_skeleton"] == 1 and M["skinned_bone_count"] is None  # stored 0xFFFFFFFF
     sm = M["parts"][1]["lods"][0][0]
     assert sm["hidden"] == sm["b24"] and not sm["hidden"]
@@ -283,7 +284,7 @@ def test_model_header_names_the_bone_count_the_hidden_flag_and_the_cloth_link():
     assert h.count(head) == 1 and h.count(rec) == 1
     h2 = h.replace(head, struct.pack("<IBIB", 0, 1, 37, 0))
     h2 = h2.replace(rec, struct.pack("<I", 1) + b"\1" + struct.pack("<I", 0))
-    M2 = we.parse_model_header(h2)
+    M2 = model_header.parse_model_header(h2)
     assert M2["skinned_bone_count"] == 37
     (hull,) = [b for b in M2["buffers"] if b["kind"] == "shadow"]
     assert hull["from_cloth"] is True and hull["cloth_submesh"] == 0  # hull of cloth submesh 0
@@ -294,8 +295,8 @@ def test_texture_slot_carries_the_usage_word():
 
     desc = f2._tex_desc(8, 8, 5, 4)
     hdr = f2._tex_header([({0: desc}, "/data/art/x/Thing.bmp")])
-    assert we.parse_texture_frames(hdr)["frames"][0]["slots"][0]["usage"] == 0
+    assert texture_header.parse_texture_frames(hdr)["frames"][0]["slots"][0]["usage"] == 0
     w, h, en, _usage = struct.unpack_from("<4I", desc, 0)
     patched = struct.pack("<4I", w, h, en, 1) + desc[16:]
     hdr = f2._tex_header([({0: patched}, "/data/art/x/Thing.bmp")])
-    assert we.parse_texture_frames(hdr)["frames"][0]["slots"][0]["usage"] == 1
+    assert texture_header.parse_texture_frames(hdr)["frames"][0]["slots"][0]["usage"] == 1

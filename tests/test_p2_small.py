@@ -34,7 +34,12 @@ import level_meta as lm
 import nav_data as nd
 import skeleton_records as sr
 import text_assets as ta
-import watchmen_extract as wx
+import extract_driver
+import extract_paths
+import model_export
+import model_mesh
+import obj_mtl
+import texture_carve
 
 import test_feature_seams as fs
 import test_formats_v2 as tf
@@ -49,7 +54,7 @@ extract = tl.extract  # the fixture: a scene with two load blocks and a nested f
 
 # ------------------------------------------------------------ repeated names
 def test_output_names_first_copy_keeps_its_name_and_a_repeat_is_not_written_again():
-    n = wx.OutputNames()
+    n = extract_paths.OutputNames()
     assert n.place("/a/Wall.bmp", "/l/one.block", b"H", b"S") == ("/a/Wall.bmp", "new")
     assert n.place("/a/Wall.bmp", "/l/two.block", b"H", b"S") == ("/a/Wall.bmp", "repeat")
     assert n.repeats == 1 and n.case_twins == [] and n.variants == []
@@ -58,7 +63,7 @@ def test_output_names_first_copy_keeps_its_name_and_a_repeat_is_not_written_agai
 def test_output_names_a_case_twin_goes_under_the_first_spelling():
     """Rubble_Rooftop_02 / Rubble_RoofTop_02 (Part 2, five blocks, same bytes): one
     file, named and labelled with the first spelling."""
-    n = wx.OutputNames()
+    n = extract_paths.OutputNames()
     n.place("/art/Rubble_Rooftop_02.model", "/l/bordello.block", b"H", b"S")
     got = n.place("/art/Rubble_RoofTop_02.model", "/l/nightclub.block", b"H", b"S")
     assert got == ("/art/Rubble_Rooftop_02.model", "repeat")
@@ -69,7 +74,7 @@ def test_output_names_a_case_twin_goes_under_the_first_spelling():
 
 def test_output_names_a_later_stream_completes_a_copy_that_had_none():
     """Part 1: the Prison block lists 22 names without the stream other blocks have."""
-    n = wx.OutputNames()
+    n = extract_paths.OutputNames()
     assert n.place("/a/Fire.bmp", "/l/Prison.block", b"H", None)[1] == "new"
     assert n.place("/a/fire.bmp", "/l/docks.block", b"H", b"S") == ("/a/Fire.bmp", "fill")
     assert n.place("/a/Fire.bmp", "/l/streets.block", b"H", b"S")[1] == "repeat"
@@ -80,7 +85,7 @@ def test_output_names_a_later_stream_completes_a_copy_that_had_none():
 def test_output_names_same_bytes_marks_a_repeat_with_the_same_stream_state():
     """Only a repeat whose header and stream state equal the copy written can be
     skipped whole; one that lacks the earlier copy's stream is still a repeat."""
-    n = wx.OutputNames()
+    n = extract_paths.OutputNames()
     n.place("/a/Fire.bmp", "/l/a.block", b"H", b"S")
     assert n.same_bytes is False  # new
     assert n.place("/a/Fire.bmp", "/l/b.block", b"H", b"S")[1] == "repeat" and n.same_bytes
@@ -94,7 +99,7 @@ def test_output_names_same_bytes_marks_a_repeat_with_the_same_stream_state():
 
 def test_output_names_different_bytes_get_their_own_documented_name():
     logged = []
-    n = wx.OutputNames(logged.append)
+    n = extract_paths.OutputNames(logged.append)
     n.place("/a/Rock.model", "/l/bordello.block", b"H", b"S")
     assert n.place("/a/Rock.model", "/l/nightclub.block", b"H2", b"S") == (
         "/a/Rock~nightclub.model",
@@ -109,8 +114,8 @@ def test_output_names_different_bytes_get_their_own_documented_name():
     assert [v[1] for v in n.variants] == ["/a/Rock~nightclub.model", "/a/rock~nightclub~2.model"]
     assert len(logged) == 2 and "different content in /l/nightclub.block" in logged[0]
     assert "/l/bordello.block" in logged[0] and "/a/Rock~nightclub.model" in logged[0]
-    assert wx.OutputNames.variant_name("Wall.bmp", "/l/a b.block") == "Wall~a_b.bmp"
-    assert wx.OutputNames.variant_name("/d/X.model", "blk", 3) == "/d/X~blk~3.model"
+    assert extract_paths.OutputNames.variant_name("Wall.bmp", "/l/a b.block") == "Wall~a_b.bmp"
+    assert extract_paths.OutputNames.variant_name("/d/X.model", "blk", 3) == "/d/X~blk~3.model"
 
 
 def _cls(name, payload=b""):
@@ -149,7 +154,7 @@ def recorded(monkeypatch):
     file holding the name they were given (the real decode_model handles a model
     without a stream, so its message is the real one)."""
     calls = {"tex": [], "mdl": []}
-    real = wx.decode_model
+    real = model_export.decode_model
 
     def carve(stream, header, out_dir, log=None):
         calls["tex"].append(out_dir.name)
@@ -177,15 +182,18 @@ def recorded(monkeypatch):
         out_path.write_bytes(out_path.stem.encode() + b"|" + stream)
         return True
 
-    monkeypatch.setattr(wx, "carve_texture", carve)
-    monkeypatch.setattr(wx, "decode_model", decode)
+    monkeypatch.setattr(texture_carve, "carve_texture", carve)
+    monkeypatch.setattr(model_export, "decode_model", decode)
     return calls
 
 
 def test_extract_writes_a_repeated_name_once_and_keeps_both_contents(tmp_path, recorded, capsys):
     files = _two_block_tree(tmp_path)
     out = tmp_path / "out"
-    assert wx.main([str(files), "-o", str(out), "--no-files", "--no-text", "--no-audio"]) == 0
+    assert (
+        extract_driver.main([str(files), "-o", str(out), "--no-files", "--no-text", "--no-audio"])
+        == 0
+    )
     log = capsys.readouterr().out
     # the texture twin and the model twin are written once, under the first spelling
     assert recorded["tex"] == ["Wall.bmp"]
@@ -240,7 +248,10 @@ def test_extract_writes_the_raw_dump_of_an_identical_copy_once(
         return real(self, data)
 
     monkeypatch.setattr(type(out), "write_bytes", write_bytes)
-    assert wx.main([str(files), "-o", str(out), "--no-files", "--no-text", "--no-audio"]) == 0
+    assert (
+        extract_driver.main([str(files), "-o", str(out), "--no-files", "--no-text", "--no-audio"])
+        == 0
+    )
     capsys.readouterr()
     # the texture twin, the model twin and the stream-less skeleton: one write each;
     # Rock has other bytes in `b` and is written under its own name
@@ -259,7 +270,9 @@ def test_extract_writes_the_raw_dump_of_an_identical_copy_once(
 
 def test_extract_summary_stays_plain_without_repeats(tmp_path, recorded, capsys):
     files = tt.loose_tree(tmp_path)  # one block, one texture, no model
-    assert wx.main([str(files), "-o", str(tmp_path / "o"), "--no-files", "--no-text"]) == 0
+    assert (
+        extract_driver.main([str(files), "-o", str(tmp_path / "o"), "--no-files", "--no-text"]) == 0
+    )
     log = capsys.readouterr().out
     assert "\nMODELS: 0  (textures indexed: " in log and "[" not in log.split("MODELS:")[1][:60]
     assert "  models      : 0\n" in log and "names       :" not in log
@@ -270,12 +283,15 @@ def test_extract_summary_stays_plain_without_repeats(tmp_path, recorded, capsys)
 def test_decode_model_says_why_nothing_was_written(tmp_path):
     lines = []
     out = tmp_path / "X.model.obj"
-    assert wx.decode_model(_cls("ModelRes"), b"", out, {}, lines.append) is False
+    assert model_export.decode_model(_cls("ModelRes"), b"", out, {}, lines.append) is False
     assert lines == [
         "      note: model X.model.obj: not decoded: empty stream: the model has no mesh data"
     ]
     lines.clear()
-    assert wx.decode_model(_cls("ModelRes"), b"\0" * 64, out, {}, lines.append, order=">") is False
+    assert (
+        model_export.decode_model(_cls("ModelRes"), b"\0" * 64, out, {}, lines.append, order=">")
+        is False
+    )
     assert len(lines) == 1 and "not decoded: no vertex buffer found (0 descriptor(s)" in lines[0]
     assert not out.exists()
 
@@ -290,15 +306,17 @@ def test_scanned_model_with_more_textures_than_buffers_logs_the_missing_material
         for p in (b"/art/t/bananatree.bmp", b"/art/t/banana_leaf_02.bmp", b"/art/t/leaf_03.bmp")
     )
     verts = [(float(i), 0.0, float(i % 3)) for i in range(9)]
-    monkeypatch.setattr(wx, "_pick_vb", lambda s: (0, 32, True, 9, [0, 1, 2, 3, 4, 5]))
     monkeypatch.setattr(
-        wx, "decode_mesh_vertices", lambda s, off, nv, stride, be, *a: (verts, None, None)
+        model_mesh, "pick_vertex_buffer", lambda s: (0, 32, True, 9, [0, 1, 2, 3, 4, 5])
+    )
+    monkeypatch.setattr(
+        model_mesh, "decode_mesh_vertices", lambda s, off, nv, stride, be, *a: (verts, None, None)
     )
     written = {}
-    monkeypatch.setattr(wx, "write_obj_mtl", lambda *a: written.update(mats=a[7]))
+    monkeypatch.setattr(obj_mtl, "write_obj_mtl", lambda *a: written.update(mats=a[7]))
     lines = []
     out = tmp_path / "Palm_Banana_01.model.obj"
-    assert wx.decode_model(hdr, b"\1" * 400, out, {}, lines.append, order=">")
+    assert model_export.decode_model(hdr, b"\1" * 400, out, {}, lines.append, order=">")
     assert written["mats"] == ["submesh_0"]
     note = [x for x in lines if "no material assigned" in x]
     assert len(note) == 1 and "Palm_Banana_01.model.obj" in note[0]
@@ -436,7 +454,7 @@ def test_extract_of_a_loose_folder_brings_the_path_data_along(tmp_path, capsys, 
     out = tmp_path / "out"
     _seed_definition(out)  # what the block pass leaves behind
     args = ["--no-textures", "--no-models", "--no-text", "--no-audio"]
-    assert wx.main([str(src), "-o", str(out)] + args) == 0
+    assert extract_driver.main([str(src), "-o", str(out)] + args) == 0
     log = capsys.readouterr().out
     # where the archive sets have them, and spelled as an archive spells its entries
     # (--names canonical, the default: lower case)
@@ -462,7 +480,7 @@ def test_extract_no_files_reads_the_loose_path_data_in_place(tmp_path, capsys):
     out = tmp_path / "out"
     _seed_definition(out)
     args = ["--no-files", "--no-textures", "--no-models", "--no-text", "--no-audio"]
-    assert wx.main([str(src), "-o", str(out)] + args) == 0
+    assert extract_driver.main([str(src), "-o", str(out)] + args) == 0
     assert not (out / "files").exists() and (out / "nav" / "Demo.nav.glb").is_file()
     assert "LOOSE SOURCE" not in capsys.readouterr().out
     assert ta._bik_index(str(out)) == {}  # --no-files: the movies are not fetched
@@ -478,7 +496,7 @@ def test_extract_names_the_levels_left_without_path_data(tmp_path, capsys):
     out = tmp_path / "out"
     _seed_definition(out)
     args = ["--no-files", "--no-textures", "--no-models", "--no-text", "--no-audio"]
-    assert wx.main([str(src), "-o", str(out)] + args) == 0
+    assert extract_driver.main([str(src), "-o", str(out)] + args) == 0
     assert [p.name for p in (out / "nav").iterdir()] == ["Demo.nav.json"]
     assert (
         "  WARNING: nav: no path data (.hpd) found for Demo: definition only"

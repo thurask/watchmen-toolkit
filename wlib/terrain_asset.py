@@ -514,7 +514,7 @@ def _np():
 
 def _dec1110(u):
     """Console packed normal (x:11 y:11 z:10 signed, LSB first) as float arrays; the
-    rule watchmen_extract._dec1110 solved for model vertices."""
+    rule model_mesh._dec1110 solved for model vertices."""
     np = _np()
     x = (u & 0x7FF).astype(np.int32)
     y = ((u >> 11) & 0x7FF).astype(np.int32)

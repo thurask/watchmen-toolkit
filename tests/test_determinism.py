@@ -11,7 +11,8 @@ non-reproducibility that makes "it works here" bug reports unfalsifiable.
 import os
 from pathlib import Path
 
-import watchmen_extract as we
+import naz_archive
+import obj_mtl
 
 # Two directories whose *basenames collide* after the ".texture" suffix is
 # stripped -- the case where enumeration order actually decides the winner.
@@ -48,9 +49,9 @@ def test_texture_index_is_stable_across_calls(tmp_path):
     characters with different textures.
     """
     root = _build_tex_tree(tmp_path / "tex", TEX_TREE)
-    first = we.build_texture_index(root)
+    first = obj_mtl.build_texture_index(root)
     for _ in range(4):
-        assert we.build_texture_index(root) == first
+        assert obj_mtl.build_texture_index(root) == first
     assert first, "the index should not be empty"
 
 
@@ -65,9 +66,9 @@ def test_texture_index_ignores_creation_order(tmp_path):
     shuffled = _build_tex_tree(tmp_path / "b", list(reversed(TEX_TREE)))
     interleaved = _build_tex_tree(tmp_path / "c", TEX_TREE[3:] + TEX_TREE[:3])
 
-    ia = _relative(we.build_texture_index(forward), forward)
-    ib = _relative(we.build_texture_index(shuffled), shuffled)
-    ic = _relative(we.build_texture_index(interleaved), interleaved)
+    ia = _relative(obj_mtl.build_texture_index(forward), forward)
+    ib = _relative(obj_mtl.build_texture_index(shuffled), shuffled)
+    ic = _relative(obj_mtl.build_texture_index(interleaved), interleaved)
 
     assert ia == ib == ic
     # and the winner really is the first in sorted order, not an arbitrary one
@@ -84,7 +85,7 @@ def test_texture_index_keys_are_lowercased_stems(tmp_path):
     root = _build_tex_tree(
         tmp_path / "tex", ["Chars/MiXeD_Case.Texture/0_diffuse_8x8_DXT1.png"] + TEX_TREE
     )
-    idx = we.build_texture_index(root)
+    idx = obj_mtl.build_texture_index(root)
     assert "mixed_case" in idx
     assert set(idx) == {
         "mixed_case",
@@ -102,7 +103,7 @@ def test_texture_index_survives_a_missing_root(tmp_path):
     Texture extraction is optional; a model-only run must not abort because the
     texture pass was skipped.
     """
-    assert we.build_texture_index(tmp_path / "does_not_exist") == {}
+    assert obj_mtl.build_texture_index(tmp_path / "does_not_exist") == {}
 
 
 # ---------------------------------------------------------------------------
@@ -145,13 +146,13 @@ def test_loose_entries_order_is_sorted_and_reproducible(tmp_path):
     b = _build_loose(tmp_path / "b", list(reversed(LOOSE_TREE)))
     c = _build_loose(tmp_path / "c", LOOSE_TREE[4:] + LOOSE_TREE[:4])
 
-    names_a = [e.name for e in we.loose_entries(a)]
-    names_b = [e.name for e in we.loose_entries(b)]
-    names_c = [e.name for e in we.loose_entries(c)]
+    names_a = [e.name for e in naz_archive.loose_entries(a)]
+    names_b = [e.name for e in naz_archive.loose_entries(b)]
+    names_c = [e.name for e in naz_archive.loose_entries(c)]
 
     assert names_a == names_b == names_c, "order depends on filesystem creation order"
     for _ in range(3):
-        assert [e.name for e in we.loose_entries(a)] == names_a
+        assert [e.name for e in naz_archive.loose_entries(a)] == names_a
 
     # within any one directory the names are sorted, and directories are
     # visited in sorted order
@@ -171,7 +172,7 @@ def test_loose_entries_selects_only_asset_containers(tmp_path):
     stem-pairing logic work unchanged on loose Part 1 trees.
     """
     root = _build_loose(tmp_path / "p1", LOOSE_TREE)
-    entries = list(we.loose_entries(root))
+    entries = list(naz_archive.loose_entries(root))
 
     assert [e.name for e in entries] == [
         "/derived_pc/alpha.block_h_z",
@@ -199,8 +200,8 @@ def test_loose_entries_round_trips_through_naz_read(tmp_path):
     root = _build_loose(tmp_path / "p1", LOOSE_TREE)
     payload = b"KAPOW" * 7
     (root / "derived_pc" / "alpha.block_h_z").write_bytes(payload)
-    entry = next(e for e in we.loose_entries(root) if e.name.endswith("alpha.block_h_z"))
-    assert we.naz_read(root, entry) == payload
+    entry = next(e for e in naz_archive.loose_entries(root) if e.name.endswith("alpha.block_h_z"))
+    assert naz_archive.naz_read(root, entry) == payload
 
 
 def test_naz_entries_delegates_directories_to_loose_entries(tmp_path):
@@ -211,5 +212,9 @@ def test_naz_entries_delegates_directories_to_loose_entries(tmp_path):
     than the other half.
     """
     root = _build_loose(tmp_path / "p1", LOOSE_TREE)
-    assert [e.name for e in we.naz_entries(root)] == [e.name for e in we.loose_entries(root)]
-    assert [e.name for e in we.naz_entries(str(root))] == [e.name for e in we.loose_entries(root)]
+    assert [e.name for e in naz_archive.naz_entries(root)] == [
+        e.name for e in naz_archive.loose_entries(root)
+    ]
+    assert [e.name for e in naz_archive.naz_entries(str(root))] == [
+        e.name for e in naz_archive.loose_entries(root)
+    ]

@@ -1062,7 +1062,7 @@ def test_face_part_takes_the_overriding_sheets_diffuse_and_keeps_its_other_layer
 
     import char_lib
     import characters_export as ce
-    import watchmen_extract as we
+    import material_refs
 
     _texture_dir(tmp_path, "/art/c/bikers/textures/head.bmp", (10, 200, 10))
     _texture_dir(tmp_path, "/art/c/bikers/textures/head02.bmp", (200, 10, 10))
@@ -1070,7 +1070,7 @@ def test_face_part_takes_the_overriding_sheets_diffuse_and_keeps_its_other_layer
     d.mkdir(parents=True)
     (d / "head.bmp").write_bytes(texture_header())
     char_lib._LAYERCACHE.clear()
-    head = we.texture_ref("/art/c/bikers/textures/head.bmp")
+    head = material_refs.texture_ref("/art/c/bikers/textures/head.bmp")
     part = (None, None, None, None, None, head)
     rec = {"slot": 0, "pivot": 0, "lod": 0, "path": head.path, "sheet_id": GOATEE}
     roots = [str(tmp_path / "textures")]
@@ -1103,7 +1103,7 @@ def test_subtract_blend_layer_becomes_black_ink_with_the_brightness_as_alpha(tmp
     from PIL import Image
 
     import char_lib
-    import watchmen_extract as we
+    import material_refs
 
     d = _texture_dir(
         tmp_path, "/art/r/spots.bmp", (0, 0, 0), sheet={"blendType": 2, "renderType": 1}
@@ -1115,25 +1115,25 @@ def test_subtract_blend_layer_becomes_black_ink_with_the_brightness_as_alpha(tmp
     _texture_dir(tmp_path, "/art/r/coat.bmp", (90, 60, 30), sheet={"blendType": 0, "renderType": 0})
     char_lib._LAYERCACHE.clear()
     roots = [str(tmp_path / "textures")]
-    ink = char_lib.find_layers(we.texture_ref("/art/r/spots.bmp"), roots)
+    ink = char_lib.find_layers(material_refs.texture_ref("/art/r/spots.bmp"), roots)
     assert ink["blend"] == "subtract"
     px = Image.open(io.BytesIO(ink["diffuse"]))
     assert px.mode == "RGBA"
     assert px.getpixel((1, 1)) == (0, 0, 0, 255)  # full ink
     assert px.getpixel((2, 2)) == (0, 0, 0, 128)
     assert px.getpixel((0, 0)) == (0, 0, 0, 0)  # nothing: the face shows through
-    coat = char_lib.find_layers(we.texture_ref("/art/r/coat.bmp"), roots)
+    coat = char_lib.find_layers(material_refs.texture_ref("/art/r/coat.bmp"), roots)
     assert "blend" not in coat
     assert Image.open(io.BytesIO(coat["diffuse"])).convert("RGB").getpixel((0, 0)) == (90, 60, 30)
 
 
 def test_subtract_layer_is_written_as_a_blend_material(tmp_path, rig):
     import char_lib
-    import watchmen_extract as we
+    import material_refs
 
     _texture_dir(tmp_path, "/art/r/spots.bmp", (255, 255, 255), sheet={"blendType": 2})
     char_lib._LAYERCACHE.clear()
-    nm = we.texture_ref("/art/r/spots.bmp")
+    nm = material_refs.texture_ref("/art/r/spots.bmp")
     V, SI, SW, T, UV, _ = rig.parts[0]
     tex = char_lib.find_textures([(V, SI, SW, T, UV, nm)], [str(tmp_path / "textures")])
     out = tmp_path / "ink.glb"

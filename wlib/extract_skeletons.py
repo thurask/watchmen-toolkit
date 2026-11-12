@@ -19,7 +19,8 @@ import os
 import json
 import struct
 import argparse
-import watchmen_extract as we
+import kapow_block
+import naz_archive
 import parse_model_nodes as pmn
 import skeleton_records as _sr
 
@@ -30,12 +31,12 @@ def _family(model_name):
 
 
 def _header_order(header):
-    """The order the header states (watchmen_extract.header_order), or None."""
+    """The order the header states (kapow_block.header_order), or None."""
     try:
-        import watchmen_extract as _we
+        import kapow_block
     except ImportError:
         return None
-    return _we.header_order(header)
+    return kapow_block.header_order(header)
 
 
 def _ordered_names(header, order=None):
@@ -198,13 +199,13 @@ def collect(naz):
     """{family: skeleton} of the `*Skeleton.model` headers of an archive, the
     first of a family in (case-sensitive) block order.  Reads the header half
     of one block at a time (a skeleton is all header)."""
-    plan = we.block_plan(naz)
+    plan = naz_archive.block_plan(naz)
     out = {}
     for stem in sorted(plan):
         if "h" not in plan[stem]:
             continue
         try:
-            it = list(we.extract_block(we.naz_read(naz, plan[stem]["h"]), None))
+            it = list(kapow_block.extract_block(naz_archive.naz_read(naz, plan[stem]["h"]), None))
         except Exception:
             continue
         for e, header, stream in it:

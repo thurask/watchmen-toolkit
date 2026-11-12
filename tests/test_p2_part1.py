@@ -24,7 +24,12 @@ import pytest
 
 import kapow_json
 import kapow_props as kp
-import watchmen_extract as we
+import extract_driver
+import kapow_block
+import model_export
+import model_header
+import texture_carve
+import texture_sheet
 
 _TEX = kp.name_hash("Texture")
 _MDL = kp.name_hash("modelRes")
@@ -143,7 +148,7 @@ def _prison(bo="<", bounds=6):
 @pytest.mark.parametrize("bo", ["<", ">"])
 def test_trailer_reads_manual_sets_with_three_float_bounds(bo):
     h, _a, _room = _prison(bo)
-    t = we.parse_block_trailer(h)
+    t = kapow_block.parse_block_trailer(h)
     assert t["auto_stream_sets"] == [] and t["end"] == len(h)
     (st,) = t["manual_stream_sets"]
     assert st["bounds_floats"] == 6 and st["min"] == (0.0, 0.0, 0.0)
@@ -151,18 +156,18 @@ def test_trailer_reads_manual_sets_with_three_float_bounds(bo):
     assert st["node_path"] == ["b06aae30", "4016effe"] and st["value"] == 2
     assert [e["name"] for e in st["entries"]] == ["/art/fence_01.model", "/art/Shower_Floor_01.bmp"]
     assert st["entries"][0]["type"] == "modelRes"
-    sets, err = we.block_stream_sets(h)
+    sets, err = kapow_block.block_stream_sets(h)
     assert err is None and len(sets) == 1
 
 
 def test_trailer_still_reads_the_four_float_bounds_of_the_code_reading():
     h, _a, _room = _prison("<", bounds=8)
-    (st,) = we.parse_block_trailer(h)["manual_stream_sets"]
+    (st,) = kapow_block.parse_block_trailer(h)["manual_stream_sets"]
     assert st["bounds_floats"] == 8 and len(st["min"]) == 4 and len(st["entries"]) == 2
 
 
 def test_stream_file_lookup_drops_the_derived_root_and_ignores_case():
-    find = we.stream_file_lookup(
+    find = kapow_block.stream_file_lookup(
         {
             "/Levels/Prison/Art/PrisonYard.block_s_z": b"YARD",
             "levels/prison/art/hall.block_s_z": b"H",
@@ -177,9 +182,11 @@ def test_stream_file_lookup_drops_the_derived_root_and_ignores_case():
 @pytest.mark.parametrize("bo", ["<", ">"])
 def test_extract_block_takes_streams_from_the_stream_sets(bo):
     h, a, room = _prison(bo)
-    find = we.stream_file_lookup({"/Levels/Prison/Art/PrisonYard.block_s_z": room})
+    find = kapow_block.stream_file_lookup({"/Levels/Prison/Art/PrisonYard.block_s_z": room})
     msgs = []
-    got = {e.name: (e, hd, st) for e, hd, st in we.extract_block(h, a, 0, msgs.append, find)}
+    got = {
+        e.name: (e, hd, st) for e, hd, st in kapow_block.extract_block(h, a, 0, msgs.append, find)
+    }
     assert got["/art/Wall.bmp"][2] == b"own-stream" and got["/art/Wall.bmp"][0].stream_file is None
     e, hd, st = got["/art/Fence_01.model"]  # name match is case-insensitive
     assert (hd, st) == (b"HDR-FENCE", b"fence-mesh")
@@ -194,18 +201,18 @@ def test_extract_block_takes_streams_from_the_stream_sets(bo):
 @pytest.mark.parametrize("bo", ["<", ">"])
 def test_every_directory_entry_carries_its_block_byte_order(bo):
     h, a, _room = _prison(bo)
-    entries, _start = we.parse_block_toc(h)
+    entries, _start = kapow_block.parse_block_toc(h)
     assert entries and {e.order for e in entries} == {bo}
-    assert {e.order for e, _hd, _st in we.extract_block(h, a)} == {bo}
+    assert {e.order for e, _hd, _st in kapow_block.extract_block(h, a)} == {bo}
     # a later block of the other order leaves the earlier entries as they are
     other = "<" if bo == ">" else ">"
-    later, _start = we.parse_block_toc(_prison(other)[0])
+    later, _start = kapow_block.parse_block_toc(_prison(other)[0])
     assert {e.order for e in entries} == {bo} and {e.order for e in later} == {other}
 
 
 def test_extract_block_without_a_resolver_is_unchanged():
     h, a, _room = _prison()
-    got = [(e.name, st) for e, _hd, st in we.extract_block(h, a)]
+    got = [(e.name, st) for e, _hd, st in kapow_block.extract_block(h, a)]
     assert got == [
         ("/art/Wall.bmp", b"own-stream"),
         ("/art/Fence_01.model", None),
@@ -217,13 +224,13 @@ def test_extract_block_without_a_resolver_is_unchanged():
 def test_a_missing_or_short_stream_file_is_reported_by_asset_name():
     h, a, room = _prison()
     msgs = []
-    out = list(we.extract_block(h, a, 0, msgs.append, we.stream_file_lookup({})))
+    out = list(kapow_block.extract_block(h, a, 0, msgs.append, kapow_block.stream_file_lookup({})))
     assert [st for _e, _h, st in out] == [b"own-stream", None, None, None]
     assert len(msgs) == 2 and "/art/Fence_01.model" in msgs[0] and "not found" in msgs[0]
     assert out[1][0].stream_note.startswith("stream file /derived_pc/")
     msgs = []
-    find = we.stream_file_lookup({"/Levels/Prison/Art/PrisonYard.block_s_z": room[:5]})
-    out = list(we.extract_block(h, a, 0, msgs.append, find))
+    find = kapow_block.stream_file_lookup({"/Levels/Prison/Art/PrisonYard.block_s_z": room[:5]})
+    out = list(kapow_block.extract_block(h, a, 0, msgs.append, find))
     assert out[1][2] is None and "runs past" in msgs[0] and "/art/Fence_01.model" in msgs[0]
 
 
@@ -245,7 +252,7 @@ def test_extract_reads_stream_only_blocks_and_names_what_has_no_stream(tmp_path)
     real = builtins.print
     builtins.print = lambda *x, **k: lines.append(" ".join(str(v) for v in x))
     try:
-        rc = we.main(
+        rc = extract_driver.main(
             [
                 str(tmp_path / "derived_pc"),
                 "-o",
@@ -319,9 +326,9 @@ def test_a_record_of_another_owner_ends_neither_layout_exactly():
 
 def test_untyped_type_table_covers_the_stored_sheet_properties():
     ut = kp.untyped_types()
-    stored = set(we.SHEET_PROPERTIES)
+    stored = set(texture_sheet.SHEET_PROPERTIES)
     assert all(kp.name_hash(n) in ut for n in stored)
-    for name, typ in we.TEXTURE_SHEET_PROPS.items():
+    for name, typ in texture_sheet.TEXTURE_SHEET_PROPS.items():
         assert ut[kp.name_hash(name)] == typ
     assert ut[kp.name_hash("uniqueID")] == "id" and kp.type_hash("id") == 0xEDEF427C
     assert ut[kp.name_hash("density")] == "integer"  # a `number` in script classes
@@ -488,31 +495,34 @@ def test_texture_sheets_of_the_older_layout_equal_the_typed_ones(bo):
     second[2] = ("uniqueID", "id", 0x1122334455667788)
     old = _texture_header(bo, False, (_SHEET, second))
     new = _texture_header(bo, True, (_SHEET, second))
-    want = we.texture_sheets(new, bo)
+    want = texture_sheet.texture_sheets(new, bo)
     assert len(want) == 2 and want[0]["overrides"] == {"normal": "/art/textures/Other_Normal.bmp"}
-    got = we.texture_sheets(old, bo)
+    got = texture_sheet.texture_sheets(old, bo)
     assert got == want
     assert got[0]["uniqueID"] == 0x483D06F5_ECE9AC1D and got[1]["name"] == "wet"
     assert got[0]["selfIlluminanceColor"] == [1.0, 0.5, 0.25]
-    assert we.texture_sheet(old, bo) == we.texture_sheet(new, bo)
-    assert we.texture_sheet(old, bo)["twoSided"] is True
-    assert we.texture_sheet(old, bo)["renderType"] == 1
-    assert we.extract_specular(old, bo) == we.extract_specular(new, bo)
-    assert we.extract_specular(old, bo) == (20.0, pytest.approx(0.58))
+    assert texture_sheet.texture_sheet(old, bo) == texture_sheet.texture_sheet(new, bo)
+    assert texture_sheet.texture_sheet(old, bo)["twoSided"] is True
+    assert texture_sheet.texture_sheet(old, bo)["renderType"] == 1
+    assert texture_sheet.extract_specular(old, bo) == texture_sheet.extract_specular(new, bo)
+    assert texture_sheet.extract_specular(old, bo) == (20.0, pytest.approx(0.58))
     # read in the wrong byte order: nothing (callers try "<" then ">")
     other = ">" if bo == "<" else "<"
-    assert we.texture_sheets(old, other) == [] and we.texture_sheet(old, other) == {}
-    assert we.extract_specular(old, other) == (None, None)
+    assert (
+        texture_sheet.texture_sheets(old, other) == []
+        and texture_sheet.texture_sheet(old, other) == {}
+    )
+    assert texture_sheet.extract_specular(old, other) == (None, None)
 
 
 def test_sheet_json_is_written_for_the_older_layout(tmp_path):
     for sub, typed in (("old", False), ("new", True)):
         (tmp_path / sub).mkdir()
-        we.write_sheet_json(_texture_header("<", typed), tmp_path / sub, "<")
+        texture_sheet.write_sheet_json(_texture_header("<", typed), tmp_path / sub, "<")
     old = json.loads((tmp_path / "old" / "sheet.json").read_text())
     assert old == json.loads((tmp_path / "new" / "sheet.json").read_text())
     assert old["twoSided"] is True and old["sheets"][0]["name"] == "default"
-    we._write_spec_txt(_texture_header(">", False), tmp_path)  # the console carve
+    texture_carve._write_spec_txt(_texture_header(">", False), tmp_path)  # the console carve
     assert (tmp_path / "spec.txt").read_text().split()[0] == "20.0"
     assert json.loads((tmp_path / "sheet.json").read_text())["blendType"] == 2
 
@@ -536,11 +546,11 @@ def _model_bag(bo, typed, animation=""):
 @pytest.mark.parametrize("typed", [True, False])
 def test_model_property_bag_and_lods_in_both_layouts(bo, typed):
     h = _model_bag(bo, typed)
-    bag = we.model_property_bag(h, bo)
+    bag = model_header.model_property_bag(h, bo)
     assert bag["record_layout"] == ("typed" if typed else "untyped")
     assert bag["properties"]["shadowMeshType"] == 2 and bag["properties"]["animation"] == ""
     assert bag["properties"]["lodDistance23"] == 90.0
-    info = we.model_lod_info(h, bo)
+    info = model_header.model_lod_info(h, bo)
     assert [l["max_distance"] for l in info["lods"]] == [30.0, 60.0, 90.0, 120.0, 150.0]
     assert info["lods"][0]["fade_out"] == 5.0 and info["store_lowest_lod_in_header"] is False
 
@@ -550,14 +560,14 @@ def test_lods_survive_an_animation_path_in_the_bag(typed):
     """The fixed 20-byte stride lost its place behind a string longer than one
     dword: every model with an `animation` path had no LODs (22 in PC Part 2)."""
     h = _model_bag("<", typed, "/art/props/common/curtains/TWM_Curtain_5M_01.animation")
-    info = we.model_lod_info(h, "<")
+    info = model_header.model_lod_info(h, "<")
     assert info is not None and len(info["lods"]) == 5 and info["lods"][1]["max_distance"] == 60.0
 
 
 def test_sidecar_of_a_scan_decoded_model_names_what_is_not_decoded():
     h = _model_bag(">", False)
-    assert we.parse_model_header(h, ">") is None  # not the Part 2 header layout
-    meta = we.model_meta_scanned(h, ">")
+    assert model_header.parse_model_header(h, ">") is None  # not the Part 2 header layout
+    meta = model_export.model_meta_scanned(h, ">")
     assert meta["format"] == "watchmen-model-meta/1" and meta["header_decoded"] is False
     assert meta["mesh_source"] == "descriptor scan" and meta["record_layout"] == "untyped"
     assert meta["lod_count"] is None and len(meta["lods"]) == 5
@@ -565,5 +575,5 @@ def test_sidecar_of_a_scan_decoded_model_names_what_is_not_decoded():
     assert meta["properties"]["lodFadeOut01"] == 5.0
     json.dumps(meta)
     # a header whose bag does not read: no sidecar rather than a guessed one
-    assert we.model_meta_scanned(h[:60], ">") is None
-    assert we.model_property_bag(b"\x08\0\0\0ModelRes", "<") is None
+    assert model_export.model_meta_scanned(h[:60], ">") is None
+    assert model_header.model_property_bag(b"\x08\0\0\0ModelRes", "<") is None

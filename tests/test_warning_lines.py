@@ -17,7 +17,11 @@ import fx_meta
 import gen_data
 import text_assets as ta
 import kapow_props
-import watchmen_extract as wx
+import extract_driver
+import extract_log
+import kapow_block
+import texture_header
+import texture_sheet
 
 import test_formats_v2 as tf
 
@@ -28,9 +32,9 @@ TEXT_HASH = kapow_props.name_hash("textRes")
 def run_log():
     """The lines the extract helpers write through the running extract's log."""
     lines = []
-    wx._RUN_LOG.append(lines.append)
+    extract_log._RUN_LOG.append(lines.append)
     yield lines
-    wx._RUN_LOG.remove(lines.append)
+    extract_log._RUN_LOG.remove(lines.append)
 
 
 def _warnings(lines):
@@ -40,13 +44,15 @@ def _warnings(lines):
 # ------------------------------------------------------------ kapow_json import
 def test_kapow_json_import_failure_keeps_its_reason(monkeypatch):
     monkeypatch.setitem(__import__("sys").modules, "kapow_json", None)  # import -> ImportError
-    wx._kapow_json.cache_clear()
+    extract_driver._kapow_json.cache_clear()
     try:
-        assert wx._kapow_json() is None
-        assert wx._KAPOW_JSON_ERROR and "kapow_json" in wx._KAPOW_JSON_ERROR[0]
+        assert extract_driver._kapow_json() is None
+        assert (
+            extract_driver._KAPOW_JSON_ERROR and "kapow_json" in extract_driver._KAPOW_JSON_ERROR[0]
+        )
     finally:
-        wx._kapow_json.cache_clear()
-        wx._KAPOW_JSON_ERROR.clear()
+        extract_driver._kapow_json.cache_clear()
+        extract_driver._KAPOW_JSON_ERROR.clear()
 
 
 def test_kapow_json_import_failure_names_each_asset_left_raw(tmp_path, monkeypatch, capsys):
@@ -58,12 +64,12 @@ def test_kapow_json_import_failure_names_each_asset_left_raw(tmp_path, monkeypat
     (lv / "seq.block_h_z").write_bytes(h)
     (lv / "seq.block_s_z").write_bytes(s)
     monkeypatch.setitem(__import__("sys").modules, "kapow_json", None)
-    wx._kapow_json.cache_clear()
+    extract_driver._kapow_json.cache_clear()
     try:
-        wx.main([str(files), "-o", str(tmp_path / "o"), "--no-textures", "--no-models"])
+        extract_driver.main([str(files), "-o", str(tmp_path / "o"), "--no-textures", "--no-models"])
     finally:
-        wx._kapow_json.cache_clear()
-        wx._KAPOW_JSON_ERROR.clear()
+        extract_driver._kapow_json.cache_clear()
+        extract_driver._KAPOW_JSON_ERROR.clear()
     out = capsys.readouterr()
     assert "WARNING: sequence /x/a.sequence: not decoded: kapow_json not importable" in (
         out.out + out.err
@@ -86,15 +92,15 @@ def _bag(records, rs=20):
 
 
 def test_prop_walk_names_a_bag_longer_than_its_cap(run_log):
-    cap = wx._PROP_WALK_CAP
+    cap = kapow_block._PROP_WALK_CAP
     start = 4 + len(b"Sound") + 4
     # at the cap exactly: nothing to say
-    assert wx.prop_walk(_bag(cap)) == (start + cap * 20, 20)
+    assert kapow_block.prop_walk(_bag(cap)) == (start + cap * 20, 20)
     assert not _warnings(run_log)
     # past it: the same offset as before, and one line per distinct header
     long_bag = _bag(cap + 6)
-    assert wx.prop_walk(long_bag) == (start + cap * 20, 20)
-    wx.prop_walk(long_bag)
+    assert kapow_block.prop_walk(long_bag) == (start + cap * 20, 20)
+    kapow_block.prop_walk(long_bag)
     got = _warnings(run_log)
     assert len(got) == 1 and "Sound header" in got[0] and "more than %d" % cap in got[0]
 
@@ -189,10 +195,10 @@ def test_skipped_steps_are_warning_lines_and_still_recorded(monkeypatch):
 
 # ------------------------------------------------------------- sheet.json
 def test_read_sheet_json_missing_is_quiet_damaged_is_named(tmp_path, run_log):
-    assert wx.read_sheet_json(tmp_path) == {}
+    assert texture_sheet.read_sheet_json(tmp_path) == {}
     assert not run_log
     (tmp_path / "sheet.json").write_text("{", encoding="utf-8")
-    assert wx.read_sheet_json(tmp_path) == {}
+    assert texture_sheet.read_sheet_json(tmp_path) == {}
     assert len(_warnings(run_log)) == 1
 
 
@@ -200,8 +206,8 @@ def test_texture_alpha_flag_names_a_header_the_reader_refuses(monkeypatch, run_l
     def refuse(*a, **k):
         raise struct.error("cut")
 
-    monkeypatch.setattr(wx, "parse_texture_frames", refuse)
-    assert wx.texture_alpha_flag(b"\x00" * 64, "<", "T.bmp") is None
+    monkeypatch.setattr(texture_header, "parse_texture_frames", refuse)
+    assert texture_header.texture_alpha_flag(b"\x00" * 64, "<", "T.bmp") is None
     got = _warnings(run_log)
     assert len(got) == 1 and "texture T.bmp: alpha flag not read" in got[0]
 
@@ -210,9 +216,9 @@ def test_alpha_flag_lets_a_code_error_through(monkeypatch):
     def bug(*a, **k):
         raise TypeError("a bug, not bad data")
 
-    monkeypatch.setattr(wx, "parse_texture_frames", bug)
+    monkeypatch.setattr(texture_header, "parse_texture_frames", bug)
     with pytest.raises(TypeError):
-        wx.texture_alpha_flag(b"\x00" * 64)
+        texture_header.texture_alpha_flag(b"\x00" * 64)
 
 
 # ------------------------------------------------------------- fx particles

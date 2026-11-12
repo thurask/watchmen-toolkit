@@ -25,6 +25,8 @@ import face_rule as fr
 import nav_data as nd
 import sound_meta as sm
 import variant_glb as vg
+import kapow_block
+import naz_archive
 from test_nav_data import demo_hpd, make_aipathdata
 
 
@@ -248,11 +250,13 @@ def test_variant_mesh_failure_names_model_archive_and_platform(monkeypatch):
 
     entry = types.SimpleNamespace(name="art/characters/Body.model")
     monkeypatch.setattr(
-        vg.we,
+        naz_archive,
         "iter_blocks",
         lambda naz, streams=True: iter([("derived_ps3/levels/x", {"h": b"h", "s": b"s"})]),
     )
-    monkeypatch.setattr(vg.we, "extract_block", lambda h, s: [(entry, b"\0" * 20, b"\0" * 64)])
+    monkeypatch.setattr(
+        kapow_block, "extract_block", lambda h, s: [(entry, b"\0" * 20, b"\0" * 64)]
+    )
     monkeypatch.setattr(char_lib, "model_order", lambda mh, ms=None, name=None, log=print: ">")
     monkeypatch.setattr(mesh_loader, "palette_remap", lambda *a, **k: ({}, []))
 

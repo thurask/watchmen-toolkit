@@ -212,7 +212,7 @@ def alpha(sheet, tex_has_alpha, vertex_alpha=False, pixel_alpha=None):
     except on a SkyBox sheet, whose pass blends.  A Sprite (9)
     sheet on a model part is filed in render list 9, which the deferred frame never
     draws (0x5739d0, 0x56f9fb); type-9 sheets are drawn by Sprite nodes (0x4c85e8)
-    with the sheet's blend triple (watchmen_extract.sheet_blend); for them, and
+    with the sheet's blend triple (texture_sheet.sheet_blend); for them, and
     where the sheet is not known
     (no renderType: a texture without sheet.json), the rule is unchanged: BLEND
     when the vertex alpha varies.

@@ -406,7 +406,8 @@ import numpy as np  # noqa: E402
 
 import rig_glb  # noqa: E402
 import test_formats_v2 as tf  # noqa: E402
-import watchmen_extract as we  # noqa: E402
+import kapow_block  # noqa: E402
+import model_header  # noqa: E402
 from conftest import parse_glb  # noqa: E402
 
 _PAL = {"bone_count": 5, "bones": [{"name": "b%d" % i} for i in range(5)]}
@@ -478,9 +479,11 @@ def test_mesh_vertex_attributes_follow_the_model_buffers(monkeypatch):
     assert rig_glb.mesh_vertex_attributes(h, s, [(0, 3, 0, 1, 56)]) is None  # does not line up
     assert rig_glb.mesh_vertex_attributes(h[:40], s, subs) is None  # not a header-driven model
     # no authored colours -> the buffer only holds the writer's default
-    real = we.select_model_buffers
+    real = model_header.select_model_buffers
     monkeypatch.setattr(
-        we, "select_model_buffers", lambda *a, **k: [dict(b, has_color=0) for b in real(*a, **k)]
+        model_header,
+        "select_model_buffers",
+        lambda *a, **k: [dict(b, has_color=0) for b in real(*a, **k)],
     )
     assert rig_glb.mesh_vertex_attributes(h, s, subs)["colors"] is None
 
@@ -941,7 +944,7 @@ import decode_sequence as ds  # noqa: E402
 
 
 def test_toc_old_attribute_names_can_be_written_too():
-    t = we.Toc()
+    t = kapow_block.Toc()
     assert t.data_size == 0 and t.best_stream is None  # a fresh Toc no longer raises
     t.flag, t.pairs, t.variants, t.unknown = 1, [(8, 16)], [5, 0, 0, 0, 0, 0], 0x1234
     assert (t.has_stream, t.streams, t.sizes, t.type_hash) == (
@@ -962,22 +965,22 @@ def test_toc_old_attribute_names_can_be_written_too():
 def test_option_values_are_range_checked():
     import argparse
 
-    assert we.model_lod_arg("all") == "all" and we.model_lod_arg("2") == 2
+    assert model_header.model_lod_arg("all") == "all" and model_header.model_lod_arg("2") == 2
     for bad in ("-1", "x", "1.5"):
         with pytest.raises(argparse.ArgumentTypeError):
-            we.model_lod_arg(bad)
-    assert we.language_arg("5") == 5
+            model_header.model_lod_arg(bad)
+    assert kapow_block.language_arg("5") == 5
     for bad in ("6", "-1", "xx"):
         with pytest.raises(argparse.ArgumentTypeError):
-            we.language_arg(bad)
+            kapow_block.language_arg(bad)
     h, s = _skinned_model()
-    M = we.parse_model_header(h)
+    M = model_header.parse_model_header(h)
     with pytest.raises(ValueError, match="LOD"):
-        we.select_model_buffers(M, -1)  # used to select nothing -> silent legacy scan
+        model_header.select_model_buffers(M, -1)  # used to select nothing -> silent legacy scan
     with pytest.raises(ValueError, match="language"):
-        we.parse_block_toc(b"\0" * 400, language=7)
+        kapow_block.parse_block_toc(b"\0" * 400, language=7)
     with pytest.raises(ValueError, match="not a block header"):
-        we.parse_block_header(b"\0" * 100)  # was a bare struct.error
+        kapow_block.parse_block_header(b"\0" * 100)  # was a bare struct.error
 
 
 def test_sequence_parse_budget_is_per_call_and_per_thread():

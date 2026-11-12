@@ -17,7 +17,7 @@ import pytest
 import anim_meta as am
 import frame
 import variant_glb as vg
-import watchmen_extract as we
+import obj_mtl
 
 import test_frame as tfr
 from conftest import parse_glb, quat_xyzw_to_mat
@@ -151,7 +151,9 @@ def test_obj_normals_are_reflected_in_the_true_frame(tmp_path, monkeypatch):
 
     def write(mode):
         out = tmp_path / mode / "q.obj"
-        we.write_obj_mtl(out, "q", v, n, uv, tris, [(0, 4, 0, 2, 56)], ["m"], {}, lambda *a: None)
+        obj_mtl.write_obj_mtl(
+            out, "q", v, n, uv, tris, [(0, 4, 0, 2, 56)], ["m"], {}, lambda *a: None
+        )
         return tfr._obj(out)
 
     (vm, nm, fm, _hm), (vt, nt, ft, _ht) = tfr.both(monkeypatch, write)

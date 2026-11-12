@@ -28,7 +28,11 @@ import ragdoll_rig as rr
 import sound_meta as sm
 import test_level_meta as tl
 import test_p4_level_terrain as tt
-import watchmen_extract as we
+import kapow_block
+import model_export
+import model_header
+import model_mesh
+import naz_archive
 from conftest import (
     entity_ref,
     f32s,
@@ -295,7 +299,7 @@ def _fake_archive(monkeypatch, tmp_path, blocks):
     read = []
     # archive_clip reads the header halves one block at a time (iter_blocks, 1.5.0)
     monkeypatch.setattr(
-        we,
+        naz_archive,
         "iter_blocks",
         lambda _naz, streams=True: iter([("b%d" % i, {"h": i}) for i in range(len(blocks))]),
     )
@@ -304,7 +308,7 @@ def _fake_archive(monkeypatch, tmp_path, blocks):
         read.append(h)
         return [(_Entry(n), d, None) for n, d in blocks[h]]
 
-    monkeypatch.setattr(we, "extract_block", extract_block)
+    monkeypatch.setattr(kapow_block, "extract_block", extract_block)
     return str(naz), read
 
 
@@ -923,27 +927,29 @@ def test_terrain_says_how_it_is_drawn(tmp_path, monkeypatch):
 # ------------------------------------------------------------------ models: strips, cloth
 def test_index_triangles_reads_lists_and_strips():
     idx = (0, 1, 2, 3, 3, 4, 5)
-    assert we.index_triangles(idx, 1) == [(0, 1, 2), (3, 3, 4)]
+    assert model_header.index_triangles(idx, 1) == [(0, 1, 2), (3, 3, 4)]
     # strip: (i, i+1, i+2) for even i, (i+2, i+1, i) for odd i; repeats are dropped
-    assert we.index_triangles(idx, 0) == [(0, 1, 2), (3, 2, 1), (3, 4, 5)]
-    assert we.index_triangles((0, 1), 0) == [] and we.index_triangles((), 1) == []
+    assert model_header.index_triangles(idx, 0) == [(0, 1, 2), (3, 2, 1), (3, 4, 5)]
+    assert (
+        model_header.index_triangles((0, 1), 0) == [] and model_header.index_triangles((), 1) == []
+    )
     with pytest.raises(ValueError):
-        we.index_triangles(idx, 2)
-    assert we.PRIMITIVE_NAMES == {0: "triangle_strip", 1: "triangle_list"}
+        model_header.index_triangles(idx, 2)
+    assert model_header.PRIMITIVE_NAMES == {0: "triangle_strip", 1: "triangle_list"}
 
 
 def test_model_header_and_sidecar_name_the_primitive():
     import test_formats_v2 as tf
 
     h, s = tf._lod_model()
-    M = we.parse_model_header(h)
+    M = model_header.parse_model_header(h)
     assert [b["primitive_type"] for b in M["buffers"][:3]] == [1, 0, 1]
     assert all(b["primitive_type"] == b["ix"] for b in M["buffers"])
     assert M["buffers"][0]["has_cloth_mesh"] == M["buffers"][0]["no_defer"]
-    subs = we.decode_model_mesh(h, s)["submeshes"]
+    subs = model_mesh.decode_model_mesh(h, s)["submeshes"]
     assert [x["primitive"] for x in subs] == ["triangle_list", "triangle_strip"]
     assert subs[1]["triangles"] == [(0, 1, 2), (0, 2, 1), (3, 2, 0)]
-    meta = we.model_meta(h)
+    meta = model_export.model_meta(h)
     prims = [sm_["primitive"] for sm_ in meta["parts"][0]["submeshes"]]
     assert prims == ["triangle_list", "triangle_strip", "triangle_list"]
     assert "triangle_strip" in meta["parts_note"]

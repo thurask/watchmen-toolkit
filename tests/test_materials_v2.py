@@ -21,7 +21,11 @@ import materials as mt
 import rig_glb
 import variant_glb as vg
 import kapow_props
-import watchmen_extract as we
+import material_refs
+import model_export
+import model_header
+import model_mesh
+import obj_mtl
 import test_formats_v2 as tf
 import test_texture_sheets as ts
 from conftest import parse_glb
@@ -265,8 +269,8 @@ def _char_glb(tmp_path, rig):
     roots = _tree(tmp_path)
     base = rig.parts[0]
     parts = [
-        tuple(base[:5]) + (we.texture_ref(HAIR),),
-        tuple(base[:5]) + (we.texture_ref(ts.SKIN),),
+        tuple(base[:5]) + (material_refs.texture_ref(HAIR),),
+        tuple(base[:5]) + (material_refs.texture_ref(ts.SKIN),),
     ]
     tex = char_lib.find_textures(parts, roots)
     vg.write_glb(parts, rig.manifest, tmp_path / "c.glb", str(rig.bind_npz), textures=tex)
@@ -308,7 +312,7 @@ def test_character_glb_legacy_materials_are_the_old_ones(tmp_path, rig, monkeypa
 
 def _static_glb(tmp_path, monkeypatch=None):
     _tree(tmp_path)
-    idx = we.build_texture_index(tmp_path / "textures")
+    idx = obj_mtl.build_texture_index(tmp_path / "textures")
     V = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], float)
     N = np.array([[0, 0, 1]] * 3, np.float32)
     rig_glb.build_rigged_glb(
@@ -320,7 +324,7 @@ def _static_glb(tmp_path, monkeypatch=None):
         None,
         [(0, 1, 2)],
         [(0, 3, 0, 1, 44)],
-        [we.texture_ref(HAIR)],
+        [material_refs.texture_ref(HAIR)],
         idx,
         {"bone_count": 0, "bones": []},
         None,
@@ -353,16 +357,16 @@ def test_mtl_roughness_bake(tmp_path, monkeypatch):
     d.mkdir()
     ss = d / "2_specSize_2x2_L8.png"
     Image.fromarray(np.array([[0, 255], [128, 64]], np.uint8), "L").save(ss)
-    out = we._make_roughness_engine(d, ss, 43.0)
+    out = obj_mtl._make_roughness_engine(d, ss, 43.0)
     assert out.name == "roughnessEngine.png"
     got = np.asarray(Image.open(out))
     assert got[0, 0] == round(float(mt.roughness(43.0)) * 255) and got[0, 1] < got[1, 1] < got[0, 0]
     d2 = tmp_path / "u.bmp"
     d2.mkdir()
-    flat = np.asarray(Image.open(we._make_roughness_engine(d2, None, 15.0)))
+    flat = np.asarray(Image.open(obj_mtl._make_roughness_engine(d2, None, 15.0)))
     assert flat.shape == (4, 4) and flat[0, 0] == round((2 / 17.0) ** 0.25 * 255)
     # the legacy bake is untouched (inverted curve, sheet exponent ignored with a layer)
-    old = np.asarray(Image.open(we._make_roughness(d, ss, 43.0)))
+    old = np.asarray(Image.open(obj_mtl._make_roughness(d, ss, 43.0)))
     assert old[0, 0] == int((1 - (2 / 3.0) ** 0.5) * 255) and old[0, 1] > old[0, 0]
 
 
@@ -373,16 +377,16 @@ def test_mtl_roughness_bake(tmp_path, monkeypatch):
 
 def test_occluder_kind_and_roles():
     h, s = tf._lod_model()
-    M = we.parse_model_header(h)
+    M = model_header.parse_model_header(h)
     assert M["parts"][0]["occluder"] is M["parts"][0]["proxy"] is not None
-    assert we.BUFFER_KINDS == ("render", "shadow", "occluder")
+    assert model_header.BUFFER_KINDS == ("render", "shadow", "occluder")
     for kinds in (("occluder",), ("proxy",)):  # the old name still selects it
-        subs = we.decode_model_mesh(h, s, kinds=kinds)["submeshes"]
+        subs = model_mesh.decode_model_mesh(h, s, kinds=kinds)["submeshes"]
         assert [(x["kind"], x["role"]) for x in subs] == [("occluder", "occluder")]
-    subs = we.decode_model_mesh(h, s, kinds=("shadow",))["submeshes"]
+    subs = model_mesh.decode_model_mesh(h, s, kinds=("shadow",))["submeshes"]
     assert [(x["kind"], x["role"], x["format"]) for x in subs] == [("shadow", "shadow_hull", 9)]
     # the default never returns either
-    assert {x["kind"] for x in we.decode_model_mesh(h, s)["submeshes"]} == {"render"}
+    assert {x["kind"] for x in model_mesh.decode_model_mesh(h, s)["submeshes"]} == {"render"}
 
 
 def _lod_header(values):
@@ -405,20 +409,20 @@ def test_lod_distances_from_the_property_bag(tmp_path, monkeypatch):
     vals += [("lodDistance12", 60.0), ("lodFadeIn12", 2.0), ("lodFadeOut12", 2.0)]
     vals += [("lodDistance23", 90.0), ("lodFadeIn23", 0.0), ("lodFadeOut23", 2.0)]
     h, s = _lod_header(vals)
-    info = we.model_lod_info(h)
+    info = model_header.model_lod_info(h)
     assert info["lods"][0] == {"lod": 0, "max_distance": 30.0, "fade_in": 2.0, "fade_out": 5.0}
     assert [x["max_distance"] for x in info["lods"]] == [30.0, 60.0, 90.0]
-    meta = we.model_meta(h)
+    meta = model_export.model_meta(h)
     assert meta["format"] == "watchmen-model-meta/1" and meta["lod_count"] == 2
     assert [x["lod"] for x in meta["lods"]] == [0, 1]  # only the LODs the model has
     assert meta["not_exported"] == {"shadow_hull": 1, "occluder": 1}
-    assert we.model_lod_info(tf._lod_model()[0]) is None  # no such properties
+    assert model_header.model_lod_info(tf._lod_model()[0]) is None  # no such properties
     # decode_model writes it next to the OBJ; --materials legacy writes no new file
-    we.decode_model(h, s, tmp_path / "m.obj")
+    model_export.decode_model(h, s, tmp_path / "m.obj")
     side = json.loads((tmp_path / "m.model.json").read_text())
     assert side["lods"][1]["max_distance"] == 60.0
     monkeypatch.setenv("WATCHMEN_MATERIALS", "legacy")
-    we.decode_model(h, s, tmp_path / "n.obj")
+    model_export.decode_model(h, s, tmp_path / "n.obj")
     assert (tmp_path / "n.obj").exists() and not (tmp_path / "n.model.json").exists()
 
 

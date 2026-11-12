@@ -21,7 +21,9 @@ from PIL import Image
 
 import materials as mt
 import rig_glb
-import watchmen_extract as we
+import model_export
+import obj_mtl
+import texture_sheet
 from conftest import parse_glb
 
 import test_texture_sheets as ts
@@ -143,7 +145,7 @@ def test_grade_options_start_at_one_half():
 # MTL
 # ---------------------------------------------------------------------------
 def test_mtl_opacity_rule():
-    f = we._mtl_opacity
+    f = obj_mtl._mtl_opacity
     assert f({"opacity": 0.69, "renderType": 0}) == pytest.approx(0.69)
     assert f({"opacity": 0.69, "renderType": 10}) == pytest.approx(0.69)
     assert f({"opacity": 0.69, "renderType": 7}) == pytest.approx(0.69)  # sky pass
@@ -156,7 +158,7 @@ def test_mtl_opacity_rule():
 
 
 def test_mtl_emission_rule():
-    f = we._mtl_emission
+    f = obj_mtl._mtl_emission
     assert f({}) == (True, None)  # no sheet values: the layer is linked as before
     assert f({"selfIlluminance": 0.0}) == (False, None)
     lit, ke = f({"selfIlluminance": 0.5, "selfIlluminanceColor": [1.0, 0.5, 0.25]})
@@ -174,7 +176,7 @@ def _tex(tmp_path, name, sheet):
 def _mtl(tmp_path, sheet, monkeypatch):
     h, s = tv._rigid_model()
     idx = {"wall_01": _tex(tmp_path, "Wall_01", sheet)}
-    assert we.decode_model(h, s, tmp_path / "m.obj", idx, None)
+    assert model_export.decode_model(h, s, tmp_path / "m.obj", idx, None)
     return (tmp_path / "m.mtl").read_text().splitlines()
 
 
@@ -218,7 +220,9 @@ def test_mtl_names_a_glow_map_the_first_sheet_does_not_light(tmp_path, monkeypat
 def _glb_material(tmp_path, sheet, monkeypatch):
     h, s = tv._rigid_model()
     idx = {"wall_01": _tex(tmp_path, "Wall_01", sheet)}
-    assert we.decode_model(h, s, tmp_path / "m.obj", idx, None, glb=we.glb_options())
+    assert model_export.decode_model(
+        h, s, tmp_path / "m.obj", idx, None, glb=model_export.glb_options()
+    )
     return parse_glb(tmp_path / "m.glb").j["materials"][0]
 
 
@@ -286,7 +290,7 @@ def test_sheet_reader_returns_the_captured_constants(name):
         props["reflectionLightFactor"] = float(refl)
     if fall is not None:
         props["fallOffPower"] = float(fall[3])
-    (sh,) = we.texture_sheets(ts._header(ts._sheet(0x1DA7D3DD, "default", 5, **props)))
+    (sh,) = texture_sheet.texture_sheets(ts._header(ts._sheet(0x1DA7D3DD, "default", 5, **props)))
     f32 = lambda v: float(np.float32(v))
     assert sh["specularSize"] == pytest.approx(f32(size), abs=0, rel=1e-7)
     assert sh["specularPower"] == pytest.approx(f32(power), abs=0, rel=1e-7)

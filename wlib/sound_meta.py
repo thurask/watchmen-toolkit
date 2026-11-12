@@ -396,8 +396,6 @@ class SoundDB:
         return self._wave[k]
 
     def _wave_info(self, k):
-        import watchmen_extract as wx
-
         if self._wavs is None:
             self._wavs = {}
             for base in (self.root, os.path.join(self.out, "audio")):
@@ -417,7 +415,7 @@ class SoundDB:
             except OSError:
                 break
             more = limit is not None and len(head) > limit
-            got = self._header_facts(wx, head[:limit] if more else head)
+            got = self._header_facts(head[:limit] if more else head)
             if got or not more:
                 if got:
                     return got
@@ -456,11 +454,13 @@ class SoundDB:
         return None
 
     @staticmethod
-    def _header_facts(wx, head):
+    def _header_facts(head):
         """Wave facts from the bytes of a raw 'sound' / stream descriptor asset."""
+        import sound_header
+
         for order in ("<", ">"):
             try:
-                i = wx.sfx_info(head, order)
+                i = sound_header.sfx_info(head, order)
             except (struct.error, IndexError, ValueError):
                 i = None
             if i and i.get("duration_s"):
@@ -474,7 +474,7 @@ class SoundDB:
                     "duration_source": i.get("duration_source", "header"),
                 }
             try:
-                d = wx.media_desc_from_header(head, order)
+                d = sound_header.media_desc_from_header(head, order)
             except (struct.error, IndexError, ValueError):
                 d = None
             if d and d["tracks"]:

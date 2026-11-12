@@ -2,7 +2,7 @@
 overtook, where they live in code.
 
 1. `.detailmesh.json`, `inferred["stream.format_stride on consoles"]`: the Xbox 360
-   stride table IS read (watchmen_extract.CONSOLE_VERTEX_STRIDES, exe table
+   stride table IS read (model_header.CONSOLE_VERTEX_STRIDES, exe table
    0x8308b6e0) and gives the 60 bytes of the PC table for format 7; only the PS3
    table was not read.  The exported text said "the console tables were not read".
 2. `anim_state_machine.members`: the docstring said how a class picks its first
@@ -22,7 +22,7 @@ import anim_state_machine as asm
 import kapow_json as kj
 import terrain_asset as ta
 import test_p3_raw_formats as p3
-import watchmen_extract as we
+import model_header
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -66,7 +66,7 @@ def test_console_stride_note_says_which_table_was_read():
     text = ta.DETAIL_INFERRED[KEY]
     # what the note claims is what the tables hold
     assert ta.DETAIL_FORMAT_STRIDE[ta.DETAIL_VERTEX_FORMAT] == 60
-    assert we.CONSOLE_VERTEX_STRIDES[ta.DETAIL_VERTEX_FORMAT] == 60
+    assert model_header.CONSOLE_VERTEX_STRIDES[ta.DETAIL_VERTEX_FORMAT] == 60
     assert "Xbox 360 table (0x8308b6e0" in text and "CONSOLE_VERTEX_STRIDES" in text
     assert "the PS3 table was not read" in text
     assert "console tables were not read" not in text

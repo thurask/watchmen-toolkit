@@ -253,6 +253,7 @@ def test_library_defaults_use_default_naz(tmp_path, monkeypatch):
     import bake_v4
     import characters_export as ce
     import jiggle_d6
+    import naz_archive
     import watchmenlib as wl
     import wutil
 
@@ -271,7 +272,7 @@ def test_library_defaults_use_default_naz(tmp_path, monkeypatch):
         assert inspect.signature(fn).parameters["naz"].default is None, fn.__name__
     seen = []
     monkeypatch.setattr(
-        wl._we, "iter_blocks", lambda naz, streams=True: seen.append(naz) or iter(())
+        naz_archive, "iter_blocks", lambda naz, streams=True: seen.append(naz) or iter(())
     )
     monkeypatch.chdir(tmp_path)
     list(wl.iter_blocks())

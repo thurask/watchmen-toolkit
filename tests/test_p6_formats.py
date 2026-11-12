@@ -16,7 +16,8 @@ import struct
 import kapow_fragment as kf
 import kapow_json as kj
 import kapow_props as kp
-import watchmen_extract as we
+import kapow_block
+import sound_header
 import test_formats_v2 as tf
 import test_p2_audio as ta
 from conftest import frag_node, fragment_bytes, u32s
@@ -28,7 +29,7 @@ DEFAULT = "THIS IS THE DEFAULT FINGERPRINT KEY, PLEASE CHANGE IT!"
 def _with_fingerprint(h, text, crc):
     b = bytearray(h)
     b[0x48:0x147] = bytes(255)
-    ct = we.fingerprint_decrypt(text.encode("latin1"))  # the cipher is its own inverse
+    ct = kapow_block.fingerprint_decrypt(text.encode("latin1"))  # the cipher is its own inverse
     b[0x48 : 0x48 + len(ct)] = ct
     b[327] = 2
     b[328:332] = struct.pack("<I", crc)
@@ -37,7 +38,7 @@ def _with_fingerprint(h, text, crc):
 
 def test_fingerprint_crc_is_the_raw_crc_of_the_padded_field():
     assert len(DEFAULT) == 54
-    assert we.fingerprint_field_crc(DEFAULT) == 0x593F880A
+    assert kapow_block.fingerprint_field_crc(DEFAULT) == 0x593F880A
     # the field is 255 bytes: one byte less or more gives another value
     for n in (254, 256):
         assert kp.kapow_hash(DEFAULT + "\0" * (n - len(DEFAULT))) != 0x593F880A
@@ -46,14 +47,14 @@ def test_fingerprint_crc_is_the_raw_crc_of_the_padded_field():
 
 def test_block_header_names_the_fingerprint_fields():
     h, _s = tf._block([("/a.bmp", tf._TEX, b"HDR-A", None)])
-    hd = we.parse_block_header(_with_fingerprint(h, DEFAULT, 0x593F880A))
+    hd = kapow_block.parse_block_header(_with_fingerprint(h, DEFAULT, 0x593F880A))
     assert hd["fingerprint"] == DEFAULT
     assert hd["fingerprint_display"] == 2 and hd["unknown_327"] == 2
     assert hd["fingerprint_crc"] == 0x593F880A and hd["fingerprint_crc_ok"] is True
     assert hd["unknown_328"] == bytes.fromhex("0a883f59")  # the older fields stay
-    bad = we.parse_block_header(_with_fingerprint(h, DEFAULT, 0x593F880B))
+    bad = kapow_block.parse_block_header(_with_fingerprint(h, DEFAULT, 0x593F880B))
     assert bad["fingerprint_crc_ok"] is False
-    other = we.parse_block_header(_with_fingerprint(h, "ANOTHER KEY", 0x593F880A))
+    other = kapow_block.parse_block_header(_with_fingerprint(h, "ANOTHER KEY", 0x593F880A))
     assert other["fingerprint"] == "ANOTHER KEY" and other["fingerprint_crc_ok"] is False
 
 
@@ -61,7 +62,7 @@ def test_fingerprint_crc_is_little_endian_on_a_big_endian_block():
     h, _s = tf._block([("/a.bmp", tf._TEX, b"HDR-A", None)])
     b = bytearray(_with_fingerprint(h, DEFAULT, 0x593F880A))
     struct.pack_into(">I", b, 32, 0x79D3E0DA)
-    hd = we.parse_block_header(bytes(b), order=">")
+    hd = kapow_block.parse_block_header(bytes(b), order=">")
     assert hd["fingerprint_crc"] == 0x593F880A and hd["fingerprint_crc_ok"] is True
 
 
@@ -196,7 +197,7 @@ def test_ps3_loop_word_is_two_mp3_frames_in_bytes():
         bps = 64 * ch * 125
         word = int(2 * 1152 * bps / rate)
         h, _d = ta.ps3_sound(frames=12, rate=rate, ch=ch, loop=1, is3d=0, word4=word)
-        i = we.sfx_info(h, ">")
+        i = sound_header.sfx_info(h, ">")
         assert i["segment_word4"] == word == int(2 * 1152 * i["bytes_per_second"] / i["rate"])
         assert i["segment_word4_rule"] == "2 mp3 frames in bytes" and i["loop_skip_frames"] == 2
         assert i["samples"] == (i["mp3_frames"] - i["loop_skip_frames"]) * 1152
@@ -206,5 +207,5 @@ def test_ps3_loop_word_is_two_mp3_frames_in_bytes():
         768,
     ]
     h, _d = ta.ps3_sound(frames=10)
-    i = we.sfx_info(h, ">")
+    i = sound_header.sfx_info(h, ">")
     assert "loop_skip_frames" not in i and "segment_word4_rule" not in i

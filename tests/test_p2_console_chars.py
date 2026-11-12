@@ -21,7 +21,9 @@ import char_lib
 import characters_export as ce
 import ragdoll_rig as rr
 import variant_glb as vg
-import watchmen_extract as we
+import kapow_block
+import model_mesh
+import naz_archive
 
 import test_ragdoll_rig as trr
 import test_v120_regressions as tv
@@ -140,7 +142,7 @@ def test_header_order_is_none_when_the_header_does_not_say():
 def test_the_fixture_ties_the_old_descriptor_count_rule():
     """The condition of the bug: one descriptor in each order."""
     hdr, stream = console_skinned_model()
-    le, be = we.find_descriptors(hdr, "<"), we.find_descriptors(hdr, ">")
+    le, be = model_mesh.find_descriptors(hdr, "<"), model_mesh.find_descriptors(hdr, ">")
     assert len(le) == len(be) == 1
     assert sum(nv * st + ib for nv, st, ib in le) > len(stream)  # the false one overruns
     assert char_lib.model_order(hdr, stream, "X") == ">"
@@ -181,10 +183,12 @@ def test_variant_glb_load_parts_keeps_it_too(monkeypatch):
     hdr, stream = console_skinned_model()
     # load_parts walks the archive one block at a time (iter_blocks, 1.5.0)
     monkeypatch.setattr(
-        vg.we, "iter_blocks", lambda naz, streams=True: iter([("blk", {"h": b"H", "s": b"S"})])
+        naz_archive,
+        "iter_blocks",
+        lambda naz, streams=True: iter([("blk", {"h": b"H", "s": b"S"})]),
     )
     monkeypatch.setattr(
-        we, "extract_block", lambda h, s: iter([(tv._Entry("/x/Body.model"), hdr, stream)])
+        kapow_block, "extract_block", lambda h, s: iter([(tv._Entry("/x/Body.model"), hdr, stream)])
     )
     parts = vg.load_parts(["Body"], tv.PALETTE, naz="does-not-exist.naz")
     assert len(parts) == 1 and len(parts[0][0]) == 8
@@ -192,7 +196,11 @@ def test_variant_glb_load_parts_keeps_it_too(monkeypatch):
 
 def test_weapon_attachment_keeps_a_single_submesh_console_prop(tmp_path):
     hdr, stream = console_rigid_model()
-    assert len(we.find_descriptors(hdr, "<")) == len(we.find_descriptors(hdr, ">")) == 1
+    assert (
+        len(model_mesh.find_descriptors(hdr, "<"))
+        == len(model_mesh.find_descriptors(hdr, ">"))
+        == 1
+    )
     base = _write_model(tmp_path, "2x4_2H", hdr, stream)
     bind = str(tmp_path / "bind.npz")
     np.savez(bind, Rb=np.stack([np.eye(3)] * 2), tb=np.array([[0.0, 0, 0], [1.0, 2.0, 3.0]]))
@@ -432,7 +440,7 @@ def test_a_planar_piece_is_found_by_the_flat_fallback(order, tmp_path, capsys):
         struct.pack_into(order + "3f", rec, 0, 0.0988, 0.43 + 0.01 * i, 0.02 * (i % 3) - 0.02)
         vb += rec
     stream = bytes(vb) + b"".join(struct.pack(order + "3H", *t) for t in tris)
-    assert not we.vb_ok(stream, 0, nv, stride, ib, order)
+    assert not model_mesh.vb_ok(stream, 0, nv, stride, ib, order)
     assert char_lib.flat_buffer(stream, 0, nv, stride, ib, order) == 0
     base = _write_model(tmp_path, "Large_Head_2", hdr, stream)
     char_lib.dropped_pieces(reset=True)

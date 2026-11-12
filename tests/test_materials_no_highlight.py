@@ -22,7 +22,9 @@ import char_lib
 import materials as mt
 import rig_glb
 import variant_glb as vg
-import watchmen_extract as we
+import material_refs
+import obj_mtl
+import texture_sheet
 import test_materials_v2 as tm
 import test_texture_sheets as ts
 from conftest import parse_glb
@@ -164,7 +166,7 @@ def test_character_glb_drops_the_roughness_texture_of_a_spec_size_layer(tmp_path
     def write(sub, power):
         root = tmp_path / sub
         path, _d = _spec_size_tree(root, power)
-        parts = [tuple(rig.parts[0][:5]) + (we.texture_ref(path),)]
+        parts = [tuple(rig.parts[0][:5]) + (material_refs.texture_ref(path),)]
         tex = char_lib.find_textures(parts, [str(root / "textures")])
         vg.write_glb(parts, rig.manifest, root / "c.glb", str(rig.bind_npz), textures=tex)
         for c in (char_lib._TEXIDX, char_lib._LAYERCACHE):
@@ -186,7 +188,7 @@ def test_character_glb_drops_the_roughness_texture_of_a_spec_size_layer(tmp_path
 
 
 def _static(root, path):
-    idx = we.build_texture_index(root / "textures")
+    idx = obj_mtl.build_texture_index(root / "textures")
     V = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], float)
     rig_glb.build_rigged_glb(
         root / "s.glb",
@@ -197,7 +199,7 @@ def _static(root, path):
         None,
         [(0, 1, 2)],
         [(0, 3, 0, 1, 44)],
-        [we.texture_ref(path)],
+        [material_refs.texture_ref(path)],
         idx,
         {"bone_count": 0, "bones": []},
         None,
@@ -235,10 +237,10 @@ def test_legacy_character_materials_are_untouched(tmp_path, rig, monkeypatch):
 
 
 def _mtl(root, path, name="m"):
-    idx = we.build_texture_index(root / "textures")
+    idx = obj_mtl.build_texture_index(root / "textures")
     out = root / "obj" / (name + ".obj")
     v = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)]
-    we.write_obj_mtl(
+    obj_mtl.write_obj_mtl(
         out,
         name,
         v,
@@ -246,7 +248,7 @@ def _mtl(root, path, name="m"):
         [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0)],
         [(0, 1, 2)],
         [(0, 3, 0, 1, 44)],
-        [we.texture_ref(path)],
+        [material_refs.texture_ref(path)],
         idx,
         lambda *a: None,
     )
@@ -282,13 +284,15 @@ def test_mtl_of_a_material_without_a_highlight_has_no_roughness_bake(tmp_path, m
     )
     d2 = ts._texture(tmp_path / "refl", path, (90, 90, 90), header=hdr)
     (d2 / "spec.txt").write_text("43.0 0.0")
-    assert we.read_sheet_json(d2)["sheets"][0]["reflectionType"] == 2  # only in the full sheet
+    assert (
+        texture_sheet.read_sheet_json(d2)["sheets"][0]["reflectionType"] == 2
+    )  # only in the full sheet
     lines = _mtl(tmp_path / "refl", path)
     # no specSize layer: the constant roughness is a plain Ns (not 0), no map (1.5.0)
     ns = [x for x in lines if x.startswith("Ns ")]
     assert ns and ns != ["Ns 0.000000"] and not [x for x in lines if x.startswith("map_Ns")]
     assert not (d2 / "roughnessEngine.png").exists()
-    want = we.mtl_ns_of_roughness(we.mtl_const_roughness(43.0))
+    want = obj_mtl.mtl_ns_of_roughness(obj_mtl.mtl_const_roughness(43.0))
     assert float(ns[0].split()[1]) == pytest.approx(want)
     # a specular layer that is black everywhere: no highlight either
     p3, d3 = _spec_size_tree(tmp_path / "black", 0.4)

@@ -10,7 +10,6 @@ Synthetic fixtures only (the builders of test_audio_v2)."""
 
 import anim_meta as am
 import sound_meta as sm
-import watchmen_extract as wx
 import test_audio_v2 as ta
 
 sound_extract = ta.sound_extract  # the fixture of test_audio_v2, used below
@@ -76,7 +75,7 @@ def test_stream_descriptor_facts_carry_the_cue_names():
             ("/sounds/Music/U/Under_track1.wav", 4800, 2, 48000, [("click1", 9), ("Perc", 5)]),
         ],
     )
-    facts = sm.SoundDB._header_facts(wx, h)
+    facts = sm.SoundDB._header_facts(h)
     assert facts["codec"] == "stream" and facts["tracks"] == 2
     assert facts["cue_names"] == ["Perc", "click1", "end"]
 

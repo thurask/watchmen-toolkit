@@ -25,7 +25,13 @@ import canonical_names as cn
 import nav_data as nd
 import particle_meta as pm
 import watchmen
-import watchmen_extract as wx
+import extract_driver
+import extract_paths
+import material_refs
+import model_export
+import obj_mtl
+import texture_carve
+import texture_sheet
 
 import test_formats_v2 as tf
 import test_p2_small as ps
@@ -100,8 +106,8 @@ def test_the_three_part2_textures_get_the_part1_spelling(folder, stored, canon):
         assert cn.canonical(folder % spelling) == folder % canon
         assert cn.canonical((folder % spelling).upper()) == folder.upper().replace("%S", canon)
         # the material is named like the texture, whatever case the model stores
-        assert str(wx.texture_ref(folder % spelling)) == canon.rsplit(".", 1)[0]
-        assert wx.texture_ref(folder % spelling).path == folder % canon
+        assert str(material_refs.texture_ref(folder % spelling)) == canon.rsplit(".", 1)[0]
+        assert material_refs.texture_ref(folder % spelling).path == folder % canon
 
 
 def test_canonical_respells_folders_and_leaves_everything_else_alone():
@@ -126,7 +132,10 @@ def test_stored_mode_changes_nothing(monkeypatch):
     monkeypatch.setenv("WATCHMEN_NAMES", "stored")
     name = GARBAGE % "garbagepile_01.bmp"
     assert cn.canonical(name) is name
-    assert str(wx.texture_ref(name)) == "garbagepile_01" and wx.texture_ref(name).path == name
+    assert (
+        str(material_refs.texture_ref(name)) == "garbagepile_01"
+        and material_refs.texture_ref(name).path == name
+    )
     assert cn.output_parts("/o/textures", ["art", "Decals", "x.bmp"]) == ["art", "Decals", "x.bmp"]
     assert cn.archive_name("data/Levels/Docks.hpd") == "data/Levels/Docks.hpd"
     assert cn.canonical(name, "canonical") == GARBAGE % "GarbagePile_01.bmp"
@@ -135,7 +144,7 @@ def test_stored_mode_changes_nothing(monkeypatch):
 # ------------------------------------------------------------------ OutputNames
 def test_output_names_place_an_asset_under_its_canonical_name():
     run = cn.begin()
-    n = wx.OutputNames(run=run)
+    n = extract_paths.OutputNames(run=run)
     stored = GARBAGE % "garbagepile_01.bmp"
     canon = GARBAGE % "GarbagePile_01.bmp"
     assert n.place(stored, "/l/streetsofriot.block", b"H", b"S") == (canon, "new")
@@ -160,7 +169,7 @@ def test_a_later_copy_in_another_case_is_a_twin_not_a_rename():
     """Part 1 stores the canonical spelling first; a later block's copy in the Part 2
     spelling is the old "twin" and nothing was renamed."""
     run = cn.begin()
-    n = wx.OutputNames(run=run)
+    n = extract_paths.OutputNames(run=run)
     canon = "/art/props/common/rubble/Rubble_RoofTop_02.model"
     other = "/art/props/common/rubble/Rubble_Rooftop_02.model"
     assert n.place(canon, "/l/docks.block", b"H", b"S") == (canon, "new")
@@ -170,7 +179,7 @@ def test_a_later_copy_in_another_case_is_a_twin_not_a_rename():
 
 
 def test_output_names_without_a_run_keep_the_stored_name():
-    n = wx.OutputNames()
+    n = extract_paths.OutputNames()
     stored = GARBAGE % "garbagepile_01.bmp"
     assert n.place(stored, "/l/a.block", b"H", b"S") == (stored, "new")
 
@@ -179,17 +188,17 @@ def test_a_reference_in_another_case_follows_the_asset_that_was_written():
     """PC Part 2: TrashCan_03 names GarbagePile_01.bmp, the archive stores
     garbagepile_01.bmp; and for a name no table lists, the spelling written."""
     run = cn.begin()
-    n = wx.OutputNames(run=run)
+    n = extract_paths.OutputNames(run=run)
     n.place("/art/T/Wall_Cables.bmp", "/l/a.block", b"H", b"S")
     n.place(GARBAGE % "garbagepile_01.bmp", "/l/a.block", b"H", b"S")
     assert run.written["art/t/wall_cables.bmp"] == "/art/T/Wall_Cables.bmp"
     for ref in ("/art/t/wall_cables.bmp", "/ART/T/WALL_CABLES.BMP", "/art/T/Wall_Cables.bmp"):
-        assert str(wx.texture_ref(ref)) == "Wall_Cables"
-        assert wx.texture_ref(ref).path == "/art/T/Wall_Cables.bmp"
-    assert str(wx.texture_ref(GARBAGE % "GARBAGEPILE_01.BMP")) == "GarbagePile_01"
+        assert str(material_refs.texture_ref(ref)) == "Wall_Cables"
+        assert material_refs.texture_ref(ref).path == "/art/T/Wall_Cables.bmp"
+    assert str(material_refs.texture_ref(GARBAGE % "GARBAGEPILE_01.BMP")) == "GarbagePile_01"
     cn.end()  # outside an extract only the table applies
-    assert str(wx.texture_ref("/art/t/wall_cables.bmp")) == "wall_cables"
-    assert str(wx.texture_ref(GARBAGE % "garbagepile_01.bmp")) == "GarbagePile_01"
+    assert str(material_refs.texture_ref("/art/t/wall_cables.bmp")) == "wall_cables"
+    assert str(material_refs.texture_ref(GARBAGE % "garbagepile_01.bmp")) == "GarbagePile_01"
 
 
 def test_texture_index_finds_the_folder_whatever_the_reference_spells(tmp_path):
@@ -197,9 +206,9 @@ def test_texture_index_finds_the_folder_whatever_the_reference_spells(tmp_path):
     d = tmp_path / "textures" / "art" / "props" / "common" / "garbage" / "textures"
     (d / "GarbagePile_01.bmp").mkdir(parents=True)
     (d / "GarbagePile_01.bmp" / "0_diffuse_4x4_DXT1.png").write_bytes(b"x")
-    idx = wx.build_texture_index(tmp_path / "textures")
+    idx = obj_mtl.build_texture_index(tmp_path / "textures")
     for spelling in ("garbagepile_01.bmp", "GarbagePile_01.bmp"):
-        ref = wx.texture_ref(GARBAGE % spelling)
+        ref = material_refs.texture_ref(GARBAGE % spelling)
         assert idx.resolve(ref).name == "GarbagePile_01.bmp" == str(ref) + ".bmp"
 
 
@@ -207,44 +216,52 @@ def test_texture_index_finds_the_folder_whatever_the_reference_spells(tmp_path):
 def test_safe_uses_the_table_and_one_spelling_per_folder(tmp_path):
     base = tmp_path / "textures"
     rel = lambda p: p.relative_to(base).as_posix()
-    assert rel(wx.safe(base, "/art/props/common/Chains/a.bmp")) == "art/props/common/chains/a.bmp"
-    assert rel(wx.safe(base, GARBAGE % "garbagepile_01.bmp")).endswith("/GarbagePile_01.bmp")
+    assert (
+        rel(extract_paths.safe(base, "/art/props/common/Chains/a.bmp"))
+        == "art/props/common/chains/a.bmp"
+    )
+    assert rel(extract_paths.safe(base, GARBAGE % "garbagepile_01.bmp")).endswith(
+        "/GarbagePile_01.bmp"
+    )
     # folders: the first spelling written is kept, as on a case-insensitive file system
-    assert rel(wx.safe(base, "/art/Walls/Brick/a.bmp")) == "art/Walls/Brick/a.bmp"
-    assert rel(wx.safe(base, "/Art/walls/brick/B.bmp")) == "art/Walls/Brick/B.bmp"
-    assert rel(wx.safe(base, "/art/WALLS/New/c.bmp")) == "art/Walls/New/c.bmp"
+    assert rel(extract_paths.safe(base, "/art/Walls/Brick/a.bmp")) == "art/Walls/Brick/a.bmp"
+    assert rel(extract_paths.safe(base, "/Art/walls/brick/B.bmp")) == "art/Walls/Brick/B.bmp"
+    assert rel(extract_paths.safe(base, "/art/WALLS/New/c.bmp")) == "art/Walls/New/c.bmp"
     # the file name itself is never respelled by that rule
-    assert rel(wx.safe(base, "/art/Walls/Brick/A.BMP")) == "art/Walls/Brick/A.BMP"
+    assert rel(extract_paths.safe(base, "/art/Walls/Brick/A.BMP")) == "art/Walls/Brick/A.BMP"
     # every output tree has its own first spelling
     other = tmp_path / "models"
-    assert wx.safe(other, "/ART/walls/x.obj").relative_to(other).as_posix() == "ART/walls/x.obj"
+    assert (
+        extract_paths.safe(other, "/ART/walls/x.obj").relative_to(other).as_posix()
+        == "ART/walls/x.obj"
+    )
     assert cn.folder_spellings(tmp_path) == {
         "textures/art": ["Art"],
         "textures/art/Walls": ["WALLS", "walls"],
         "textures/art/Walls/Brick": ["brick"],
     }
     # still never leaves the base
-    assert rel(wx.safe(base, "../../x/../Art/y")) == "x/Art/y"
+    assert rel(extract_paths.safe(base, "../../x/../Art/y")) == "x/Art/y"
 
 
 def test_a_file_value_names_the_path_that_was_written(tmp_path, monkeypatch):
     """sound_info.json and the music sidecars: "file" follows the folder spelling
     of the tree, so it opens on a case-sensitive file system."""
     base = tmp_path / "audio"
-    wx.safe(base, "/sounds/SFX/a.wav")
-    assert wx.out_rel(base, "/sounds/sfx/b.wav") == "sounds/SFX/b.wav"
-    assert wx.out_rel(str(base), "\\sounds\\Sfx\\c.wav") == "sounds/SFX/c.wav"
+    extract_paths.safe(base, "/sounds/SFX/a.wav")
+    assert extract_paths.out_rel(base, "/sounds/sfx/b.wav") == "sounds/SFX/b.wav"
+    assert extract_paths.out_rel(str(base), "\\sounds\\Sfx\\c.wav") == "sounds/SFX/c.wav"
     monkeypatch.setenv("WATCHMEN_NAMES", "stored")
-    assert wx.out_rel(base, "/sounds/sfx/b.wav") == "sounds/sfx/b.wav"
-    assert wx.out_rel(base, "\\sounds\\Sfx\\c.wav") == "sounds/Sfx/c.wav"
+    assert extract_paths.out_rel(base, "/sounds/sfx/b.wav") == "sounds/sfx/b.wav"
+    assert extract_paths.out_rel(base, "\\sounds\\Sfx\\c.wav") == "sounds/Sfx/c.wav"
 
 
 def test_safe_in_stored_mode_is_the_old_function(tmp_path, monkeypatch):
     monkeypatch.setenv("WATCHMEN_NAMES", "stored")
     base = tmp_path / "t"
-    assert wx.safe(base, "/art/Walls/a.bmp") == base / "art" / "Walls" / "a.bmp"
-    assert wx.safe(base, "/ART/walls/b.bmp") == base / "ART" / "walls" / "b.bmp"
-    assert wx.safe(base, "/art/props/common/Chains/a.bmp").parent.name == "Chains"
+    assert extract_paths.safe(base, "/art/Walls/a.bmp") == base / "art" / "Walls" / "a.bmp"
+    assert extract_paths.safe(base, "/ART/walls/b.bmp") == base / "ART" / "walls" / "b.bmp"
+    assert extract_paths.safe(base, "/art/props/common/Chains/a.bmp").parent.name == "Chains"
     assert cn.folder_spellings(tmp_path) == {}
 
 
@@ -305,8 +322,8 @@ def writers(monkeypatch):
         out_path.write_bytes(stream)
         return True
 
-    monkeypatch.setattr(wx, "carve_texture", carve)
-    monkeypatch.setattr(wx, "decode_model", decode)
+    monkeypatch.setattr(texture_carve, "carve_texture", carve)
+    monkeypatch.setattr(model_export, "decode_model", decode)
     return seen
 
 
@@ -323,7 +340,12 @@ def _paths(out, skip=("files",)):
 def _extract(tmp_path, platform, *more):
     files = _platform_tree(tmp_path / ("src%d" % platform), platform)
     out = tmp_path / ("out%d" % platform)
-    assert wx.main([str(files), "-o", str(out), "--no-text", "--no-audio", "--no-nav", *more]) == 0
+    assert (
+        extract_driver.main(
+            [str(files), "-o", str(out), "--no-text", "--no-audio", "--no-nav", *more]
+        )
+        == 0
+    )
     return out
 
 
@@ -442,7 +464,7 @@ def test_extract_writes_one_folder_where_assets_spell_it_two_ways(tmp_path, writ
     (d / "a.block_s_z").write_bytes(s)
     out = tmp_path / "out"
     args = [str(tmp_path / "files"), "-o", str(out), "--no-text", "--no-audio", "--no-nav"]
-    assert wx.main(args + ["--no-files"]) == 0
+    assert extract_driver.main(args + ["--no-files"]) == 0
     assert os.listdir(out / "textures") == ["art"] and os.listdir(out / "extracted") == ["art"]
     assert os.listdir(out / "textures" / "art") == ["Walls"]
     assert sorted(os.listdir(out / "textures" / "art" / "Walls")) == [
@@ -458,31 +480,34 @@ def test_extract_writes_one_folder_where_assets_spell_it_two_ways(tmp_path, writ
         "textures/art/Walls": ["WALLS", "walls"],
     }
     # the texture index of that tree resolves every spelling to the one folder
-    idx = wx.build_texture_index(out / "textures")
-    assert idx.resolve(wx.texture_ref("/ART/walls/STONE.bmp")).name == "Stone.bmp"
+    idx = obj_mtl.build_texture_index(out / "textures")
+    assert idx.resolve(material_refs.texture_ref("/ART/walls/STONE.bmp")).name == "Stone.bmp"
     assert "canonical spelling" not in capsys.readouterr().out
 
 
 def test_decode_model_puts_the_stored_name_into_the_model_json(tmp_path):
     h, s = tf._lod_model()
     stored = "/art/props/common/rubble/Rubble_Rooftop_02.model"
-    assert wx.decode_model(h, s, tmp_path / "m.obj", stored_name=stored) is True
+    assert model_export.decode_model(h, s, tmp_path / "m.obj", stored_name=stored) is True
     assert json.loads((tmp_path / "m.model.json").read_text())["stored_name"] == stored
-    assert wx.decode_model(h, s, tmp_path / "n.obj") is True
+    assert model_export.decode_model(h, s, tmp_path / "n.obj") is True
     assert "stored_name" not in json.loads((tmp_path / "n.model.json").read_text())
 
 
 def test_mark_stored_name_keeps_the_sheet(tmp_path):
     (tmp_path / "sheet.json").write_text('{"twoSided": true}')
-    wx.mark_stored_name(tmp_path, "/art/x/wall.bmp")
-    assert wx.read_sheet_json(tmp_path) == {"twoSided": True, "stored_name": "/art/x/wall.bmp"}
+    texture_sheet.mark_stored_name(tmp_path, "/art/x/wall.bmp")
+    assert texture_sheet.read_sheet_json(tmp_path) == {
+        "twoSided": True,
+        "stored_name": "/art/x/wall.bmp",
+    }
     # no sheet, no sidecar: two archives must not differ in the files of a folder
     other = tmp_path / "t"
     other.mkdir()
-    wx.mark_stored_name(other, "/art/x/wall.bmp")
-    wx.mark_stored_name(tmp_path, None)
+    texture_sheet.mark_stored_name(other, "/art/x/wall.bmp")
+    texture_sheet.mark_stored_name(tmp_path, None)
     assert not (other / "sheet.json").exists()
-    assert wx.read_sheet_json(tmp_path)["stored_name"] == "/art/x/wall.bmp"
+    assert texture_sheet.read_sheet_json(tmp_path)["stored_name"] == "/art/x/wall.bmp"
 
 
 # ------------------------------------------------------------------ loose folder
@@ -514,7 +539,7 @@ def test_loose_folder_files_keep_their_spelling_with_names_stored(tmp_path, monk
     out = tmp_path / "out"
     ps._seed_definition(out)
     args = ["--no-textures", "--no-models", "--no-text", "--no-audio", "--names", "stored"]
-    assert wx.main([str(src), "-o", str(out)] + args) == 0
+    assert extract_driver.main([str(src), "-o", str(out)] + args) == 0
     assert (out / "files").joinpath(*ps.HPD_NAME.split("/")).is_file()
     doc = json.loads((out / "nav" / "Demo.nav.json").read_text(encoding="utf-8"))
     assert doc["source"]["hpd"] == ps.HPD_NAME.split("/")[-1]
@@ -527,7 +552,7 @@ def test_extract_records_the_loose_folder_spelling(tmp_path, capsys):
     out = tmp_path / "out"
     ps._seed_definition(out)
     args = ["--no-textures", "--no-models", "--no-text", "--no-audio"]
-    assert wx.main([str(src), "-o", str(out)] + args) == 0
+    assert extract_driver.main([str(src), "-o", str(out)] + args) == 0
     doc = json.loads((out / cn.RUN_FILE).read_text(encoding="utf-8"))
     assert doc["renamed"][ps.HPD_NAME.lower()] == [ps.HPD_NAME]
     assert "names       : 2 written under their canonical spelling" in capsys.readouterr().out
@@ -627,7 +652,7 @@ def test_cli_names_option_is_refused_where_no_name_is_written(monkeypatch, capsy
 def test_extract_parser_has_the_option(monkeypatch, capsys):
     monkeypatch.setenv("WATCHMEN_NAMES", "canonical")
     with pytest.raises(SystemExit):
-        wx.main(["--help"])
+        extract_driver.main(["--help"])
     assert "--names {canonical,stored}" in capsys.readouterr().out
     assert cn.CURRENT is None  # the run is closed however main() ends
 
@@ -655,7 +680,7 @@ def test_the_output_trees_of_an_export_share_one_folder_spelling(
     (d / "a.block_s_z").write_bytes(s)
     out = tmp_path / "out"
     args = [str(tmp_path / "files"), "-o", str(out), "--no-text", "--no-audio", "--no-nav"]
-    assert wx.main(args + ["--no-files"]) == 0
+    assert extract_driver.main(args + ["--no-files"]) == 0
     got = _paths(out)
     for want in (
         "extracted/art/environments/common/House.fragment",
@@ -690,7 +715,10 @@ def test_the_output_trees_of_an_export_share_one_folder_spelling(
     }
     # --names stored: every tree as the archive stores its own paths
     out2 = tmp_path / "out2"
-    assert wx.main(args[:2] + [str(out2)] + args[3:] + ["--no-files", "--names", "stored"]) == 0
+    assert (
+        extract_driver.main(args[:2] + [str(out2)] + args[3:] + ["--no-files", "--names", "stored"])
+        == 0
+    )
     got2 = _paths(out2)
     # a case-insensitive file system merges folders that differ only in case
     # into the spelling written first

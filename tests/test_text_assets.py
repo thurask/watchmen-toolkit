@@ -17,7 +17,7 @@ import struct
 import pytest
 
 import kapow_props
-import watchmen_extract as wx
+import extract_driver
 
 try:  # the module is new: on 1.3.0 every test fails instead of erroring at import
     import text_assets as ta
@@ -188,8 +188,8 @@ def test_extract_writes_text_for_every_language_and_nothing_else_changes(tmp_pat
     files = loose_tree(tmp_path)
     plain, full = tmp_path / "plain", tmp_path / "full"
     args = ["--no-files", "--no-textures", "--no-models", "--quiet"]
-    assert wx.main([str(files), "-o", str(plain), "--no-text"] + args) == 0
-    assert wx.main([str(files), "-o", str(full)] + args) == 0
+    assert extract_driver.main([str(files), "-o", str(plain), "--no-text"] + args) == 0
+    assert extract_driver.main([str(files), "-o", str(full)] + args) == 0
     a, b = tree_hashes(plain), tree_hashes(full)
     assert not any(k.startswith("text/") for k in a)
     # additive: every file of the run without text is there, byte for byte
@@ -254,7 +254,9 @@ def test_text_command_adds_only_the_text_folder(tmp_path, capsys):
 
     files = loose_tree(tmp_path)
     full = tmp_path / "full"
-    wx.main([str(files), "-o", str(full), "--no-files", "--no-textures", "--no-models", "--quiet"])
+    extract_driver.main(
+        [str(files), "-o", str(full), "--no-files", "--no-textures", "--no-models", "--quiet"]
+    )
     out = tmp_path / "existing"
     (out / "extracted").mkdir(parents=True)
     (out / "extracted" / "keep.bin").write_bytes(b"untouched")

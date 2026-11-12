@@ -269,7 +269,7 @@ def is_tuned(joints, bodies):
 def byte_order(blob, pivot_book=False):
     """Byte order of a model header ("<" PC, ">" Xbox 360 / PS3), read from its
     opening [u32 length][class name] (char_lib.header_order: the field
-    watchmen_extract.asset_class reads in the archive's order); of a pivot book,
+    kapow_block.asset_class reads in the archive's order); of a pivot book,
     from the name length of its first object at offset 12.  "<" when the bytes do
     not say."""
     import struct
@@ -370,7 +370,7 @@ WORLD_FIXES_RULE = (
 def cloth_mesh_format(model, node_index, mesh_index):
     """Stored FORMAT of the vertex buffer a cloth simulates: LOD 0 submesh
     `mesh_index` of part `node_index` in a parsed model header
-    (watchmen_extract.parse_model_header), or None when the lookup fails."""
+    (model_header.parse_model_header), or None when the lookup fails."""
     try:
         fmt = model["parts"][node_index]["lods"][0][mesh_index]["format"]
     except (TypeError, KeyError, IndexError):
@@ -391,9 +391,9 @@ def world_fixes_applied(mesh_format, props):
 def _model_header(mb, order):
     """parse_model_header(mb), or None (a blob the mesh reader does not follow)."""
     try:
-        import watchmen_extract as _wx
+        import model_header
 
-        return _wx.parse_model_header(mb, order)
+        return model_header.parse_model_header(mb, order)
     except Exception:
         return None
 

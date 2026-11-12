@@ -789,21 +789,22 @@ def test_the_model_tail_reads_to_the_end_of_the_header():
 
 def test_the_morph_channel_list_and_the_animation_path_are_parsed():
     import parse_model_nodes as pmn
-    import watchmen_extract as we
+    import model_export
+    import model_header
 
     ch = struct.pack("<f", 0.5) + _str("default03") + struct.pack("<I", 2)
     ch += struct.pack("<If", 1, 0.5) + struct.pack("<If", 2, 1.0)
     h = _with_tail(build_model(), struct.pack("<I", 1) + ch, animation="/art/a/b.animation")
-    assert we.parse_model_header(h)["has_animation"] == 1
+    assert model_header.parse_model_header(h)["has_animation"] == 1
     T = pmn.model_tail(h)
     assert T["animation"] == "/art/a/b.animation" and T["end"] == len(h)
     assert T["morph_channels"] == [
         {"f0": 0.5, "name": "default03", "targets": [[1, 0.5], [2, 1.0]]}
     ]
-    meta = we._model_tail_meta(h)
+    meta = model_export._model_tail_meta(h)
     assert meta["animation"] == "/art/a/b.animation"
     assert meta["morph_channels"][0]["name"] == "default03"
     assert "0x4b5b31" in meta["morph_channel_note"]
     # a tail that does not end the blob is not read
     assert pmn.model_tail(h + b"\0") is None
-    assert we._model_tail_meta(build_model()) == {}
+    assert model_export._model_tail_meta(build_model()) == {}

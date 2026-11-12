@@ -18,7 +18,10 @@ import struct
 
 import pytest
 
-import watchmen_extract as we
+import texture_carve
+import texture_decode
+import texture_header
+import texture_sheet
 
 np = pytest.importorskip("numpy")
 pytest.importorskip("PIL")
@@ -71,10 +74,10 @@ def _x360_tile(linear, we_, he, unit, xo=0, yo=0):
     out = bytearray(tw * th * unit)
     for y in range(he):
         for x in range(we_):
-            d = we.xg2d_offset(x + xo, y + yo, tw, unit) * unit
+            d = texture_decode.xg2d_offset(x + xo, y + yo, tw, unit) * unit
             s = (y * we_ + x) * unit
             out[d : d + unit] = linear[s : s + unit]
-    return we.bswap16(bytes(out))
+    return texture_decode.bswap16(bytes(out))
 
 
 def _pngs(d):
@@ -87,7 +90,7 @@ def _px(path):
 
 def _carve(stream, hdr, out):
     log = []
-    ok = we.carve_texture(stream, hdr, out, log.append)
+    ok = texture_carve.carve_texture(stream, hdr, out, log.append)
     return ok, [l.strip() for l in log]
 
 
@@ -109,8 +112,8 @@ def test_big_endian_header_parses_with_the_stored_size_of_each_layer():
             )
         ]
     )
-    assert we.parse_texture_frames(hdr) is None  # not a little-endian header
-    ex = we.parse_texture_frames(hdr, ">")
+    assert texture_header.parse_texture_frames(hdr) is None  # not a little-endian header
+    ex = texture_header.parse_texture_frames(hdr, ">")
     slots = [d for d in ex["frames"][0]["slots"] if d]
     assert [(d["slot"], d["enum"], d["fmt"], d["size"]) for d in slots] == [
         (0, 5, "DXT1", 8192),
@@ -118,7 +121,7 @@ def test_big_endian_header_parses_with_the_stored_size_of_each_layer():
         (4, 8, "DXT3A", 8192),
     ]
     assert ex["frames"][0]["path"] == "/data/art/x/Ground.bmp"
-    assert [we.texture_layer_label(slots, j, ">") for j in range(3)] == [
+    assert [texture_header.texture_layer_label(slots, j, ">") for j in range(3)] == [
         "diffuse",
         "normal",
         "height",  # slot 4 (was "specSize" until the labels followed the file slot)
@@ -127,19 +130,21 @@ def test_big_endian_header_parses_with_the_stored_size_of_each_layer():
 
 def test_format_8_stays_a_console_format():
     """Id 8 exists only in the X360 table: the PC parser must keep rejecting it."""
-    assert 8 not in we.TEX_ENUMS
+    assert 8 not in texture_header.TEX_ENUMS
     pc = _header([({0: _desc("<", 8, 8, 8, 1)}, "/data/a.bmp")], o="<")
-    assert we.parse_texture_frames(pc) is None
-    assert we.parse_texture_frames(_header([({0: _desc("<", 8, 8, 5, 1)}, "/data/a.bmp")], "<"))
+    assert texture_header.parse_texture_frames(pc) is None
+    assert texture_header.parse_texture_frames(
+        _header([({0: _desc("<", 8, 8, 5, 1)}, "/data/a.bmp")], "<")
+    )
 
 
 def test_dxt3a_is_four_bits_per_texel_low_nibble_first():
     blk = bytes([0x10, 0x32, 0x54, 0x76, 0x98, 0xBA, 0xDC, 0xFE])
-    img = we.decode_one_layer(blk + bytes([0xFF] * 8), 8, 8, 4)
+    img = texture_decode.decode_one_layer(blk + bytes([0xFF] * 8), 8, 8, 4)
     assert img.shape == (4, 8) and img.dtype == np.uint8
     assert (img[:, :4].reshape(-1) == np.arange(16) * 17).all()
     assert (img[:, 4:] == 255).all()
-    assert we.decode_one_layer(blk, 8, 8, 4) is None  # short data
+    assert texture_decode.decode_one_layer(blk, 8, 8, 4) is None  # short data
 
 
 # ---------------------------------------------------------------------------
@@ -195,7 +200,7 @@ def test_x360_fourth_layer_in_format_8_is_written(tmp_path):
         ("2_specMap_128x128_DXT1.png", spec, 5),
         ("3_height_128x128_DXT3A.png", size, 8),
     ):
-        want = we.decode_one_layer(lin, en, 128, 128)
+        want = texture_decode.decode_one_layer(lin, en, 128, 128)
         assert (_px(tmp_path / "t" / name) == want).all(), name
 
 
@@ -259,9 +264,9 @@ def test_x360_animation_frames_keep_both_layers_and_pc_names(tmp_path):
     )
     for f in range(3):
         got = _px(tmp_path / "t" / ("frame%d_0_diffuse_16x16_DXT1.png" % f))
-        assert (got == we.decode_one_layer(small[f], 5, 16, 16)).all()
+        assert (got == texture_decode.decode_one_layer(small[f], 5, 16, 16)).all()
         got = _px(tmp_path / "t" / ("frame%d_1_glow_128x128_DXT1.png" % f))
-        assert (got == we.decode_one_layer(big[f], 5, 128, 128)).all()
+        assert (got == texture_decode.decode_one_layer(big[f], 5, 128, 128)).all()
 
 
 _FACE = [0xF800, 0x07E0, 0x001F, 0xFFE0, 0xF81F, 0x07FF]
@@ -273,9 +278,9 @@ def _x360_cube(w=64, mips=7):
     no face has, so a face read from the wrong place shows."""
     bw = w // 4
     lvl0 = b"".join(_x360_tile(_dxt1([_FACE[k]] * (bw * bw), bw, bw), bw, bw, 8) for k in range(6))
-    per_face = we._x360_layer_bytes(5, w, w, mips)
+    per_face = texture_decode.x360_layer_bytes(5, w, w, mips)
     n = (per_face * 6 - len(lvl0)) // 8
-    rest = we.bswap16(_dxt1([0x8410] * n, n, 1))
+    rest = texture_decode.bswap16(_dxt1([0x8410] * n, n, 1))
     stream = lvl0 + rest
     assert len(stream) == per_face * 6
     hdr = _header(
@@ -299,7 +304,7 @@ def test_x360_cube_faces_are_stored_inside_each_mip_level(tmp_path):
 
 def test_x360_cube_below_32_texels_is_marked_not_guessed(tmp_path):
     w, mips = 16, 5
-    per_face = we._x360_layer_bytes(5, w, w, mips)
+    per_face = texture_decode.x360_layer_bytes(5, w, w, mips)
     stream = _x360_tile(_dxt1([_FACE[0]] * 16, 4, 4), 4, 4, 8, xo=4) + bytes(per_face * 5)
     hdr = _header(
         [({0: _desc(">", w, w, 5, mips, typ=2, size=len(stream))}, "/data/art/c/Tiny_cubemap.bmp")]
@@ -307,7 +312,9 @@ def test_x360_cube_below_32_texels_is_marked_not_guessed(tmp_path):
     ok, log = _carve(stream, hdr, tmp_path / "t")
     assert ok and _pngs(tmp_path / "t") == ["face0_0_diffuse_16x16_DXT1.png"]
     assert len([l for l in log if l.startswith("WARNING: texture Tiny_cubemap:")]) == 1
-    marks = json.loads((tmp_path / "t" / "sheet.json").read_text())[we.TEXTURE_DECODE_KEY]
+    marks = json.loads((tmp_path / "t" / "sheet.json").read_text())[
+        texture_sheet.TEXTURE_DECODE_KEY
+    ]
     assert len(marks) == 1 and "only face 0 written" in marks[0]
 
 
@@ -324,8 +331,11 @@ def test_x360_sizes_that_do_not_fill_the_stream_warn_and_mark(tmp_path):
     assert "frame-0 plan covers" in warns[1]
     assert "(approx stream 45056)" in log[-1]
     js = json.loads((tmp_path / "t" / "sheet.json").read_text())
-    assert len(js[we.TEXTURE_DECODE_KEY]) == 2
-    assert we.read_sheet_json(tmp_path / "t")[we.TEXTURE_DECODE_KEY] == js[we.TEXTURE_DECODE_KEY]
+    assert len(js[texture_sheet.TEXTURE_DECODE_KEY]) == 2
+    assert (
+        texture_sheet.read_sheet_json(tmp_path / "t")[texture_sheet.TEXTURE_DECODE_KEY]
+        == js[texture_sheet.TEXTURE_DECODE_KEY]
+    )
 
 
 def test_x360_layer_size_off_the_layout_rule_is_reported(tmp_path):
@@ -339,7 +349,9 @@ def test_x360_layer_size_off_the_layout_rule_is_reported(tmp_path):
         "WARNING: texture Odd: layer 0 (DXT1 128x128, 1 mips) stores 12288 bytes, the layout rule "
         "gives 8192: top mip decoded from the layer start, not checked"
     ]
-    assert we.TEXTURE_DECODE_KEY in json.loads((tmp_path / "t" / "sheet.json").read_text())
+    assert texture_sheet.TEXTURE_DECODE_KEY in json.loads(
+        (tmp_path / "t" / "sheet.json").read_text()
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -355,7 +367,7 @@ def _ps3_seg(data, fmt, mips, w, h, cube=0):
 
 def _ps3_cube(w=8, mips=4, pad=128):
     bw = w // 4
-    chain = we.chain_bytes(5, w, w, mips)
+    chain = texture_header.chain_bytes(5, w, w, mips)
     data = b""
     for k in range(6):
         face = _dxt1([_FACE[k]] * (bw * bw), bw, bw)
@@ -368,7 +380,7 @@ def _ps3_cube(w=8, mips=4, pad=128):
 def test_ps3_cube_writes_six_faces_from_128_byte_aligned_chains(tmp_path):
     """Was: one PNG (face 0) and no word about the other five."""
     hdr, stream = _ps3_cube()
-    assert we.chain_bytes(5, 8, 8, 4) == 56  # so every face but the last is padded
+    assert texture_header.chain_bytes(5, 8, 8, 4) == 56  # so every face but the last is padded
     ok, log = _carve(stream, hdr, tmp_path / "t")
     assert ok and log == ["Hall_cubemap: PS3 1 segs -> t/ (6 png)"]
     assert _pngs(tmp_path / "t") == ["face%d_0_diffuse_8x8_DXT1.png" % k for k in range(6)]
@@ -383,7 +395,9 @@ def test_ps3_cube_with_an_unexplained_segment_size_writes_face_0_and_says_so(tmp
     assert ok and _pngs(tmp_path / "t") == ["face0_0_diffuse_8x8_DXT1.png"]
     warns = [l for l in log if l.startswith("WARNING: texture Hall_cubemap:")]
     assert len(warns) == 1 and "only face 0 written" in warns[0]
-    marks = json.loads((tmp_path / "t" / "sheet.json").read_text())[we.TEXTURE_DECODE_KEY]
+    marks = json.loads((tmp_path / "t" / "sheet.json").read_text())[
+        texture_sheet.TEXTURE_DECODE_KEY
+    ]
     assert marks == [warns[0].split(": ", 2)[2]]
 
 
@@ -413,7 +427,9 @@ def test_ps3_segment_count_off_the_header_warns_and_marks(tmp_path):
         "header's frame-0 layers"
     ]
     assert _pngs(tmp_path / "t") == ["seg0_0_diffuse_8x8_DXT1.png", "seg1_0_diffuse_8x8_DXT1.png"]
-    assert we.TEXTURE_DECODE_KEY in json.loads((tmp_path / "t" / "sheet.json").read_text())
+    assert texture_sheet.TEXTURE_DECODE_KEY in json.loads(
+        (tmp_path / "t" / "sheet.json").read_text()
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -439,8 +455,8 @@ def _face_colours(d):
 def test_pc_cube_is_read_level_by_level_by_default(tmp_path):
     """A PC cube stores its mip levels in order, six faces per level (as X360)."""
     hdr, stream = _pc_cube()
-    assert we.PC_CUBE_LEVEL_MAJOR is True
-    assert we.carve_texture(stream, hdr, tmp_path / "t")
+    assert texture_carve.PC_CUBE_LEVEL_MAJOR is True
+    assert texture_carve.carve_texture(stream, hdr, tmp_path / "t")
     assert _face_colours(tmp_path / "t") == [_rgb(c) for c in _FACE]
 
 
@@ -448,15 +464,15 @@ def test_pc_cube_switch_off_gives_the_1_3_0_reading(tmp_path, monkeypatch):
     """Six face chains: faces 1-5 start 40 bytes apart here, so they are not the
     stored faces (what 1.3.0 wrote)."""
     hdr, stream = _pc_cube()
-    monkeypatch.setattr(we, "PC_CUBE_LEVEL_MAJOR", False)
-    assert we.carve_texture(stream, hdr, tmp_path / "t")
+    monkeypatch.setattr(texture_carve, "PC_CUBE_LEVEL_MAJOR", False)
+    assert texture_carve.carve_texture(stream, hdr, tmp_path / "t")
     got = _face_colours(tmp_path / "t")
     assert got[0] == _rgb(_FACE[0])
     assert got[1:] != [_rgb(c) for c in _FACE[1:]]
 
 
 # ---------------------------------------------------------------------------
-# packed-tail bases (watchmen_extract._x360_packed_offset)
+# packed-tail bases (texture_decode._x360_packed_offset)
 # ---------------------------------------------------------------------------
 
 
@@ -474,8 +490,8 @@ def test_x360_normal_in_the_packed_tail_is_x_first_without_a_half_swap(w, h, xo,
     pc = _rand_blocks(bw * bh, 16, w + h)
     xfirst = b"".join(pc[i + 8 : i + 16] + pc[i : i + 8] for i in range(0, len(pc), 16))
     raw = _x360_tile(xfirst, bw, bh, 16, xo, yo)
-    a = we.decode_one_layer(pc, 9, w, h)
-    b = we.x360_base_level(raw, 10, w, h)
+    a = texture_decode.decode_one_layer(pc, 9, w, h)
+    b = texture_decode.x360_base_level(raw, 10, w, h)
     assert np.array_equal(np.asarray(a), np.asarray(b))
 
 
@@ -487,12 +503,12 @@ def test_x360_arrowmore_base_is_its_own_tiled_surface_at_element_28():
     tile = bytearray(32 * 32 * 8)
     for y in range(6):
         for x in range(4):
-            d = (28 + we.xg2d_offset(x, y, 32, 8)) * 8
+            d = (28 + texture_decode.xg2d_offset(x, y, 32, 8)) * 8
             tile[d : d + 8] = lin[(y * 4 + x) * 8 : (y * 4 + x + 1) * 8]
-    raw = we.bswap16(bytes(tile))
-    assert we._x360_packed_offset("blk", 8, 16, 24, 4, 6) == (0, 0, 28)
-    a = we.decode_one_layer(lin, 5, 16, 24)
-    b = we.x360_base_level(raw, 5, 16, 24)
+    raw = texture_decode.bswap16(bytes(tile))
+    assert texture_decode._x360_packed_offset("blk", 8, 16, 24, 4, 6) == (0, 0, 28)
+    a = texture_decode.decode_one_layer(lin, 5, 16, 24)
+    b = texture_decode.x360_base_level(raw, 5, 16, 24)
     assert np.array_equal(np.asarray(a), np.asarray(b))
     # any other packed DXT1 base keeps its place in the tile
-    assert we._x360_packed_offset("blk", 8, 16, 32, 4, 8) == (4, 0, None)
+    assert texture_decode._x360_packed_offset("blk", 8, 16, 32, 4, 8) == (4, 0, None)

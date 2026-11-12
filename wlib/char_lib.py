@@ -36,19 +36,19 @@ _TEXIDX = {}
 
 
 def _texindex(root):
-    """watchmen_extract.TextureIndex of one texture tree (cached)."""
+    """obj_mtl.TextureIndex of one texture tree (cached)."""
     idx = _TEXIDX.get(root)
     if idx is None:
-        import watchmen_extract as _we
+        import obj_mtl
 
-        idx = _TEXIDX[root] = _we.build_texture_index(root, require_diffuse=False)
+        idx = _TEXIDX[root] = obj_mtl.build_texture_index(root, require_diffuse=False)
     return idx
 
 
 def _texdir(matname, root):
     """Texture dir of a material in the tree `root`, or None.
 
-    A material that comes from a model is a watchmen_extract.TexRef and carries the
+    A material that comes from a model is a material_refs.TexRef and carries the
     asset path the model stores; the engine loads exactly that asset, so that is the
     directory used ('head' exists in three folders).  Only a material without a path,
     or whose path is not in the tree, is looked up by bare name: deterministic (asset
@@ -84,22 +84,22 @@ SHEET_TAG = "#sheet="  # TexRef path suffix naming a texture sheet other than th
 def sheet_ref(ref, sheet_name):
     """`ref` (a TexRef) wearing the named sheet of its texture: same material name,
     path + '#sheet=<name>', so it is a material of its own."""
-    import watchmen_extract as _we
+    import material_refs
 
     base = (getattr(ref, "path", None) or "").partition(SHEET_TAG)[0]
     if not base or not sheet_name:
         return ref
-    return _we.TexRef(str(ref), base + SHEET_TAG + sheet_name)
+    return material_refs.TexRef(str(ref), base + SHEET_TAG + sheet_name)
 
 
 def _sheet_table(texdir, root):
-    """Every sheet of the texture carved to `texdir` (watchmen_extract.texture_sheets
+    """Every sheet of the texture carved to `texdir` (texture_sheet.texture_sheets
     dicts): from its sheet.json when that lists them, else from the Texture header
     under <extract_out>/extracted (a tree whose sheet.json holds no table), else
     the one sheet such a sheet.json describes."""
-    import watchmen_extract as _we
+    import texture_sheet
 
-    js = _we.read_sheet_json(texdir)
+    js = texture_sheet.read_sheet_json(texdir)
     if js.get("sheets"):
         return js["sheets"]
     try:
@@ -107,7 +107,7 @@ def _sheet_table(texdir, root):
         hp = os.path.join(os.path.dirname(os.path.abspath(root)), "extracted", rel)
         with open(hp, "rb") as fh:
             hdr = fh.read()
-        got = _we.texture_sheets(hdr, "<") or _we.texture_sheets(hdr, ">")
+        got = texture_sheet.texture_sheets(hdr, "<") or texture_sheet.texture_sheets(hdr, ">")
         if got:
             return got
     except (OSError, ValueError):
@@ -116,7 +116,7 @@ def _sheet_table(texdir, root):
 
 
 def _flat_roughness(exponent):
-    """The 4x4 roughness image watchmen_extract._make_roughness writes for a texture
+    """The 4x4 roughness image obj_mtl._make_roughness writes for a texture
     without a specSize layer, for another sheet's specular exponent."""
     import io
     import math
@@ -140,16 +140,17 @@ def _find_layers_uncached(matname, texroots, flip_normal_g=True):
     normal: engine ATI2 X/Y + reconstructed Z, converted D3D->glTF (green flip;
     set WATCHMEN_NORMALS=dx to keep DirectX orientation).  The PNG must come from
     this toolkit's texture extraction: a PC ATI2 layer written with X and Y swapped
-    (watchmen_extract.ati2_xy) is repaired by no flip.
+    (texture_decode.ati2_xy) is repaired by no flip.
     'sheet': the sheet in use (alpha threshold, normal-map power, blend ...), if known.
     mr: glTF occlusion/roughness/metallic from the render-verified roughnessGen.png."""
     import io
     import materials as _mt
-    import watchmen_extract as _we
+    import material_refs
+    import texture_sheet
 
     engine = _mt.mode() == "engine"
     base, _, sname = (getattr(matname, "path", None) or "").partition(SHEET_TAG)
-    ref = _we.TexRef(str(matname), base) if sname else matname
+    ref = material_refs.TexRef(str(matname), base) if sname else matname
     for root in texroots:
         d = _texdir(ref, root)
         if d:
@@ -158,10 +159,10 @@ def _find_layers_uncached(matname, texroots, flip_normal_g=True):
                 sheets = _sheet_table(d, root)
             except Exception:
                 sheets = []
-            sheet = _we.select_sheet(sheets, sname or None)
+            sheet = texture_sheet.select_sheet(sheets, sname or None)
             over = {}
             for layer, opath in sorted((sheet.get("overrides") or {}).items()):
-                od = _texdir(_we.texture_ref(opath), root)
+                od = _texdir(material_refs.texture_ref(opath), root)
                 if od:
                     over[layer] = od
                 else:
@@ -180,7 +181,7 @@ def _find_layers_uncached(matname, texroots, flip_normal_g=True):
                 if engine:
                     # the Texture header's alpha flag, when the extract recorded it
                     # (sheet.json "textureHasAlpha"): the engine's alpha test follows it
-                    _fl = _we.read_sheet_json(os.path.dirname(f)).get("textureHasAlpha")
+                    _fl = texture_sheet.read_sheet_json(os.path.dirname(f)).get("textureHasAlpha")
                     if isinstance(_fl, bool):
                         out["texAlphaFlag"] = _fl
                 # DXT1 1-bit cutout alpha -> glTF MASK
@@ -273,17 +274,17 @@ BLEND_SUBTRACT = 2
 
 
 def _blend_layer(layers):
-    """A sheet that is not a plain alpha blend (watchmen_extract.sheet_blend):
+    """A sheet that is not a plain alpha blend (texture_sheet.sheet_blend):
     `subtract` (Rorschach's two inkblot layers) takes its texture AWAY from what is
     behind it -- white = full ink, black = nothing; `add` puts it on top as light.
     glTF has neither, and drawn as an ordinary texture such a layer would paint its
     black background over the surface.  The diffuse is rewritten by
-    watchmen_extract.blend_layer_image (black ink / the lit colour, coverage in
+    texture_sheet.blend_layer_image (black ink / the lit colour, coverage in
     alpha) to be drawn alphaMode BLEND; layers['blend'] = the blend type and
     layers['blend_info'] = the sheet_blend dict tell variant_glb."""
-    import watchmen_extract as _we
+    import texture_sheet
 
-    info = _we.sheet_blend(layers.get("sheet"))
+    info = texture_sheet.sheet_blend(layers.get("sheet"))
     if not info or info.get("gltf") not in ("ink", "glow") or "diffuse" not in layers:
         return
     try:
@@ -291,7 +292,9 @@ def _blend_layer(layers):
         from PIL import Image
 
         buf = io.BytesIO()
-        _we.blend_layer_image(Image.open(io.BytesIO(layers["diffuse"])), info).save(buf, "PNG")
+        texture_sheet.blend_layer_image(Image.open(io.BytesIO(layers["diffuse"])), info).save(
+            buf, "PNG"
+        )
     except Exception:
         return
     layers["diffuse"] = buf.getvalue()
@@ -302,11 +305,11 @@ def _blend_layer(layers):
 
 def header_order(header):
     """Byte order of an extracted asset header, read from the header itself
-    (watchmen_extract.header_order: the [u32 length][class name] it opens with is
+    (kapow_block.header_order: the [u32 length][class name] it opens with is
     valid in one order only).  None when the header does not say."""
-    import watchmen_extract as we
+    import kapow_block
 
-    return we.header_order(header)
+    return kapow_block.header_order(header)
 
 
 def model_order(mh, ms=None, name=None, log=print):
@@ -314,14 +317,14 @@ def model_order(mh, ms=None, name=None, log=print):
     say (never on the six shipped sets: 5,490 of 5,490 models say) the mesh
     descriptors decide -- a set that overruns the stream `ms` does not count, the
     larger set wins, a tie stays little-endian -- and that is logged."""
-    import watchmen_extract as we
+    import model_mesh
 
     o = header_order(mh)
     if o is not None:
         return o
     n = {}
     for bo in ("<", ">"):
-        d = we.find_descriptors(mh, bo)
+        d = model_mesh.find_descriptors(mh, bo)
         if ms is not None and sum(nv * st + ib for nv, st, ib in d) > len(ms):
             d = []
         n[bo] = len(d)
@@ -382,17 +385,17 @@ def dropped_pieces(reset=False):
 def flat_buffer(ms, off, nv, stride, ib, order):
     """Stream offset of a PLANAR submesh's vertex buffer (one flat axis: the eye
     card of Large_Head_2), searched only after the strict scan found nothing --
-    the fallback watchmen_extract.decode_model uses (vb_ok_flat).  None when
+    the fallback model_export.decode_model uses (vb_ok_flat).  None when
     there is none.  (Large_Head_2 submesh 3: 69803, the offset the header-driven
     layout of the PC file gives.)"""
-    import watchmen_extract as we
+    import model_mesh
 
     c = off
     while c <= min(off + 65536, len(ms) - nv * stride - ib):
         if (
-            we.is_finite_float(struct.unpack_from(order + "f", ms, c)[0])
-            and we.vb_ok_flat(ms, c, nv, stride, ib, order)
-            and we.ib_ok(ms, c, nv, stride, ib, order)
+            model_mesh.is_finite_float(struct.unpack_from(order + "f", ms, c)[0])
+            and model_mesh.vb_ok_flat(ms, c, nv, stride, ib, order)
+            and model_mesh.ib_ok(ms, c, nv, stride, ib, order)
         ):
             return c
         c += 1
@@ -448,7 +451,8 @@ def load_parts(models, bn, sheets=None):
     is logged and noted (dropped_palette_names); a piece with a skin influence
     the palette does not cover keeps its other weights, and a vertex left
     without any marks the piece not decoded (note_dropped)."""
-    import watchmen_extract as we
+    import material_refs
+    import model_mesh
     import variant_glb as _vg
     import mesh_loader as ml
 
@@ -457,7 +461,9 @@ def load_parts(models, bn, sheets=None):
         try:
             mh = _read_bytes(base + ".model")
             ms = _read_bytes(base + ".model.stream")
-            plat = we.console_platform_for(base + ".model")  # decides the console colour order
+            plat = model_mesh.console_platform_for(
+                base + ".model"
+            )  # decides the console colour order
             name = os.path.basename(base)
             # byte order: console (X360/PS3) model headers/streams are big-endian.
             # The header says which (model_order); counting descriptors per order ties
@@ -474,7 +480,9 @@ def load_parts(models, bn, sheets=None):
                 SI, SW = sk
                 mat = sb["material"]
                 if sel:
-                    mat = sheet_ref(mat, sel.get(we.texture_key(getattr(mat, "path", None) or "")))
+                    mat = sheet_ref(
+                        mat, sel.get(material_refs.texture_key(getattr(mat, "path", None) or ""))
+                    )
                 parts.append(_vg.with_attrs((sb["V"], SI, SW, sb["T"], sb["UV"], mat), sb["attrs"]))
         except Exception as ex:
             ex.add_note(f"char_lib.load_parts: {base}.model")

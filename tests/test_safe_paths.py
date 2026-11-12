@@ -1,4 +1,4 @@
-"""Archive-entry path sanitization (``watchmen_extract.safe``).
+"""Archive-entry path sanitization (``extract_paths.safe``).
 
 Entry names inside a .naz are attacker-controlled (rot-2 obfuscated, not
 authenticated), so every one of them has to be clamped under the output
@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-import watchmen_extract as we
+import extract_paths
 
 
 def _under(base, p):
@@ -35,7 +35,7 @@ def test_safe_keeps_ordinary_names(tmp_path, name, expected):
     extracted asset tree, so the filter has to be surgical: only the dangerous
     components go, and '..' embedded in a filename is not one of them.
     """
-    out = we.safe(tmp_path, name)
+    out = extract_paths.safe(tmp_path, name)
     assert out == tmp_path.joinpath(*expected)
     assert _under(tmp_path, out)
 
@@ -63,7 +63,7 @@ def test_safe_never_escapes_base(tmp_path, name):
     """
     base = tmp_path / "out"
     base.mkdir()
-    out = we.safe(base, name)
+    out = extract_paths.safe(base, name)
     assert _under(base, out) or Path(out).resolve() == base.resolve()
     assert ".." not in Path(out).parts
 
@@ -88,7 +88,7 @@ def test_safe_neutralizes_windows_drive_letters(tmp_path, name, expected):
     of '..' filtering catches. Replacing ':' with '_' keeps the name readable
     while making it an ordinary path component everywhere.
     """
-    out = we.safe(tmp_path, name)
+    out = extract_paths.safe(tmp_path, name)
     assert out == tmp_path.joinpath(*expected)
     assert ":" not in str(out.relative_to(tmp_path))
     assert _under(tmp_path, out)
@@ -102,7 +102,7 @@ def test_safe_maps_degenerate_names_to_a_file(tmp_path, name):
     writing (IsADirectoryError at best, clobbering at worst). '_unnamed' keeps
     the result a writable leaf under the base.
     """
-    out = we.safe(tmp_path, name)
+    out = extract_paths.safe(tmp_path, name)
     assert out == tmp_path / "_unnamed"
     assert out != tmp_path
     assert out.parent == tmp_path
@@ -116,7 +116,7 @@ def test_safe_result_is_writable_and_stays_put(tmp_path):
     victim.write_text("original")
 
     for hostile in ("../victim.txt", "../../victim.txt", "C:/victim.txt", ""):
-        out = we.safe(base, hostile)
+        out = extract_paths.safe(base, hostile)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_bytes(b"payload")
 

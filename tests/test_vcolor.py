@@ -24,7 +24,10 @@ import rig_glb
 import test_formats_v2 as tf
 import variant_glb as vg
 import kapow_props
-import watchmen_extract as we
+import model_export
+import model_mesh
+import texture_decode
+import texture_sheet
 from conftest import parse_glb
 
 Image = pytest.importorskip("PIL.Image")
@@ -45,17 +48,17 @@ def test_pc_ati2_keeps_the_y_block_first():
     # Direct3D 9 ATI2: first block = Y (green), second = X (red).  1.3.0 wrote the
     # first block to the PNG's red channel.
     layer = _bc4_flat(200) + _bc4_flat(60)  # first block 200, second block 60
-    img = we.decode_one_layer(layer, 9, 4, 4)
+    img = texture_decode.decode_one_layer(layer, 9, 4, 4)
     assert img[..., 0].tolist() == [[60] * 4] * 4  # X = second block
     assert img[..., 1].tolist() == [[200] * 4] * 4  # Y = first block
     # the X360 format (enum 10) is X-first already and stays as it was
-    x360 = we.decode_one_layer(layer, 10, 4, 4)
+    x360 = texture_decode.decode_one_layer(layer, 10, 4, 4)
     assert x360[0, 0, 0] == 200 and x360[0, 0, 1] == 60
-    assert we.ati2_xy(("first", "second")) == ("second", "first")
+    assert texture_decode.ati2_xy(("first", "second")) == ("second", "first")
 
 
 def test_normal_z_is_rebuilt_from_the_swapped_pair():
-    img = we.decode_one_layer(_bc4_flat(255) + _bc4_flat(128), 9, 4, 4)
+    img = texture_decode.decode_one_layer(_bc4_flat(255) + _bc4_flat(128), 9, 4, 4)
     x, y = img[0, 0, 0] / 255 * 2 - 1, img[0, 0, 1] / 255 * 2 - 1
     assert abs(y - 1.0) < 1e-6 and abs(x) < 0.01
     assert img[0, 0, 2] <= 129  # z = sqrt(1 - x^2 - y^2) ~ 0 -> 0.5 encoded
@@ -97,22 +100,24 @@ def _sheet_header(order="<"):
 
 
 def test_texture_sheet_reads_the_first_sheet_only():
-    sh = we.texture_sheet(_sheet_header())
+    sh = texture_sheet.texture_sheet(_sheet_header())
     assert sh["renderType"] == 1 and sh["twoSided"] is True and sh["alphaThreshold"] == 95
     assert sh["writeDepthBuffer"] is False and sh["isLit"] is True
     assert abs(sh["normalMapPower"] - 1.5) < 1e-6 and abs(sh["opacity"] - 0.75) < 1e-6
-    assert we.SHEET_RENDER_TYPES[sh["renderType"]] == "blend"
-    assert we.texture_sheet(b"\x00" * 64) == {}
-    be = we.texture_sheet(_sheet_header(">"), ">")
+    assert texture_sheet.SHEET_RENDER_TYPES[sh["renderType"]] == "blend"
+    assert texture_sheet.texture_sheet(b"\x00" * 64) == {}
+    be = texture_sheet.texture_sheet(_sheet_header(">"), ">")
     assert be["twoSided"] is True and be["alphaThreshold"] == 95
 
 
 def test_sheet_json_round_trip(tmp_path):
-    we.write_sheet_json(_sheet_header(), tmp_path)
-    d = we.read_sheet_json(tmp_path)
+    texture_sheet.write_sheet_json(_sheet_header(), tmp_path)
+    d = texture_sheet.read_sheet_json(tmp_path)
     assert d["twoSided"] is True and d["renderType"] == 1
-    assert we.read_sheet_json(tmp_path / "missing") == {}
-    we.write_sheet_json(b"\x00" * 64, tmp_path / "x")  # no sheet: nothing written, no error
+    assert texture_sheet.read_sheet_json(tmp_path / "missing") == {}
+    texture_sheet.write_sheet_json(
+        b"\x00" * 64, tmp_path / "x"
+    )  # no sheet: nothing written, no error
     assert not (tmp_path / "x").exists()
 
 
@@ -134,8 +139,8 @@ def test_tangent_handedness_follows_the_normal_texture_orientation():
     n = np.array([[0, 0, 1.0]] * 2)
     t = np.array([[1.0, 0, 0]] * 2)
     b = np.array([[0, 1.0, 0], [0, -1.0, 0]])  # s = +1, -1
-    assert we.gltf_tangents(n, t, b)[:, 3].tolist() == [-1.0, 1.0]  # glTF texture: w = -s
-    assert we.gltf_tangents(n, t, b, green_up=False)[:, 3].tolist() == [1.0, -1.0]
+    assert model_mesh.gltf_tangents(n, t, b)[:, 3].tolist() == [-1.0, 1.0]  # glTF texture: w = -s
+    assert model_mesh.gltf_tangents(n, t, b, green_up=False)[:, 3].tolist() == [1.0, -1.0]
 
 
 def test_gltf_normal_png_inverts_green_only():
@@ -299,7 +304,7 @@ def test_without_sheet_json_materials_stay_double_sided(tmp_path):
 @pytest.fixture
 def rig_on():
     """The --glb switches of decode_model (rig_glb loaded, default attributes)."""
-    return we.glb_options()
+    return model_export.glb_options()
 
 
 def _rigid_model():
@@ -314,11 +319,11 @@ def _skinned_model():
 def test_rigid_model_gets_a_static_glb_with_its_vertex_data(tmp_path, rig_on):
     h, s = _rigid_model()
     # no normal map for the material: NORMAL and COLOR_0, but no (unused) TANGENT
-    assert we.decode_model(h, s, tmp_path / "plain.obj", {}, None, glb=rig_on)
+    assert model_export.decode_model(h, s, tmp_path / "plain.obj", {}, None, glb=rig_on)
     A = parse_glb(tmp_path / "plain.glb").j["meshes"][0]["primitives"][0]["attributes"]
     assert set(A) == {"POSITION", "NORMAL", "TEXCOORD_0", "COLOR_0"}
     idx = {"wall_01": _texture_dir(tmp_path, "Wall_01", {"twoSided": False}, alpha=False)}
-    assert we.decode_model(h, s, tmp_path / "crate.obj", idx, None, glb=rig_on)
+    assert model_export.decode_model(h, s, tmp_path / "crate.obj", idx, None, glb=rig_on)
     g = parse_glb(tmp_path / "crate.glb")
     assert "skins" not in g.j
     A = g.j["meshes"][0]["primitives"][0]["attributes"]
@@ -335,17 +340,17 @@ def test_rigid_model_gets_a_static_glb_with_its_vertex_data(tmp_path, rig_on):
 def test_no_vertex_attrs_restores_the_130_output(tmp_path, rig_on):
     no_attrs = dataclasses.replace(rig_on, attrs=False)
     h, s = _rigid_model()
-    assert we.decode_model(h, s, tmp_path / "crate.obj", {}, None, glb=no_attrs)
+    assert model_export.decode_model(h, s, tmp_path / "crate.obj", {}, None, glb=no_attrs)
     assert not (tmp_path / "crate.glb").exists()  # 1.3.0: no .glb for a rigid model
     h, s = _skinned_model()
-    assert we.decode_model(h, s, tmp_path / "body.obj", {}, None, glb=no_attrs)
+    assert model_export.decode_model(h, s, tmp_path / "body.obj", {}, None, glb=no_attrs)
     g = parse_glb(tmp_path / "body.glb")
     p = g.j["meshes"][0]["primitives"][0]
     assert set(p["attributes"]) == {"POSITION", "TEXCOORD_0", "JOINTS_0", "WEIGHTS_0"}
     assert g.j["materials"][p["material"]]["doubleSided"] is True
     off = (tmp_path / "body.glb").read_bytes()
     idx = {"trim_02": _texture_dir(tmp_path, "Trim_02", None, alpha=False)}
-    assert we.decode_model(h, s, tmp_path / "body.obj", idx, None, glb=rig_on)
+    assert model_export.decode_model(h, s, tmp_path / "body.obj", idx, None, glb=rig_on)
     on = parse_glb(tmp_path / "body.glb")
     assert {"NORMAL", "TANGENT", "COLOR_0"} <= set(on.j["meshes"][0]["primitives"][0]["attributes"])
     assert (tmp_path / "body.glb").read_bytes() != off

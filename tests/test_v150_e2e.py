@@ -22,7 +22,9 @@ from PIL import Image
 
 import watchmen
 import kapow_props
-import watchmen_extract as we
+import audio_decode
+import extract_driver
+import naz_archive
 import test_audio_v2 as ta
 import test_formats_v2 as tf
 import test_fullextract as tfe
@@ -158,7 +160,7 @@ def test_extract_every_asset_kind(tmp_path, capsys):
     with wave.open(str(out / "audio" / "sounds" / "sfx" / "Hit.wav"), "rb") as w:
         assert w.getnframes() == 52
         got = w.readframes(52)
-    assert got == we.adpcm_mono(tva._block(0, 16, 10, 5, [1, 2] * 25), 32)[:52].tobytes()
+    assert got == audio_decode.adpcm_mono(tva._block(0, 16, 10, 5, [1, 2] * 25), 32)[:52].tobytes()
     info = json.loads((out / "audio" / "sound_info.json").read_text())
     assert {"sounds/sfx/Beep.wav", "sounds/sfx/Hit.wav"} <= set(info["sounds"])
 
@@ -178,8 +180,8 @@ def test_extract_reads_the_synthetic_archive_one_block_at_a_time(tmp_path, monke
     from test_v150_streaming import _Tracked
 
     naz, _pcm, _packets = _archive(tmp_path)
-    real_read = we.naz_read
-    monkeypatch.setattr(we, "naz_read", lambda p, e: _Tracked(real_read(p, e)))
+    real_read = naz_archive.naz_read
+    monkeypatch.setattr(naz_archive, "naz_read", lambda p, e: _Tracked(real_read(p, e)))
     _Tracked.alive = 0
-    assert we.main([str(naz), "-o", str(tmp_path / "o"), "--quiet", "--no-models"]) == 0
+    assert extract_driver.main([str(naz), "-o", str(tmp_path / "o"), "--quiet", "--no-models"]) == 0
     assert _Tracked.alive == 0

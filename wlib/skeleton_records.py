@@ -164,7 +164,7 @@ def weight_is_area(tris, verts, indices):
 _weight_is_area = weight_is_area  # the private spelling, kept for existing callers
 
 
-#: vertex formats a MeshBuffer may name (watchmen_extract.VERTEX_STRIDES has 11)
+#: vertex formats a MeshBuffer may name (model_header.VERTEX_STRIDES has 11)
 _VERTEX_FORMATS = 11
 
 
@@ -180,7 +180,7 @@ def _skip_node_meshes(mb, p, order="<", limit=None, layout="part2"):
                      [u32 +0x28][u8][u8] MeshBuffer [u32 blobLen][blob]
         MeshBuffer = [f32 x 6 bbox][u8][u8][u8 hasSide] ( [u8] 5 x counted array of
                      12, 2, 12, 2, 2-byte items ) [u32 x 6]
-    layout "part1" (stand-alone Part 1 build, watchmen_extract.MODEL_LAYOUTS):
+    layout "part1" (stand-alone Part 1 build, model_header.MODEL_LAYOUTS):
     the submesh has ONE u8 between [u32 +0x28] and the MeshBuffer, not two.
     Raises ValueError / struct.error when the bytes do not follow it."""
     limit = len(mb) if limit is None else min(limit, len(mb))

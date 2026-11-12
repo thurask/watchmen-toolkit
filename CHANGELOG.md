@@ -164,6 +164,17 @@
   tests pass unchanged (`GLB_GOLDEN_STRICT=1`, Linux, Python 3.13); every GLB the suite writes
   is byte-identical to the code before; `pc_p2` and `pc_p1` are byte-identical to the 1.7.0
   export, `_extract_done.txt` excluded, 0 `WARNING:` lines (measured). (2026-11-12)
+- **Callers import the home modules.** The wlib modules and the tests import `naz_archive`,
+  `kapow_block`, `model_header` and the rest directly and patch names there; nothing but
+  `tests/test_module_homes.py` imports `watchmen_extract` any more. Three tests that patched a
+  private spelling through it now patch a public name: `model_mesh.pick_vertex_buffer` (was
+  `_pick_vb`), `texture_header.is_texture_header` (was `_is_texture`) and
+  `model_header.console_header_decode`, the first call of the model plan (was
+  `_header_model_plan`); the patches of `variant_glb.we` and `watchmenlib._we` go to
+  `naz_archive` and `kapow_block`. `sound_meta.SoundDB._header_facts(head)` reads the sound
+  header module itself (it took the module as its first argument). The `generator` strings of
+  the GLB writers and the detail-mesh note that name `watchmen_extract` are output and stay as
+  they are. (2026-11-12)
 
 ## 1.7.0 — 2026-11-11
 

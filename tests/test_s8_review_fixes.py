@@ -623,7 +623,7 @@ def test_one_sheet_record_parser_reads_both_versions():
 
 def test_texture_headers_are_found_without_regard_to_letter_case(tmp_path, monkeypatch):
     import face_rule
-    import watchmen_extract as we
+    import texture_sheet
 
     f = tmp_path / "extracted" / "Art" / "Chars" / "Tex.texture"
     f.parent.mkdir(parents=True)
@@ -634,7 +634,9 @@ def test_texture_headers_are_found_without_regard_to_letter_case(tmp_path, monke
     assert face_rule.sheet_overrides(str(tmp_path), rec) == {
         "art/chars/tex.texture": {"sheet": "Blue", "unique_id": 5, "overrides": sheet["overrides"]}
     }
-    monkeypatch.setattr(we, "texture_sheets", lambda h, order="<": [sheet] if h == b"hdr" else [])
+    monkeypatch.setattr(
+        texture_sheet, "texture_sheets", lambda h, order="<": [sheet] if h == b"hdr" else []
+    )
     ce._TEX_SHEETS.clear()
     assert ce._texture_sheets(str(tmp_path), "ART/CHARS/TEX.texture") == [sheet]
     assert ce._asset_file(str(tmp_path), ["Art", "Chars", "Tex.texture"]) == str(f)
@@ -642,16 +644,16 @@ def test_texture_headers_are_found_without_regard_to_letter_case(tmp_path, monke
 
 # ------------------------------------------------------------- L2 / L7
 def test_a_sheet_json_that_is_not_written_is_reported(tmp_path, monkeypatch, capsys):
-    import watchmen_extract as we
+    import texture_sheet
 
     def boom(header, order="<"):
         raise ValueError("bad sheet")
 
-    monkeypatch.setattr(we, "texture_sheet", boom)
-    we.write_sheet_json(b"", tmp_path / "T")
+    monkeypatch.setattr(texture_sheet, "texture_sheet", boom)
+    texture_sheet.write_sheet_json(b"", tmp_path / "T")
     said = capsys.readouterr().out
     assert "WARNING: texture T: sheet.json not written (ValueError: bad sheet)" in said
-    we._mark_texture_decode(tmp_path / "missing" / "T2", ["layer 1: no data"])
+    texture_sheet.mark_texture_decode(tmp_path / "missing" / "T2", ["layer 1: no data"])
     assert "WARNING: texture T2: decode notes not recorded" in capsys.readouterr().out
 
 
@@ -665,13 +667,13 @@ def test_a_bind_that_needs_a_missing_archive_names_the_argument(tmp_path):
 
 # ------------------------------------------------------------- L10 untiling
 def _untile_reference(data, we_, he, bpe, alw=None, yoff=0):
-    import watchmen_extract as we
+    import texture_decode
 
     alw = max(alw or we_, 32)
     out = bytearray(we_ * he * bpe)
     for y in range(he):
         for x in range(we_):
-            s = we.xg2d_offset(x, y + yoff, alw, bpe) * bpe
+            s = texture_decode.xg2d_offset(x, y + yoff, alw, bpe) * bpe
             d = (y * we_ + x) * bpe
             if s + bpe <= len(data):
                 out[d : d + bpe] = data[s : s + bpe]
@@ -688,12 +690,12 @@ def _untile_reference(data, we_, he, bpe, alw=None, yoff=0):
     ],
 )
 def test_the_vectorised_untiling_gives_the_loops_bytes(we_, he, bpe, alw, yoff, cut):
-    import watchmen_extract as we
+    import texture_decode
 
     rng = np.random.default_rng(we_ * he + bpe)
     n = ((max(alw or we_, 32) + 31) & ~31) * (((he + yoff) + 31) & ~31) * bpe
     data = rng.integers(0, 256, n - cut, dtype=np.uint8).tobytes()
-    got = we._xg_untile(data, we_, he, bpe, alw=alw, yoff=yoff)
+    got = texture_decode._xg_untile(data, we_, he, bpe, alw=alw, yoff=yoff)
     assert got == _untile_reference(data, we_, he, bpe, alw=alw, yoff=yoff)
     assert len(got) == we_ * he * bpe
 
@@ -710,9 +712,9 @@ def test_a_root_takes_the_track_the_prefix_lookup_finds(tmp_path):
 
 # ------------------------------------------------------------- device names
 def test_windows_device_names_are_not_written(tmp_path, monkeypatch):
-    import watchmen_extract as we
+    import extract_paths
 
     monkeypatch.setenv("WATCHMEN_NAMES", "stored")
-    assert we.safe(tmp_path, "a/CON.txt") == tmp_path / "a" / "_CON.txt"
-    assert we.safe(tmp_path, "nul/lpt1") == tmp_path / "_nul" / "_lpt1"
-    assert we.safe(tmp_path, "a/CONSOLE.txt") == tmp_path / "a" / "CONSOLE.txt"
+    assert extract_paths.safe(tmp_path, "a/CON.txt") == tmp_path / "a" / "_CON.txt"
+    assert extract_paths.safe(tmp_path, "nul/lpt1") == tmp_path / "_nul" / "_lpt1"
+    assert extract_paths.safe(tmp_path, "a/CONSOLE.txt") == tmp_path / "a" / "CONSOLE.txt"

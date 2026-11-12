@@ -19,7 +19,9 @@ import anim_meta as am
 import anim_state_machine as asm
 import face_rule as fr
 import kapow_props
-import watchmen_extract as wx
+import audio_decode
+import extract_driver
+import sound_header as sound_header_mod
 
 try:  # the module is new: every sound_meta test fails (not errors at import) on 1.3.0
     import sound_meta as sm
@@ -132,20 +134,20 @@ def descriptor(stream, tracks, order="<", trailer=None, sizes=None):
 # -------------------------------------------------------- multi-track music
 def test_pc_stream_is_split_at_the_link_records():
     raw, packets = pc_stream(3)
-    tracks = wx.media_tracks_pc(raw)
+    tracks = sound_header_mod.media_tracks_pc(raw)
     assert [t["packets"] for t in tracks] == packets
     # one byte short / one stray byte: not a clean chain -> the caller falls back
-    assert wx.media_tracks_pc(raw[:-1]) is None
-    assert wx.media_tracks_pc(raw + b"\x00") is None
+    assert sound_header_mod.media_tracks_pc(raw[:-1]) is None
+    assert sound_header_mod.media_tracks_pc(raw + b"\x00") is None
 
 
 def test_per_track_files_hold_only_their_own_packets_and_end_sample(tmp_path):
     probe, packets = pc_stream(2)
-    computed = [wx.ogg_from_packets(p, True)[4] for p in packets]
+    computed = [audio_decode.ogg_from_packets(p, True)[4] for p in packets]
     ends = [c - 7 for c in computed]
     raw, packets = pc_stream(2, ends=ends)
     name = "/derived_pc/sounds/music/a/Song_track0.mediastream_s"
-    out = wx.decode_audio_tracks(raw, tmp_path, name)
+    out = audio_decode.decode_audio_tracks(raw, tmp_path, name)
     assert [t["index"] for t in out] == [0, 1]
     assert [t["file"] for t in out] == [
         "derived_pc/sounds/music/a/Song_track0.mediastream_s.ogg",
@@ -162,19 +164,19 @@ def test_per_track_files_hold_only_their_own_packets_and_end_sample(tmp_path):
         assert t["duration_s"] == round(ends[k] / 48000.0, 4)
     # the 1.3.0 file: every track's chunks appended in turn, one header set
     flat = tmp_path / "flat.ogg"
-    assert wx.decode_audio(raw, flat, True)
+    assert audio_decode.decode_audio(raw, flat, True)
     n_flat = len([p for p in ogg_packets(flat.read_bytes()) if p[0] not in (1, 3, 5)])
     assert n_flat >= sum(len(p) - 3 for p in packets)
 
 
 def test_one_track_stream_keeps_its_name_and_ends_at_the_stored_position(tmp_path):
     _probe, packets = pc_stream(1)
-    computed = wx.ogg_from_packets(packets[0], True)[4]
+    computed = audio_decode.ogg_from_packets(packets[0], True)[4]
     raw, _packets = pc_stream(1, ends=[computed - 7])
     name = "/derived_pc/sounds/music/Menu_track0.mediastream_s"
-    out = wx.decode_audio_tracks(raw, tmp_path / "t", name)
+    out = audio_decode.decode_audio_tracks(raw, tmp_path / "t", name)
     old = tmp_path / "old.ogg"
-    assert wx.decode_audio(raw, old, True)
+    assert audio_decode.decode_audio(raw, old, True)
     assert len(out) == 1 and out[0]["file"].endswith("Menu_track0.mediastream_s.ogg")
     new = (tmp_path / "t" / out[0]["file"]).read_bytes()
     # the stream's stored end position (0x8d29c0 shortens the last block to it), not the
@@ -188,13 +190,15 @@ def test_one_track_stream_keeps_its_name_and_ends_at_the_stored_position(tmp_pat
 
 def test_track_file_names():
     n = "/a/b/Underground_track0.mediastream_s"
-    assert wx.media_track_name(n, 3) == "/a/b/Underground_track3.mediastream_s"
-    assert wx.media_track_name(n, 1, "Intro loop!") == (
+    assert sound_header_mod.media_track_name(n, 3) == "/a/b/Underground_track3.mediastream_s"
+    assert sound_header_mod.media_track_name(n, 1, "Intro loop!") == (
         "/a/b/Underground_track1_Intro_loop.mediastream_s"
     )
-    assert wx.media_track_name(n, 9, "none") == "/a/b/Underground_track9.mediastream_s"
+    assert (
+        sound_header_mod.media_track_name(n, 9, "none") == "/a/b/Underground_track9.mediastream_s"
+    )
     # a directory named like a track is left alone; no _track0 -> a suffix
-    assert wx.media_track_name("/x_track0.d/song.mediastream_s", 2) == (
+    assert sound_header_mod.media_track_name("/x_track0.d/song.mediastream_s", 2) == (
         "/x_track0.d/song_track2.mediastream_s"
     )
 
@@ -216,7 +220,7 @@ def test_stream_descriptor_tracks_and_cue_points(order, trailer):
         tr,
         sizes=[51158, 43344],
     )
-    d = wx.media_desc_from_header(h, order)
+    d = sound_header_mod.media_desc_from_header(h, order)
     assert d["stream"] == "/derived_pc/sounds/Music/U/Under_track0.mediastream_s"
     assert d["groups"] == 5 and d["first_group_sizes"] == [51158, 43344]
     assert [t["samples"] for t in d["tracks"]] == [2304001, 2304003]
@@ -227,8 +231,8 @@ def test_stream_descriptor_tracks_and_cue_points(order, trailer):
     assert d["tracks"][1]["source"].endswith("Under_track1.wav")
     assert d["tracks"][1]["cue_points"] == [] and d["tracks"][1]["rate"] == 48000
     # the 1.3.0 reader still gives the first track's numbers
-    assert wx.media_meta_from_header(h, order)[1:] == (2, 48000, 2304001)
-    assert wx.media_desc_from_header(b"\x00" * 64, order) is None
+    assert sound_header_mod.media_meta_from_header(h, order)[1:] == (2, 48000, 2304001)
+    assert sound_header_mod.media_desc_from_header(b"\x00" * 64, order) is None
 
 
 def ps3_seg(payload):
@@ -242,12 +246,14 @@ def test_ps3_stream_tracks(tmp_path):
     raw = b"".join(g0) + link([len(c) for c in g1], ">") + b"".join(g1)
     raw += link([len(c) for c in g0], ">")
     assert len(raw) >= 0x1000
-    codec, tracks = wx.media_tracks_console(raw)
+    codec, tracks = sound_header_mod.media_tracks_console(raw)
     assert codec == "mp3" and tracks == [b"".join(pay[0]), b"".join(pay[1])]
     # the single-file reader of 1.3.0 sees the same bytes, track after track per group
-    assert len(wx._console_media_parse(raw)[1]) == sum(len(t) for t in tracks)
+    assert len(sound_header_mod.console_media_parse(raw)[1]) == sum(len(t) for t in tracks)
     name = "/derived_ps3/sounds/music/x/Song_track0.mediastream_s"
-    out = wx.decode_console_audio(name, raw, tmp_path, None, None, lambda *a: None, tracks=True)
+    out = audio_decode.decode_console_audio(
+        name, raw, tmp_path, None, None, lambda *a: None, tracks=True
+    )
     assert [t["file"].rsplit("/", 1)[1] for t in out] == [
         "Song_track0.mediastream_s.mp3",
         "Song_track1.mediastream_s.mp3",
@@ -263,11 +269,11 @@ def test_x360_stream_tracks_split_group_0_with_the_closing_link():
     g1 = [pkts(0, 1, 1), pkts(1, 1, 2)]
     raw = b"".join(g0) + link([len(c) for c in g1], ">") + b"".join(g1)
     raw += link([len(c) for c in g0], ">")
-    codec, tracks = wx.media_tracks_console(raw)
+    codec, tracks = sound_header_mod.media_tracks_console(raw)
     assert codec == "xma" and tracks == [g0[0] + g1[0], g0[1] + g1[1]]
     # a closing link that does not add up to group 0: no split, no guess
     bad = raw[:-12] + link([2048, 2048], ">")
-    assert wx.media_tracks_console(bad) is None
+    assert sound_header_mod.media_tracks_console(bad) is None
 
 
 def test_extract_writes_one_file_per_track_and_flat_music_the_old_file(tmp_path):
@@ -278,9 +284,11 @@ def test_extract_writes_one_file_per_track_and_flat_music_the_old_file(tmp_path)
     one, _p = pc_stream(1)
     (src / "Menu_track0.mediastream_s").write_bytes(one)
     new, flat = tmp_path / "new", tmp_path / "flat"
-    assert wx.main([str(tmp_path / "files"), "-o", str(new), "--no-files", "--quiet"]) == 0
+    assert (
+        extract_driver.main([str(tmp_path / "files"), "-o", str(new), "--no-files", "--quiet"]) == 0
+    )
     args = [str(tmp_path / "files"), "-o", str(flat), "--no-files", "--quiet", "--flat-music"]
-    assert wx.main(args) == 0
+    assert extract_driver.main(args) == 0
     d = "audio/derived_pc/sounds/music/"
     got = sorted(p.name for p in (new / d).iterdir())
     assert got == [
@@ -303,7 +311,7 @@ def test_extract_writes_one_file_per_track_and_flat_music_the_old_file(tmp_path)
         "Song_track0.mediastream_s.ogg",
     ]
     ref = tmp_path / "ref.ogg"
-    wx.decode_audio(raw, ref, True)
+    audio_decode.decode_audio(raw, ref, True)
     assert (flat / d / "Song_track0.mediastream_s.ogg").read_bytes() == ref.read_bytes()
     # a one-track stream holds the same packets either way (its end position may differ)
     m = "Menu_track0.mediastream_s.ogg"
@@ -321,7 +329,7 @@ def sound_header(ch=1, rate=44100, fmt=1, data=b"", samples=None, loop=0, is3d=1
         n = len(data) // (2 * ch) if samples is None else samples
         return h + struct.pack("<2I", n, len(data)) + data + struct.pack("<I", 0)
     ba = 32
-    h += struct.pack("<3I", (ba * rate * 128) & 0xFFFFFFFF, samples or 0, ba) + wx._COEFB
+    h += struct.pack("<3I", (ba * rate * 128) & 0xFFFFFFFF, samples or 0, ba) + audio_decode._COEFB
     return h + struct.pack("<I", len(data)) + data + struct.pack("<I", 0)
 
 
@@ -331,45 +339,47 @@ def ramp(frames, ch):
 
 def test_stereo_sound_takes_the_rate_of_its_header():
     pcm = ramp(64, 2)
-    data, ch, rate = wx.decode_sfx(sound_header(2, 48000, 1, pcm, orig=48000))
+    data, ch, rate = audio_decode.decode_sfx(sound_header(2, 48000, 1, pcm, orig=48000))
     assert (ch, rate) == (2, 48000)
     blocks = b"".join(b"\x00" * 32 for _ in range(4))
-    _d, ch, rate = wx.decode_sfx(sound_header(2, 43937, 2, blocks, samples=40))
+    _d, ch, rate = audio_decode.decode_sfx(sound_header(2, 43937, 2, blocks, samples=40))
     assert (ch, rate) == (2, 43937)
     # mono sounds are stored at 44100 whatever their source rate was
-    _d, ch, rate = wx.decode_sfx(sound_header(1, 44100, 1, ramp(64, 1), orig=22050))
+    _d, ch, rate = audio_decode.decode_sfx(sound_header(1, 44100, 1, ramp(64, 1), orig=22050))
     assert (ch, rate) == (1, 44100)
     # a rate no sound has: the old constant, not a broken file
-    assert wx.decode_sfx(sound_header(1, 3, 1, ramp(64, 1)))[2] == 44100
+    assert audio_decode.decode_sfx(sound_header(1, 3, 1, ramp(64, 1)))[2] == 44100
 
 
 def test_pcm_data_starts_right_after_its_byte_count():
     pcm = ramp(64, 2)
-    data, _ch, _rate = wx.decode_sfx(sound_header(2, 48000, 1, pcm))
+    data, _ch, _rate = audio_decode.decode_sfx(sound_header(2, 48000, 1, pcm))
     assert data == pcm  # 1.3.0 began 4 bytes (one stereo frame) late and ran into the cue count
     frames = struct.unpack("<128h", data)
     assert frames[0::2] == tuple(range(100, 228, 2)) and frames[1::2] == tuple(range(101, 228, 2))
     mono = ramp(50, 1)
-    assert wx.decode_sfx(sound_header(1, 44100, 1, mono))[0] == mono
+    assert audio_decode.decode_sfx(sound_header(1, 44100, 1, mono))[0] == mono
 
 
 def test_sound_header_facts():
-    i = wx.sfx_info(sound_header(2, 48016, 1, ramp(480, 2), loop=1, is3d=0, orig=48000))
+    i = sound_header_mod.sfx_info(
+        sound_header(2, 48016, 1, ramp(480, 2), loop=1, is3d=0, orig=48000)
+    )
     assert i["looping"] is True and i["is3d"] is False
     assert (i["channels"], i["rate"], i["original_rate"], i["codec"]) == (2, 48016, 48000, "pcm16")
     assert i["samples"] == 480 and i["duration_s"] == round(480 / 48016.0, 4)
     assert i["cue_points"] == []
-    a = wx.sfx_info(sound_header(1, 44100, 2, b"\x00" * 64, samples=88200))
+    a = sound_header_mod.sfx_info(sound_header(1, 44100, 2, b"\x00" * 64, samples=88200))
     assert a["codec"] == "ms-adpcm" and a["block_align"] == 32 and a["duration_s"] == 2.0
     assert a["looping"] is False and a["data_bytes"] == 64
-    assert wx.sfx_info(b"\x00" * 12) is None
+    assert sound_header_mod.sfx_info(b"\x00" * 12) is None
 
 
 def test_loop_flag_as_smpl_chunk_only_on_request(tmp_path):
     pcm = ramp(100, 1)
     a, b = tmp_path / "a.wav", tmp_path / "b.wav"
-    wx.write_wav(pcm, 1, 44100, a)
-    wx.write_wav(pcm, 1, 44100, b, loop=True)
+    audio_decode.write_wav(pcm, 1, 44100, a)
+    audio_decode.write_wav(pcm, 1, 44100, b, loop=True)
     plain = a.read_bytes()
     looped = b.read_bytes()
     assert looped[: len(plain)][8:] == plain[8:] and len(looped) == len(plain) + 68

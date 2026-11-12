@@ -21,7 +21,8 @@ import char_lib
 import characters_export as ce
 import rig_glb
 import variant_glb as vg
-import watchmen_extract as we
+import material_refs
+import obj_mtl
 from conftest import parse_glb
 
 Image = pytest.importorskip("PIL.Image")
@@ -85,16 +86,18 @@ def _reversed_walk(monkeypatch):
 
 
 def test_texref_is_the_bare_name_and_keeps_the_path():
-    a = we.texture_ref("/art/characters/bikers/textures/head.bmp")
-    b = we.texture_ref("/art/characters/knottops/textures/head.bmp")
+    a = material_refs.texture_ref("/art/characters/bikers/textures/head.bmp")
+    b = material_refs.texture_ref("/art/characters/knottops/textures/head.bmp")
     assert a == "head" and str(a) == "head" and a.path.endswith("bikers/textures/head.bmp")
     assert a != b and hash(a) == hash(b) == hash("head")
-    assert a == we.TexRef("head", "\\ART\\Characters\\Bikers\\textures\\HEAD.bmp")  # same asset
+    assert a == material_refs.TexRef(
+        "head", "\\ART\\Characters\\Bikers\\textures\\HEAD.bmp"
+    )  # same asset
     d = {a: 1, b: 2}
     assert len(d) == 2 and d[a] == 1 and d[b] == 2
     assert "head" in d  # a plain name still finds a material of that name
     c = pickle.loads(pickle.dumps(b))
-    assert c == b and c.path == b.path and isinstance(c, we.TexRef)
+    assert c == b and c.path == b.path and isinstance(c, material_refs.TexRef)
     assert json.dumps([a]) == '["head"]'
 
 
@@ -104,16 +107,16 @@ def test_extract_materials_carry_the_header_paths():
         + b"\x2b\x00\x00\x00/art/characters/bikers/textures/EnemyEye.bmp\x00"
         + b"\x30\x00\x00\x00/art/characters/common/textures/head/EnemyEye.bmp\x00"
     )
-    mats = we.extract_materials(hdr)
+    mats = material_refs.extract_materials(hdr)
     assert mats == ["EnemyEye", "EnemyEye"]  # still the names every caller compares
     assert [m.path for m in mats] == [
         "/art/characters/bikers/textures/EnemyEye.bmp",
         "/art/characters/common/textures/head/EnemyEye.bmp",
     ]
     assert mats[0] != mats[1]
-    assert we.unique_material_names(mats) == ["EnemyEye", "EnemyEye__2"]
-    assert we.unique_material_names(mats + mats[:1]) == ["EnemyEye", "EnemyEye__2", "EnemyEye"]
-    assert we.unique_material_names(["a", "b", "a"]) == ["a", "b", "a"]
+    assert obj_mtl.unique_material_names(mats) == ["EnemyEye", "EnemyEye__2"]
+    assert obj_mtl.unique_material_names(mats + mats[:1]) == ["EnemyEye", "EnemyEye__2", "EnemyEye"]
+    assert obj_mtl.unique_material_names(["a", "b", "a"]) == ["a", "b", "a"]
 
 
 # ---------------------------------------------------------------------------
@@ -124,21 +127,21 @@ def test_extract_materials_carry_the_header_paths():
 @pytest.mark.parametrize("order", ORDERS)
 def test_index_resolves_by_path_whatever_the_creation_order(tmp_path, order):
     root = _tree(tmp_path / "textures", order)
-    idx = we.build_texture_index(root)
+    idx = obj_mtl.build_texture_index(root)
     for rel in order:
-        got = idx.resolve(we.texture_ref("/" + rel), warn=pytest.fail)
+        got = idx.resolve(material_refs.texture_ref("/" + rel), warn=pytest.fail)
         assert got == root / rel
     # case and separators of the stored path do not matter
-    assert idx.resolve(we.TexRef("head", "\\ART\\CHARACTERS\\KNOTTOPS\\Textures\\Head.BMP")) == (
-        root / KNOT
-    )
+    assert idx.resolve(
+        material_refs.TexRef("head", "\\ART\\CHARACTERS\\KNOTTOPS\\Textures\\Head.BMP")
+    ) == (root / KNOT)
     assert idx.resolve("/art/characters/common/textures/head/head.bmp") == root / COMMON
 
 
 @pytest.mark.parametrize("order", ORDERS)
 def test_bare_name_fallback_is_sorted_and_warns_with_the_candidates(tmp_path, order):
     root = _tree(tmp_path / "textures", order)
-    idx = we.build_texture_index(root)
+    idx = obj_mtl.build_texture_index(root)
     said = []
     assert idx.resolve("head", warn=said.append) == root / BIKERS  # asset paths sorted, first
     assert idx["head"] == root / BIKERS and idx.get("head") == root / BIKERS  # the dict view
@@ -159,30 +162,30 @@ def test_a_path_that_is_not_in_the_tree_falls_back_to_the_name(tmp_path):
     root = tmp_path / "textures"
     only = _texture(root, "Textures/grids/gray.BMP", (9, 9, 9))
     _tree(root, ORDERS[1])
-    idx = we.build_texture_index(root)
+    idx = obj_mtl.build_texture_index(root)
     said = []
     # one texture of that name: taken silently, wherever the model says it lives
-    assert idx.resolve(we.texture_ref("/textures/gray.bmp"), warn=said.append) == only
+    assert idx.resolve(material_refs.texture_ref("/textures/gray.bmp"), warn=said.append) == only
     assert said == []
     # several: the documented tie-break, and the warning names the missing path
-    gone = we.texture_ref("/art/characters/prisoners/textures/head.bmp")
+    gone = material_refs.texture_ref("/art/characters/prisoners/textures/head.bmp")
     assert idx.resolve(gone, warn=said.append) == root / BIKERS
     assert "prisoners/textures/head.bmp is not in the texture tree" in said[0]
-    assert idx.resolve(we.texture_ref("/x/nothing.bmp"), warn=said.append) is None
+    assert idx.resolve(material_refs.texture_ref("/x/nothing.bmp"), warn=said.append) is None
 
 
 def test_index_does_not_depend_on_the_walk_order(tmp_path, monkeypatch):
     root = _tree(tmp_path / "textures", ORDERS[0])
-    a = we.build_texture_index(root)
+    a = obj_mtl.build_texture_index(root)
     _reversed_walk(monkeypatch)
-    b = we.build_texture_index(root)
+    b = obj_mtl.build_texture_index(root)
     assert dict(a) == dict(b) and a.by_path == b.by_path and a.candidates == b.candidates
     assert b["head"] == root / BIKERS
 
 
 def test_plain_dict_indexes_still_work():
-    assert we.resolve_texture({"a": "X"}, we.TexRef("A", "/p/A.bmp")) == "X"
-    assert we.resolve_texture({}, "a") is None and we.resolve_texture(None, "a") is None
+    assert obj_mtl.resolve_texture({"a": "X"}, material_refs.TexRef("A", "/p/A.bmp")) == "X"
+    assert obj_mtl.resolve_texture({}, "a") is None and obj_mtl.resolve_texture(None, "a") is None
 
 
 # ---------------------------------------------------------------------------
@@ -194,7 +197,7 @@ def test_plain_dict_indexes_still_work():
 def test_character_layers_come_from_the_models_own_folder(tmp_path, order, capsys):
     root = str(_tree(tmp_path / "textures", order))
     for rel in order:
-        lay = char_lib.find_layers(we.texture_ref("/" + rel), [root])
+        lay = char_lib.find_layers(material_refs.texture_ref("/" + rel), [root])
         assert _rgb(lay["diffuse"]) == COLOUR[rel]
     assert capsys.readouterr().err == ""  # nothing ambiguous was looked up
     # a material without a path: deterministic, and it says so
@@ -221,7 +224,7 @@ def test_two_models_with_the_same_material_name_keep_their_own_textures(tmp_path
         None,
         ref,
     )
-    a, b = we.texture_ref("/" + KNOT), we.texture_ref("/" + BIKERS)
+    a, b = material_refs.texture_ref("/" + KNOT), material_refs.texture_ref("/" + BIKERS)
     tex = char_lib.find_textures([part(a), part(b), part(a)], [root])
     assert len(tex) == 2
     assert _rgb(tex[a]["diffuse"]) == COLOUR[KNOT] and _rgb(tex[b]["diffuse"]) == COLOUR[BIKERS]
@@ -231,8 +234,8 @@ def test_upper_case_and_padded_texture_folders_are_found(tmp_path):
     root = tmp_path / "textures"
     _texture(root, "art/characters/rorschach/textures/RorschachFaceClean.BMP", (1, 2, 3))
     _texture(root, "art/characters/rorschach/textures/rorschachspots01 .bmp", (4, 5, 6))
-    face = we.texture_ref("/art/characters/rorschach/textures/RorschachFaceClean.BMP")
-    spots = we.texture_ref("/art/characters/rorschach/textures/rorschachspots01 .bmp")
+    face = material_refs.texture_ref("/art/characters/rorschach/textures/RorschachFaceClean.BMP")
+    spots = material_refs.texture_ref("/art/characters/rorschach/textures/rorschachspots01 .bmp")
     assert spots == "rorschachspots01 "  # the name the game uses, trailing blank included
     assert _rgb(char_lib.find_layers(face, [str(root)])["diffuse"]) == (1, 2, 3)
     assert _rgb(char_lib.find_layers(spots, [str(root)])["diffuse"]) == (4, 5, 6)
@@ -242,7 +245,7 @@ def test_upper_case_and_padded_texture_folders_are_found(tmp_path):
 
 def test_character_glb_embeds_one_image_per_path(rig, tmp_path):
     root = str(_tree(tmp_path / "textures", ORDERS[1]))
-    a, b = we.texture_ref("/" + KNOT), we.texture_ref("/" + COMMON)
+    a, b = material_refs.texture_ref("/" + KNOT), material_refs.texture_ref("/" + COMMON)
     base = rig.parts[0]
     parts = [tuple(base[:5]) + (a,), tuple(base[:5]) + (b,), tuple(base[:5]) + (a,)]
     tex = char_lib.find_textures(parts, [root])
@@ -270,15 +273,15 @@ def _write_two(tmp_path, mats, idx):
     v = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)] * 2
     subs = [(0, 3, 0, 1, 44), (3, 3, 1, 1, 44)]
     out = tmp_path / "models" / "m.obj"
-    we.write_obj_mtl(out, "m", v, None, None, [(0, 1, 2), (3, 4, 5)], subs, mats, idx, None)
+    obj_mtl.write_obj_mtl(out, "m", v, None, None, [(0, 1, 2), (3, 4, 5)], subs, mats, idx, None)
     return out.read_text(), out.with_suffix(".mtl").read_text()
 
 
 @pytest.mark.parametrize("order", ORDERS)
 def test_mtl_links_each_submesh_to_its_own_texture(tmp_path, order):
     root = _tree(tmp_path / "textures", order)
-    idx = we.build_texture_index(root)
-    mats = [we.texture_ref("/" + KNOT), we.texture_ref("/" + COMMON)]
+    idx = obj_mtl.build_texture_index(root)
+    mats = [material_refs.texture_ref("/" + KNOT), material_refs.texture_ref("/" + COMMON)]
     obj, mtl = _write_two(tmp_path, mats, idx)
     assert "usemtl head\n" in obj and "usemtl head__2\n" in obj
     blocks = dict(b.split("\n", 1) for b in mtl.split("newmtl ")[1:])
@@ -291,9 +294,12 @@ def test_mtl_is_unchanged_for_unique_names(tmp_path):
     root = tmp_path / "textures"
     _texture(root, "art/a/skin.bmp", (1, 1, 1))
     _texture(root, "art/a/cloth.bmp", (2, 2, 2))
-    refs = [we.texture_ref("/art/a/skin.bmp"), we.texture_ref("/art/a/cloth.bmp")]
-    with_paths = _write_two(tmp_path / "p", refs, we.build_texture_index(root))
-    plain = _write_two(tmp_path / "q", ["skin", "cloth"], we.build_texture_index(root))
+    refs = [
+        material_refs.texture_ref("/art/a/skin.bmp"),
+        material_refs.texture_ref("/art/a/cloth.bmp"),
+    ]
+    with_paths = _write_two(tmp_path / "p", refs, obj_mtl.build_texture_index(root))
+    plain = _write_two(tmp_path / "q", ["skin", "cloth"], obj_mtl.build_texture_index(root))
     assert with_paths == plain and "__2" not in with_paths[1]
 
 
@@ -301,12 +307,12 @@ def test_model_glb_materials_follow_the_path(tmp_path):
     root = tmp_path / "textures"
     for rel in (KNOT, BIKERS, COMMON):
         _texture(root, rel, COLOUR[rel])
-    idx = we.build_texture_index(root)
+    idx = obj_mtl.build_texture_index(root)
     V = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)] * 2
     U = [(0, 0), (1, 0), (1, 1), (0, 1)] * 2
     T = [(0, 2, 1), (0, 3, 2), (4, 6, 5), (4, 7, 6)]
     subs = [(0, 4, 0, 2, 44), (4, 4, 2, 2, 44)]
-    mats = [we.texture_ref("/" + KNOT), we.texture_ref("/" + COMMON)]
+    mats = [material_refs.texture_ref("/" + KNOT), material_refs.texture_ref("/" + COMMON)]
     out = tmp_path / "m.glb"
     pal = {"bone_count": 1, "bones": [{"name": "root"}]}
     said = []

@@ -21,7 +21,10 @@ import sound_meta as sm
 import test_audio_v2 as au
 import test_text_assets as tt
 import text_assets as ta
-import watchmen_extract as wx
+import audio_decode
+import extract_driver
+import kapow_block
+import sound_header
 
 text_extract = tt.text_extract  # the fixture of test_text_assets, used below
 
@@ -96,7 +99,10 @@ def run_extract(tmp_path, capsys, assets, block=None):
     (src / "x.block_s_z").write_bytes(b"")
     out = tmp_path / "out"
     capsys.readouterr()
-    assert wx.main([str(tmp_path / "files"), "-o", str(out), "--no-files", "--no-text"]) == 0
+    assert (
+        extract_driver.main([str(tmp_path / "files"), "-o", str(out), "--no-files", "--no-text"])
+        == 0
+    )
     return out, capsys.readouterr().out
 
 
@@ -104,29 +110,31 @@ def run_extract(tmp_path, capsys, assets, block=None):
 def test_mp3_frame_walk_counts_whole_frames():
     d = mp3_frames(7)
     assert len(d) == 7 * 192
-    fs = wx.mp3_frame_stats(d)
+    fs = sound_header.mp3_frame_stats(d)
     assert (fs["frames"], fs["samples"], fs["rate"], fs["channels"]) == (7, 7 * 1152, 48000, 1)
     assert fs["bytes"] == len(d) and fs["clean"] is True
     # bytes after the last whole frame are counted out, not guessed into a frame
-    fs = wx.mp3_frame_stats(d + b"\xff\xfb\x54")
+    fs = sound_header.mp3_frame_stats(d + b"\xff\xfb\x54")
     assert fs["frames"] == 7 and fs["clean"] is False and fs["bytes"] == len(d)
     # stereo 128 kbit/s at 44100: 417-byte frames, 418 with the padding bit
     st = bytes([0xFF, 0xFB, 0x90, 0x64]) + b"\x00" * 413
     pad = bytes([0xFF, 0xFB, 0x92, 0x64]) + b"\x00" * 414
-    fs = wx.mp3_frame_stats(st + pad + st)
+    fs = sound_header.mp3_frame_stats(st + pad + st)
     assert (fs["frames"], fs["channels"], fs["rate"], fs["clean"]) == (3, 2, 44100, True)
     # MPEG-2 layer III: 576 samples a frame
     m2 = bytes([0xFF, 0xF3, 0x80, 0xC4]) + b"\x00" * (72 * 64000 // 22050 - 4)
-    assert wx.mp3_frame_stats(m2 * 2)["samples"] == 2 * 576
-    assert wx.mp3_frame_stats(b"\x00" * 64)["frames"] == 0
-    assert wx.mp3_frame_stats(b"\xff\xe0\x00\x00" * 8)["frames"] == 0  # a sync is not a frame
+    assert sound_header.mp3_frame_stats(m2 * 2)["samples"] == 2 * 576
+    assert sound_header.mp3_frame_stats(b"\x00" * 64)["frames"] == 0
+    assert (
+        sound_header.mp3_frame_stats(b"\xff\xe0\x00\x00" * 8)["frames"] == 0
+    )  # a sync is not a frame
 
 
 # ----------------------------------------------------------- sound headers
 def test_ps3_sound_header_gives_the_stored_sample_count():
     h, data = ps3_sound(frames=10, rate=48000, pad=7)
-    assert wx.sfx_info(h, "<") is None  # the PC reader does not take it
-    i = wx.sfx_info(h, ">")
+    assert sound_header.sfx_info(h, "<") is None  # the PC reader does not take it
+    i = sound_header.sfx_info(h, ">")
     assert i["codec"] == "mp3" and (i["channels"], i["rate"]) == (1, 48000)
     assert (i["looping"], i["is3d"]) == (False, True)
     assert i["samples"] == 10 * 1152 and i["duration_s"] == 0.24
@@ -139,7 +147,7 @@ def test_ps3_sound_header_gives_the_stored_sample_count():
 
 def test_ps3_looping_sound_keeps_its_count_and_the_unread_word():
     h, _d = ps3_sound(frames=12, rate=44100, ch=2, loop=1, is3d=0, word4=384)
-    i = wx.sfx_info(h, ">")
+    i = sound_header.sfx_info(h, ">")
     assert (i["looping"], i["is3d"], i["channels"]) == (True, False, 2)
     # the header count, not frames x 1152: a looping sound holds two frames more
     assert i["samples"] == 10 * 1152 and i["mp3_frames"] == 12
@@ -149,38 +157,38 @@ def test_ps3_looping_sound_keeps_its_count_and_the_unread_word():
 
 def test_ps3_header_without_a_count_falls_back_to_the_frames_and_says_so():
     h, _d = ps3_sound(frames=5, samples=0)
-    i = wx.sfx_info(h, ">")
+    i = sound_header.sfx_info(h, ">")
     assert i["samples"] == 5 * 1152 and i["duration_source"] == "frame_count"
     assert i["duration_s"] == 0.12
 
 
 def test_ps3_layout_is_not_guessed_from_other_bytes():
     h, _d = ps3_sound(frames=4)
-    pe = wx._propbag_end(h, ">")
-    assert wx.sfx_info(h[: pe + 55 + 100], ">") is None  # MP3 bytes cut short
+    pe = kapow_block.propbag_end(h, ">")
+    assert sound_header.sfx_info(h[: pe + 55 + 100], ">") is None  # MP3 bytes cut short
     bad = bytearray(h)
     bad[pe + 55] = 0x00  # no frame where the MP3 has to start
-    assert wx.sfx_info(bytes(bad), ">") is None
+    assert sound_header.sfx_info(bytes(bad), ">") is None
     bad = bytearray(h)
     struct.pack_into(">I", bad, pe + 7, 9)  # nine channels
-    assert wx.sfx_info(bytes(bad), ">") is None
+    assert sound_header.sfx_info(bytes(bad), ">") is None
 
 
 def test_x360_sound_header_count_is_whole_xma_frames():
     h, data = x360_sound(counts=(17, 15))
-    i = wx.sfx_info(h, ">")
+    i = sound_header.sfx_info(h, ">")
     assert i["codec"] == "xma2" and i["samples"] == 32 * 512
     assert i["xma_frames"] == 32 and i["duration_source"] == "header"
     assert i["duration_s"] == round(32 * 512 / 48000.0, 4)
     assert h[i["data_offset"] : i["data_offset"] + i["data_bytes"]] == data
     # no stored count: the packets' frame counts
     h, _d = x360_sound(counts=(3, 4), samples=0)
-    i = wx.sfx_info(h, ">")
+    i = sound_header.sfx_info(h, ">")
     assert i["samples"] == 7 * 512 and i["duration_source"] == "frame_count"
 
 
 def test_pc_sound_record_has_no_console_keys():
-    i = wx.sfx_info(au.sound_header(2, 48000, 1, au.ramp(480, 2), loop=1, is3d=0))
+    i = sound_header.sfx_info(au.sound_header(2, 48000, 1, au.ramp(480, 2), loop=1, is3d=0))
     assert "duration_source" not in i and "xma_frames" not in i and "mp3_frames" not in i
 
 
@@ -190,7 +198,7 @@ def test_x360_xma_starts_at_the_first_packet(tmp_path):
     four bytes (the cue count) past the last.  No decoder read the result."""
     h, data = x360_sound(counts=(17, 15), ch=2)
     logs = []
-    rec = wx.decode_sfx_console(h, ">", "sounds/fx/a.wav", tmp_path, None, logs.append)
+    rec = audio_decode.decode_sfx_console(h, ">", "sounds/fx/a.wav", tmp_path, None, logs.append)
     riff = (tmp_path / "sounds/fx/a.wav.xma").read_bytes()
     j = riff.index(b"data")
     assert struct.unpack_from("<I", riff, j + 4)[0] == len(data)
@@ -208,7 +216,9 @@ def test_ps3_mp3_is_the_whole_segment(tmp_path):
     -- and cut the MP3 short."""
     h, data = ps3_sound(frames=42, pad=9)  # 42 x 192 = 8064 bytes at 8000 bytes/s
     assert len(data) == 8064
-    rec = wx.decode_sfx_console(h, ">", "sounds/fx/b.wav", tmp_path, None, lambda *a: None)
+    rec = audio_decode.decode_sfx_console(
+        h, ">", "sounds/fx/b.wav", tmp_path, None, lambda *a: None
+    )
     assert (tmp_path / "sounds/fx/b.wav.mp3").read_bytes() == data
     assert rec["file"] == "sounds/fx/b.wav.mp3"
     assert rec["samples"] == 42 * 1152 and rec["duration_s"] == 1.008
@@ -218,12 +228,15 @@ def test_unknown_console_header_writes_nothing_and_is_not_scanned_into_audio(tmp
     # a stream descriptor-like blob with bytes that look like a frame sync
     h = bag() + b"\x00\x01" + b"\x00" * 20 + b"\xff\xe3/sounds/x.mediastream_s\x00" + b"\x07" * 400
     logs = []
-    assert wx.decode_sfx_console(h, ">", "sounds/x.wav", tmp_path, None, logs.append) is False
+    assert (
+        audio_decode.decode_sfx_console(h, ">", "sounds/x.wav", tmp_path, None, logs.append)
+        is False
+    )
     assert not list(tmp_path.rglob("*.mp3")) and not list(tmp_path.rglob("*.xma"))
     # an MP3 the header reader does not take is still written, with a log line
     data = mp3_frames(6)
     odd = bag() + b"\x00\x01\x09" + b"\x00" * 30 + data
-    rec = wx.decode_sfx_console(odd, ">", "sounds/y.wav", tmp_path, None, logs.append)
+    rec = audio_decode.decode_sfx_console(odd, ">", "sounds/y.wav", tmp_path, None, logs.append)
     assert (tmp_path / "sounds/y.wav.mp3").read_bytes() == data
     assert rec["header"] == "not recognised" and rec["duration_source"] == "frame_count"
     assert rec["duration_s"] == 0.144
@@ -310,7 +323,9 @@ def test_one_track_console_stream_takes_its_facts_from_the_descriptor(tmp_path):
     desc = {"tracks": [{"samples": 16384, "channels": 2, "rate": 44100}]}
     name = "sounds/Music/GameOver_track0.mediastream_s"
     quiet = lambda *a: None
-    out = wx.decode_console_audio(name, raw, tmp_path, None, None, quiet, tracks=True, desc=desc)
+    out = audio_decode.decode_console_audio(
+        name, raw, tmp_path, None, None, quiet, tracks=True, desc=desc
+    )
     assert len(out) == 1
     t = out[0]
     assert (t["channels"], t["rate"], t["samples"]) == (2, 44100, 16384)
@@ -318,7 +333,7 @@ def test_one_track_console_stream_takes_its_facts_from_the_descriptor(tmp_path):
     riff = (tmp_path / (name + ".xma")).read_bytes()
     assert struct.unpack_from("<HHI", riff, 20) == (0x166, 2, 44100)
     # facts by path still win
-    out = wx.decode_console_audio(
+    out = audio_decode.decode_console_audio(
         name, raw, tmp_path, (2, 48000, 16384), None, quiet, tracks=True, desc=desc
     )
     assert out[0]["rate"] == 48000
@@ -368,7 +383,7 @@ def test_sounddb_uses_sound_info_json_then_the_decoded_file(tmp_path):
     }
     doc = {"format": "watchmen-sound-info/1", "sounds": {"sounds/fx/A.wav": rec}}
     (tmp_path / "audio" / "sound_info.json").write_text(json.dumps(doc))
-    wx.write_wav(au.ramp(4800, 1), 1, 48000, audio / "dec.wav")
+    audio_decode.write_wav(au.ramp(4800, 1), 1, 48000, audio / "dec.wav")
     db = sm.SoundDB(str(tmp_path))
     w = db.wave("/sounds/fx/a.wav")  # asset paths compare without case
     assert w["duration_s"] == 1.5 and w["loop"] is True

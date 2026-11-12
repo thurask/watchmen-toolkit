@@ -26,7 +26,11 @@ import pytest
 import kapow_fragment as kf
 import kapow_json as kj
 import kapow_props
-import watchmen_extract as wx
+import extract_driver
+import model_export
+import model_mesh
+import obj_mtl
+import texture_carve
 
 import test_formats_v2 as tf
 import test_p2_fragment as pf
@@ -100,7 +104,7 @@ def test_misc_summary_counts_an_asset_stored_in_two_blocks_once(tmp_path, capsys
         (d / (nm + ".block_h_z")).write_bytes(h)
         (d / (nm + ".block_s_z")).write_bytes(s)
     args = [str(tmp_path / "files"), "-o", str(tmp_path / "out"), "--no-files", "--no-text"]
-    assert wx.main(args + ["--no-audio", "--no-textures", "--no-models"]) == 0
+    assert extract_driver.main(args + ["--no-audio", "--no-textures", "--no-models"]) == 0
     log = capsys.readouterr().out
     assert "  misc JSON   : .fragment 1\n" in log and "not decoded completely: none" in log
 
@@ -117,14 +121,14 @@ def test_extract_says_none_when_every_misc_asset_is_decoded(tmp_path):
 @pytest.fixture
 def glb_on(monkeypatch):
     """The --glb switches of decode_model (the rig writer loaded), default attributes."""
-    monkeypatch.setattr(wx, "write_obj_mtl", lambda *a: None)
-    return wx.glb_options()
+    monkeypatch.setattr(obj_mtl, "write_obj_mtl", lambda *a: None)
+    return model_export.glb_options()
 
 
 def _decode(tmp_path, h, s, glb=None):
     logs = []
     st = {}
-    ok = wx.decode_model(
+    ok = model_export.decode_model(
         h, s, tmp_path / "m.obj", log=lambda *a: logs.append(a[0]), status=st, glb=glb
     )
     assert ok is True
@@ -147,20 +151,20 @@ def test_model_without_glb_says_why_in_its_sidecar(tmp_path, glb_on):
 
 
 def test_without_glb_option_the_sidecar_has_no_marker(tmp_path, monkeypatch):
-    monkeypatch.setattr(wx, "write_obj_mtl", lambda *a: None)
+    monkeypatch.setattr(obj_mtl, "write_obj_mtl", lambda *a: None)
     meta, st, logs = _decode(tmp_path, *pm.build("<", "part2"))
     assert "glb" not in meta and st["glb"] is None
     # a caller that passes no dict finds the same facts in MODEL_STATUS
-    assert wx.decode_model(*pm.build("<", "part2"), tmp_path / "n.obj") is True
-    assert wx.MODEL_STATUS["glb"] is None and wx.MODEL_STATUS["partial"] is None
+    assert model_export.decode_model(*pm.build("<", "part2"), tmp_path / "n.obj") is True
+    assert model_export.MODEL_STATUS["glb"] is None and model_export.MODEL_STATUS["partial"] is None
 
 
 def test_scan_decode_that_misses_submeshes_is_marked(tmp_path, glb_on, monkeypatch):
     """Console Palm_Banana_01 before the header decode: one of three submeshes."""
     monkeypatch.setenv("WATCHMEN_CONSOLE_MODELS", "scan")
     h, s = pm.build(">", "part2", console="x360")
-    full = wx.find_descriptors(h, ">")
-    monkeypatch.setattr(wx, "find_descriptors", lambda hd, o: full[:1] if o == ">" else [])
+    full = model_mesh.find_descriptors(h, ">")
+    monkeypatch.setattr(model_mesh, "find_descriptors", lambda hd, o: full[:1] if o == ">" else [])
     meta, st, logs = _decode(tmp_path, h, s, glb=glb_on)
     assert meta["mesh_source"] == "descriptor scan" and meta["not_decoded"] == ["submeshes"]
     assert (
@@ -174,7 +178,7 @@ def test_scan_decode_that_misses_submeshes_is_marked(tmp_path, glb_on, monkeypat
 
 def test_complete_scan_decode_is_not_marked_partial(tmp_path, monkeypatch):
     monkeypatch.setenv("WATCHMEN_CONSOLE_MODELS", "scan")
-    monkeypatch.setattr(wx, "write_obj_mtl", lambda *a: None)
+    monkeypatch.setattr(obj_mtl, "write_obj_mtl", lambda *a: None)
     meta, st, logs = _decode(tmp_path, *pm.build(">", "part2", console="x360"))
     assert meta["mesh_source"] == "descriptor scan"
     assert "not_decoded" not in meta and "submeshes" not in meta and st["partial"] is None
@@ -182,7 +186,7 @@ def test_complete_scan_decode_is_not_marked_partial(tmp_path, monkeypatch):
 
 def test_extract_summary_counts_models_without_glb(tmp_path, monkeypatch, capsys):
     files = ps._two_block_tree(tmp_path)
-    real = wx.decode_model
+    real = model_export.decode_model
 
     def decode(
         header, stream, out_path, tex_index=None, log=None, order=None, lod=0, status=None, glb=None
@@ -208,11 +212,11 @@ def test_extract_summary_counts_models_without_glb(tmp_path, monkeypatch, capsys
         )
         return True
 
-    monkeypatch.setattr(wx, "carve_texture", lambda *a, **k: True)
-    monkeypatch.setattr(wx, "decode_model", decode)
+    monkeypatch.setattr(texture_carve, "carve_texture", lambda *a, **k: True)
+    monkeypatch.setattr(model_export, "decode_model", decode)
     out = tmp_path / "out"
     args = [str(files), "-o", str(out), "--no-files", "--no-text", "--no-audio", "--glb"]
-    assert wx.main(args) == 0
+    assert extract_driver.main(args) == 0
     log = capsys.readouterr().out
     assert '  model GLBs  : 1  (2 decoded model(s) WITHOUT a .glb; "glb" in their' in log
     assert (
@@ -225,8 +229,10 @@ def test_extract_summary_counts_models_without_glb(tmp_path, monkeypatch, capsys
 
 def test_extract_summary_without_glb_option_has_no_glb_line(tmp_path, monkeypatch, capsys):
     files = ps._two_block_tree(tmp_path)
-    monkeypatch.setattr(wx, "carve_texture", lambda *a, **k: True)
-    assert wx.main([str(files), "-o", str(tmp_path / "o"), "--no-files", "--no-text"]) == 0
+    monkeypatch.setattr(texture_carve, "carve_texture", lambda *a, **k: True)
+    assert (
+        extract_driver.main([str(files), "-o", str(tmp_path / "o"), "--no-files", "--no-text"]) == 0
+    )
     log = capsys.readouterr().out
     assert "model GLBs" not in log and "no GLB for" not in log
 
@@ -308,7 +314,7 @@ def test_block_order_does_not_depend_on_the_letter_case_of_the_block_path(tmp_pa
         (d / (nm + ".block_s_z")).write_bytes(s)
     out = tmp_path / "out"
     args = [str(tmp_path / "files"), "-o", str(out), "--no-files", "--no-text", "--no-audio"]
-    assert wx.main(args + ["--no-textures", "--no-models"]) == 0
+    assert extract_driver.main(args + ["--no-textures", "--no-models"]) == 0
     log = capsys.readouterr().out
     assert log.index("a.block") < log.index("B.block")
     assert "/art/T/wall.bmp (= /art/T/Wall.bmp)" in log

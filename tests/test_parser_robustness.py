@@ -16,7 +16,7 @@ import pytest
 
 import decode_sequence as ds
 import parse_model_nodes as pmn
-import watchmen_extract as we
+import naz_archive
 from conftest import build_model_header, synthetic_nodes
 
 TIME_GUARD = 10.0  # generous: these parsers finish in milliseconds when sane
@@ -57,7 +57,7 @@ def test_naz_entries_rejects_a_non_archive(tmp_path):
     p = tmp_path / "not.naz"
     p.write_bytes(bytes(random.Random(1).randrange(256) for _ in range(4096)))
     with pytest.raises(ValueError, match="not a NAZ archive"):
-        list(we.naz_entries(p))
+        list(naz_archive.naz_entries(p))
 
 
 @pytest.mark.parametrize("size", [0, 1, 8, 15])
@@ -71,7 +71,7 @@ def test_naz_entries_on_a_truncated_file(tmp_path, size):
     p = tmp_path / "short.naz"
     p.write_bytes(b"\x00" * size)
     with pytest.raises(ValueError):
-        list(we.naz_entries(p))
+        list(naz_archive.naz_entries(p))
 
 
 def test_naz_entries_terminates_on_garbage(tmp_path):
@@ -84,7 +84,7 @@ def test_naz_entries_terminates_on_garbage(tmp_path):
     rnd = random.Random(7)
     for _ in range(20):
         p.write_bytes(bytes(rnd.randrange(256) for _ in range(2048)))
-        box = run_bounded(lambda: list(we.naz_entries(p)))
+        box = run_bounded(lambda: list(naz_archive.naz_entries(p)))
         assert "value" in box or isinstance(box.get("error"), (ValueError, OSError, struct.error))
 
 

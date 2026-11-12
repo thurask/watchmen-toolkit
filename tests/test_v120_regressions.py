@@ -12,7 +12,7 @@ Sections
   1. extractor: decode_model threads the byte order into decode_skin
   2. watchmenlib.decode_skin forwards `order`
   3. variant_glb.load_parts: BipNN-prefix slot fallback + byte-order autodetect
-  4. watchmen_extract.decode_model: engine-exact submesh -> material pairing
+  4. model_export.decode_model: engine-exact submesh -> material pairing
   5. kapow_fragment: ImportError (not SystemExit) for a missing key table
   6. watchmen.py: `hash` / `gendata` dispatch before the facade import
   7. kapow_props.parse: truncated propbags degrade, wordcount mismatch warns
@@ -40,7 +40,11 @@ import parse_model_nodes as pmn
 import rig_glb
 import skeleton_records as sr
 import variant_glb as vg
-import watchmen_extract as we
+import kapow_block
+import material_refs
+import model_export
+import model_mesh
+import naz_archive
 from conftest import build_clip_header, build_model_header, rot_vector, synthetic_nodes
 
 import watchmenlib as wl  # a broken facade (missing table, bad import) is an error
@@ -114,10 +118,10 @@ def test_synthetic_model_is_unambiguous_and_carvable(order):
     joints = [(i % 5, 0, 0, 0) for i in range(8)]
     hdr, stream = skinned_model(order, joints)
     other = ">" if order == "<" else "<"
-    assert we.find_descriptors(hdr, order) == [(8, STRIDE[order], 36)]
-    assert we.find_descriptors(hdr, other) == []
-    assert we.vb_ok(stream, 0, 8, STRIDE[order], 36, order)
-    assert we.ib_ok(stream, 0, 8, STRIDE[order], 36, order)
+    assert model_mesh.find_descriptors(hdr, order) == [(8, STRIDE[order], 36)]
+    assert model_mesh.find_descriptors(hdr, other) == []
+    assert model_mesh.vb_ok(stream, 0, 8, STRIDE[order], 36, order)
+    assert model_mesh.ib_ok(stream, 0, 8, STRIDE[order], 36, order)
     si, sw = rig_glb.decode_skin(stream, 0, 8, STRIDE[order], order)
     assert si[:, 0].tolist() == [j[0] for j in joints]
     assert np.allclose(sw[:, 0], 1.0)
@@ -163,7 +167,12 @@ def test_decode_model_passes_detected_byte_order_to_decode_skin(tmp_path, rig_st
     """
     joints = [(i % 5, 0, 0, 0) for i in range(8)]
     hdr, stream = skinned_model(order, joints)
-    assert we.decode_model(hdr, stream, tmp_path / "m.obj", glb=we.GlbOptions(rig_stub)) is True
+    assert (
+        model_export.decode_model(
+            hdr, stream, tmp_path / "m.obj", glb=model_export.GlbOptions(rig_stub)
+        )
+        is True
+    )
     assert len(rig_stub.skin_calls) == 1, "one skinned submesh -> one decode_skin call"
     call = rig_stub.skin_calls[0]
     assert call["order"] == order
@@ -180,7 +189,12 @@ def test_console_model_yields_a_skinned_glb(tmp_path, rig_stub):
     """
     joints = [((i * 3) % 5, 0, 0, 0) for i in range(8)]
     hdr, stream = skinned_model(">", joints)
-    assert we.decode_model(hdr, stream, tmp_path / "m.obj", glb=we.GlbOptions(rig_stub)) is True
+    assert (
+        model_export.decode_model(
+            hdr, stream, tmp_path / "m.obj", glb=model_export.GlbOptions(rig_stub)
+        )
+        is True
+    )
     assert len(rig_stub.glb_calls) == 1, "console skinned model must produce a glb"
     SI = rig_stub.glb_calls[0]["SI"]
     assert SI.shape == (8, 4)
@@ -254,10 +268,12 @@ def _run_load_parts(monkeypatch, order, joints):
     hdr, stream = skinned_model(order, joints, names=MESH_NODES)
     # load_parts walks the archive one block at a time (iter_blocks, 1.5.0)
     monkeypatch.setattr(
-        vg.we, "iter_blocks", lambda naz, streams=True: iter([("blk", {"h": b"H", "s": b"S"})])
+        naz_archive,
+        "iter_blocks",
+        lambda naz, streams=True: iter([("blk", {"h": b"H", "s": b"S"})]),
     )
     monkeypatch.setattr(
-        we, "extract_block", lambda h, s: iter([(_Entry("/x/Body.model"), hdr, stream)])
+        kapow_block, "extract_block", lambda h, s: iter([(_Entry("/x/Body.model"), hdr, stream)])
     )
     return vg.load_parts(["Body"], PALETTE, naz="does-not-exist.naz")
 
@@ -331,10 +347,10 @@ def test_decode_model_pairs_materials_by_record_not_position(tmp_path):
     hdr, stream = skinned_model(
         "<", joints, nsub=2, materials=["coat_a", "coat_b"], piece_mats=[1, 1]
     )
-    assert we.extract_materials(hdr) == ["coat_a", "coat_b"]
-    assert we.submesh_materials(hdr, "<") == [("Piece0", 1), ("Piece1", 1)]
+    assert material_refs.extract_materials(hdr) == ["coat_a", "coat_b"]
+    assert material_refs.submesh_materials(hdr, "<") == [("Piece0", 1), ("Piece1", 1)]
     out = tmp_path / "m.obj"
-    assert we.decode_model(hdr, stream, out) is True
+    assert model_export.decode_model(hdr, stream, out) is True
     usemtl = [ln.split()[1] for ln in out.read_text().splitlines() if ln.startswith("usemtl ")]
     assert usemtl == ["coat_b", "coat_b"]
 
@@ -419,7 +435,7 @@ def test_hash_command_does_not_import_the_facade():
         "m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)\n"
         "rc = m.main(['watchmen.py', 'hash', 'POSITION'])\n"
         "heavy = sorted(x for x in sys.modules if x.split('.')[0] in "
-        "('numpy', 'PIL', 'watchmenlib', 'kapow_fragment', 'watchmen_extract'))\n"
+        "('numpy', 'PIL', 'watchmenlib', 'kapow_fragment', 'extract_driver'))\n"
         "print('RC', rc); print('HEAVY', ' '.join(heavy))\n"
     )
     r = _run(None, REPO, code)

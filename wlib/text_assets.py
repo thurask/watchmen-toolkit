@@ -701,22 +701,22 @@ def block_text_assets(h_data, warn=None):
     the textRes assets of one block header file (`*.block_h_z`).  A slot whose
     blob is missing or inflates past the ceiling is None; a blob that does not
     inflate is kept as stored.  Both give a WARNING line through `warn`."""
-    import watchmen_extract as wx
+    import kapow_block
 
     warn = warn or (lambda *a: None)
 
     out, order = {}, None
-    for lang in range(wx.BLOCK_LANGUAGES):
-        entries, cur = wx.parse_block_toc(h_data, language=lang)
-        bo = order = entries[0].order if entries else wx.detect_block_order(h_data)
-        num = struct.unpack_from(bo + "I", h_data, wx.NUM_TABLES_OFFSET)[0]
+    for lang in range(kapow_block.BLOCK_LANGUAGES):
+        entries, cur = kapow_block.parse_block_toc(h_data, language=lang)
+        bo = order = entries[0].order if entries else kapow_block.detect_block_order(h_data)
+        num = struct.unpack_from(bo + "I", h_data, kapow_block.NUM_TABLES_OFFSET)[0]
         lang_off = struct.unpack_from(bo + "6I", h_data, 364)
         for i, e in enumerate(entries):
             if i == num and lang_off[lang]:
                 cur = lang_off[lang]
             size = e.data_size
             if e.type_name == TEXT_CLASS:
-                rec = out.setdefault(e.name, [e.localized, [None] * wx.BLOCK_LANGUAGES])
+                rec = out.setdefault(e.name, [e.localized, [None] * kapow_block.BLOCK_LANGUAGES])
 
                 def _report(msg, name=e.name, lang=lang):
                     warn(
@@ -725,7 +725,7 @@ def block_text_assets(h_data, warn=None):
                     )
 
                 try:
-                    rec[1][lang] = wx.maybe_inflate(
+                    rec[1][lang] = kapow_block.maybe_inflate(
                         h_data[cur : cur + size], e.type_name, report=_report
                     )
                 except ValueError as ex:  # past the inflate ceiling
@@ -824,9 +824,9 @@ class TextWriter:
         return len(found)
 
     def _safe(self, code, name, suffix=""):
-        import watchmen_extract as wx
+        import extract_paths
 
-        return str(wx.safe(Path(self.root) / code, name + suffix))
+        return str(extract_paths.safe(Path(self.root) / code, name + suffix))
 
     def write(self):
         """Write everything collected; returns the index dict (None when no
@@ -908,14 +908,14 @@ class TextWriter:
 def extract_text(naz, out_dir, log=print):
     """Write only OUT_DIR/text/ from a game.naz (or a loose `files` tree):
     reads the block header files, touches nothing else.  Returns the index."""
-    import watchmen_extract as wx
+    import naz_archive
 
     w = TextWriter(out_dir, log)
-    for e in wx.naz_entries(naz):
+    for e in naz_archive.naz_entries(naz):
         if not e.name.lower().endswith(".block_h_z"):
             continue
         try:
-            w.add_block(wx.naz_read(naz, e), e.name[: -len("_h_z")])
+            w.add_block(naz_archive.naz_read(naz, e), e.name[: -len("_h_z")])
         except Exception as ex:
             log("  ! %s: %s" % (e.name, ex))
     return w.write()

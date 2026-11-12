@@ -6,12 +6,12 @@ Every character path reads its mesh pieces here: char_lib.load_parts (the
 and characters_export's weapon and head attachments (_weapon_attach_parts,
 _rigid_attach_parts).
 
-Primary path: the model header (watchmen_extract.decode_model_mesh -- the
+Primary path: the model header (model_mesh.decode_model_mesh -- the
 header parsed by parse_model_header, every buffer located by
 model_stream_layout, which must consume the stream exactly).  Each render
 buffer of vertex format 5 / 6 is one submesh, at the stream offset the header
 gives, its index run read with the buffer's primitive type (a triangle strip
-is decoded as a strip, watchmen_extract.index_triangles).  Positions are kept
+is decoded as a strip, model_header.index_triangles).  Positions are kept
 part-local, as stored (part_space=True).
 
 Fallback: the descriptor scan (find_descriptors, then the first
@@ -228,21 +228,24 @@ class LoadReport(dict):
 
 
 def _header_path(mh, ms, order):
-    """(watchmen_extract.decode_model_mesh result, None), or (None, why) when the
+    """(model_mesh.decode_model_mesh result, None), or (None, why) when the
     header path does not apply to this model."""
-    import watchmen_extract as we
+    import model_header
+    import model_mesh
 
     try:
-        D = we.decode_model_mesh(mh, ms, lod="all", kinds=("render",), order=order, part_space=True)
+        D = model_mesh.decode_model_mesh(
+            mh, ms, lod="all", kinds=("render",), order=order, part_space=True
+        )
     except (ValueError, struct.error, IndexError) as ex:  # a malformed header is data
         return None, "the header does not decode (%s)" % ex
     if D is not None:
         return D, None
-    if order == ">" and not we.console_header_decode():
+    if order == ">" and not model_header.console_header_decode():
         return None, "WATCHMEN_CONSOLE_MODELS=scan"
     if ms is None:
         return None, "no stream"
-    M = we.parse_model_header(mh, order)
+    M = model_header.parse_model_header(mh, order)
     if M is None:
         return None, "the header does not parse as a ModelRes"
     return None, "the header's buffers do not consume the stream exactly"
@@ -250,7 +253,7 @@ def _header_path(mh, ms, order):
 
 def _scan_one(ms, off, nv, stride, ib, order):
     """The descriptor-scan offset search for one descriptor -> (vbo or None, "strict" | "flat")."""
-    import watchmen_extract as we
+    import model_mesh
     import char_lib
 
     hi = len(ms) - nv * stride - ib
@@ -260,9 +263,9 @@ def _scan_one(ms, off, nv, stride, ib, order):
         # TwilightLadyHair / rorschachspots) sits ~4 bytes before the real one,
         # passes vb_ok, but has a ~50% repeated-index IB.
         if (
-            we.is_finite_float(struct.unpack_from(order + "f", ms, c)[0])
-            and we.vb_ok(ms, c, nv, stride, ib, order)
-            and we.ib_ok(ms, c, nv, stride, ib, order)
+            model_mesh.is_finite_float(struct.unpack_from(order + "f", ms, c)[0])
+            and model_mesh.vb_ok(ms, c, nv, stride, ib, order)
+            and model_mesh.ib_ok(ms, c, nv, stride, ib, order)
         ):
             return c, "strict"
         c += 1
@@ -300,7 +303,8 @@ def load_submeshes(
     "T" (k,3) int triangles, "material", "attrs" (dict or None), "skin" (joint
     quads uint8, weights float32) or (None, None)}.  A piece that cannot be
     decoded is NOT in `subs`: char_lib.note_dropped records and logs it."""
-    import watchmen_extract as we
+    import material_refs
+    import model_mesh
     import char_lib
     import rig_glb
     import variant_glb as _vg
@@ -308,7 +312,7 @@ def load_submeshes(
     rep = LoadReport(name)
     if order is None:
         order = char_lib.model_order(mh, ms, name)
-    descs = we.find_descriptors(mh, order)
+    descs = model_mesh.find_descriptors(mh, order)
     D, why = _header_path(mh, ms, order)
     plan = []  # (desc ordinal or None, nv, stride, ib, header submesh or None)
     if D is not None:
@@ -345,8 +349,8 @@ def load_submeshes(
     else:
         for j, (nv, st, ib) in enumerate(descs):
             plan.append((j, nv, st, ib, None))
-    mats = we.extract_materials(mh)
-    smat = we.submesh_materials(mh, order)
+    mats = material_refs.extract_materials(mh)
+    smat = material_refs.submesh_materials(mh, order)
     subs = []
     off = 0
     si = None
@@ -378,7 +382,7 @@ def load_submeshes(
                     continue
                 path = "scan" if how == "strict" else "flat"
                 restored, notes = [], []
-                v, _, uvs = we.decode_mesh_vertices(
+                v, _, uvs = model_mesh.decode_mesh_vertices(
                     ms, vbo, nv, stride, order == ">", restored, notes
                 )
                 V = np.array(v, float)

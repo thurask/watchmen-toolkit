@@ -22,7 +22,7 @@ import font_asset as fa
 import kapow_json as kj
 import kapow_props as kp
 import terrain_asset as ta
-import watchmen_extract as we
+import extract_driver
 
 import test_p2_fragment as tf
 import test_p2_part1 as p1
@@ -799,7 +799,7 @@ def _run_extract(tmp_path, entries, stream, extra=()):
     real = builtins.print
     builtins.print = lambda *x, **k: lines.append(" ".join(str(v) for v in x))
     try:
-        rc = we.main(
+        rc = extract_driver.main(
             [
                 str(tmp_path / "derived_pc"),
                 "-o",

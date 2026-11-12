@@ -35,7 +35,8 @@ from PIL import Image
 import ragdoll_rig as rr
 import rig_glb
 import variant_glb as vg
-import watchmen_extract as we
+import material_refs
+import obj_mtl
 from conftest import parse_glb
 
 import test_frame as tfr
@@ -382,7 +383,7 @@ def _texture_index(tmp_path, asset):
     (d / "1_normal_4x4_ATI2.png").write_bytes(NORMAL_RGB)
     sheet = {"renderType": 0, "blendType": 0, "opacity": 1.0, "specularPower": 20.0}
     (d / "sheet.json").write_text(json.dumps(dict(sheet, sheets=[dict(sheet, name="default")])))
-    return we.TextureIndex(root)
+    return obj_mtl.TextureIndex(root)
 
 
 def _rigged(path, rig, clips=None, **kw):
@@ -437,7 +438,7 @@ def test_rigged_static_materials(tmp_path, rig, clean_env, engine):
         out,
         rig,
         static=True,
-        materials=[we.texture_ref(asset)],
+        materials=[material_refs.texture_ref(asset)],
         tex_index=idx,
         normals=np.tile(np.array([[0.0, 0.0, 1.0]], np.float32), (rig.NV, 1)),
         has_color=[False],
@@ -455,7 +456,7 @@ def test_rigged_skinned_materials(tmp_path, rig, clean_env, engine):
     _rigged(
         out,
         rig,
-        materials=[we.texture_ref(asset)],
+        materials=[material_refs.texture_ref(asset)],
         tex_index=idx,
         has_color=[False],
         has_alpha=[False],

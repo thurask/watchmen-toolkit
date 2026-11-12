@@ -35,7 +35,11 @@ import char_lib
 import characters_export as ce
 import mesh_loader as ml
 import variant_glb as vg
-import watchmen_extract as we
+import kapow_block
+import model_export
+import model_header
+import model_mesh
+import naz_archive
 
 import test_p2_console_chars as tc
 import test_p3_part1_model as tm
@@ -131,7 +135,7 @@ def test_a_strip_buffer_is_decoded_as_a_strip(no_scan):
     h, s = tm.build("<", "part2")
     k = h.rindex(_DESC)  # Spine's buffer
     h = h[:k] + struct.pack("<6I", 8, 4, 5, 8, 12, 0) + h[k + len(_DESC) :]
-    assert len(we.find_descriptors(h, "<")) == 2
+    assert len(model_mesh.find_descriptors(h, "<")) == 2
     subs, rep = ml.load_submeshes(h, s, "M", skin=False, attrs=False)
     assert rep["strips"] == 1 and len(subs) == 3
     spine = subs[2]
@@ -144,8 +148,8 @@ def test_a_strip_buffer_is_decoded_as_a_strip(no_scan):
 
 def test_a_triangle_naming_a_missing_vertex_drops_the_piece(no_scan, capsys):
     h, s = tm.build("<", "part2")
-    M = we.parse_model_header(h, "<")
-    we.model_stream_layout(M, s, "<")
+    M = model_header.parse_model_header(h, "<")
+    model_header.model_stream_layout(M, s, "<")
     ib = M["buffers"][0]["ib"]  # Body: indices 0 1 2 0 2 3 -> 0 1 9 0 2 3
     s = s[: ib + 4] + struct.pack("<H", 9) + s[ib + 6 :]
     subs, rep = ml.load_submeshes(h, s, "Bad", skin=False, attrs=False)
@@ -160,8 +164,8 @@ def test_a_triangle_naming_a_missing_vertex_drops_the_piece(no_scan, capsys):
 
 def test_degenerate_triangles_are_counted_and_logged(no_scan, capsys):
     h, s = tm.build("<", "part2")
-    M = we.parse_model_header(h, "<")
-    we.model_stream_layout(M, s, "<")
+    M = model_header.parse_model_header(h, "<")
+    model_header.model_stream_layout(M, s, "<")
     ib = M["buffers"][0]["ib"]  # Body: 0 1 2 0 2 3 -> 0 1 2 0 2 2
     s = s[: ib + 10] + struct.pack("<H", 2) + s[ib + 12 :]
     subs, rep = ml.load_submeshes(h, s, "Deg", skin=False, attrs=False)
@@ -288,7 +292,7 @@ def test_an_influence_outside_the_palette_is_logged_and_its_weight_dropped(tmp_p
 def test_a_zero_weight_influence_outside_the_palette_is_a_note_not_a_problem(tmp_path, capsys):
     """Weight 0 already: nothing is dropped, the arrays are what they would be with
     an index inside the palette, and the log has no '!' line for it."""
-    import watchmen_extract as wx
+    import extract_log
 
     hdr, stream = tv.skinned_model("<", [(1, 0, 0, 0)] * 8, names=tv.MESH_NODES)
     ref = tc._write_model(tmp_path, "Ref", hdr, stream)
@@ -305,7 +309,9 @@ def test_a_zero_weight_influence_outside_the_palette_is_a_note_not_a_problem(tmp
     assert uj(part[1], part[2]).tolist() == uj(want[1], want[2]).tolist()
     assert part[2].tobytes() == want[2].tobytes()
     # (the fixture's own lines aside: byte order, palette names)
-    assert not [ln for ln in out.splitlines() if wx.is_warning_line(ln) and "influence" in ln]
+    assert not [
+        ln for ln in out.splitlines() if extract_log.is_warning_line(ln) and "influence" in ln
+    ]
     assert "influence" in out
     assert (
         "  note: Body sub0: 1 zero-weight skin influence(s) name an index past the 5-entry "
@@ -347,10 +353,12 @@ def test_variant_glb_drops_an_outside_index_too(monkeypatch):
     hdr, stream = tv.skinned_model("<", [(1, 0, 0, 0)] * 8, names=tv.MESH_NODES)
     stream = _skin(stream, 2, (2, 9, 0, 0), (0.25, 0.75, 0, 0))
     monkeypatch.setattr(
-        vg.we, "iter_blocks", lambda naz, streams=True: iter([("blk", {"h": b"H", "s": b"S"})])
+        naz_archive,
+        "iter_blocks",
+        lambda naz, streams=True: iter([("blk", {"h": b"H", "s": b"S"})]),
     )
     monkeypatch.setattr(
-        we, "extract_block", lambda h, s: iter([(tv._Entry("/x/Body.model"), hdr, stream)])
+        kapow_block, "extract_block", lambda h, s: iter([(tv._Entry("/x/Body.model"), hdr, stream)])
     )
     (part,) = vg.load_parts(["Body"], tv.PALETTE, naz="does-not-exist.naz")
     assert part[1][2, 0] == tv.EXPECTED_REMAP[2] and part[2][2].tolist() == [1, 0, 0, 0]
@@ -372,14 +380,14 @@ def test_the_weapon_attachment_reads_the_header(no_scan, tmp_path):
 def test_one_unreadable_block_is_logged_and_the_walk_goes_on(monkeypatch, capsys):
     hdr, stream = tv.skinned_model("<", [(i % 5, 0, 0, 0) for i in range(8)], names=tv.MESH_NODES)
     blocks = [("/Levels/A/Bad.block", {"h": b"bad", "s": b""}), ("/L/Good", {"h": b"H", "s": b"S"})]
-    monkeypatch.setattr(vg.we, "iter_blocks", lambda naz, streams=True: iter(blocks))
+    monkeypatch.setattr(naz_archive, "iter_blocks", lambda naz, streams=True: iter(blocks))
 
     def extract_block(h, s):
         if h == b"bad":
             raise ValueError("truncated block")
         return iter([(tv._Entry("/x/Body.model"), hdr, stream)])
 
-    monkeypatch.setattr(we, "extract_block", extract_block)
+    monkeypatch.setattr(kapow_block, "extract_block", extract_block)
     assert len(vg.load_parts(["Body"], tv.PALETTE, naz="x.naz")) == 1
     assert "  ! block Bad.block: truncated block" in capsys.readouterr().out
 
@@ -387,13 +395,15 @@ def test_one_unreadable_block_is_logged_and_the_walk_goes_on(monkeypatch, capsys
 def test_an_interrupt_during_the_walk_is_not_swallowed(monkeypatch):
     """1.4.0 had a bare `except:` there."""
     monkeypatch.setattr(
-        vg.we, "iter_blocks", lambda naz, streams=True: iter([("blk", {"h": b"H", "s": b"S"})])
+        naz_archive,
+        "iter_blocks",
+        lambda naz, streams=True: iter([("blk", {"h": b"H", "s": b"S"})]),
     )
 
     def interrupt(h, s):
         raise KeyboardInterrupt
 
-    monkeypatch.setattr(we, "extract_block", interrupt)
+    monkeypatch.setattr(kapow_block, "extract_block", interrupt)
     with pytest.raises(KeyboardInterrupt):
         vg.load_parts(["Body"], tv.PALETTE, naz="x.naz")
 
@@ -414,13 +424,15 @@ def test_mesh_arrays_reads_the_body_through_the_loader(capsys):
 def test_half_equals_numpy_float16_on_every_code():
     codes = np.arange(65536, dtype=np.uint16)
     ref = codes.view("<f2").astype(np.float64)
-    got = np.array([we.half_to_float(int(c)) for c in codes], np.float64)
+    got = np.array([model_mesh.half_to_float(int(c)) for c in codes], np.float64)
     fin = np.isfinite(ref)
     assert np.array_equal(np.isfinite(got), fin)
     assert got[fin].tobytes() == ref[fin].tobytes()  # bit for bit, -0.0 included
     assert np.array_equal(np.isnan(got), np.isnan(ref))
     assert np.array_equal(np.isinf(got) & (got > 0), np.isinf(ref) & (ref > 0))
-    assert we.half_to_float(0x7C00) == float("inf") and we.half_to_float(0xFC00) == float("-inf")
+    assert model_mesh.half_to_float(0x7C00) == float("inf") and model_mesh.half_to_float(
+        0xFC00
+    ) == float("-inf")
 
 
 def _random_stream(rng, nv, stride, be, finite=True):
@@ -474,11 +486,13 @@ def decode_sub_loop(stream, vbo, nv, stride, be=False, restored=None, notes=None
             norms, bad = [], 0
             for i in range(nv):
                 if be:
-                    h = we._dec1110(struct.unpack_from(">I", stream, vbo + i * stride + 12)[0])
+                    h = model_mesh._dec1110(
+                        struct.unpack_from(">I", stream, vbo + i * stride + 12)[0]
+                    )
                 else:
                     b = vbo + i * stride + 12
                     h = [
-                        we.half_to_float(struct.unpack_from(hfmt, stream, b + 2 * k)[0])
+                        model_mesh.half_to_float(struct.unpack_from(hfmt, stream, b + 2 * k)[0])
                         for k in range(3)
                     ]
                 if not all(math.isfinite(c) for c in h):
@@ -501,8 +515,10 @@ def decode_sub_loop(stream, vbo, nv, stride, be=False, restored=None, notes=None
             uo = 20 if be else 24
             uvs = [
                 (
-                    we.half_to_float(struct.unpack_from(hfmt, stream, vbo + i * stride + uo)[0]),
-                    we.half_to_float(
+                    model_mesh.half_to_float(
+                        struct.unpack_from(hfmt, stream, vbo + i * stride + uo)[0]
+                    ),
+                    model_mesh.half_to_float(
                         struct.unpack_from(hfmt, stream, vbo + i * stride + uo + 2)[0]
                     ),
                 )
@@ -518,8 +534,8 @@ def decode_sub_loop(stream, vbo, nv, stride, be=False, restored=None, notes=None
                     )
         except struct.error:
             uvs = None
-    if nv == we.LASH_RESTORE["vertex_count"] and uvs and we.synth_enabled():
-        fixed = we.lash_restored_uvs(uvs)
+    if nv == model_mesh.LASH_RESTORE["vertex_count"] and uvs and model_mesh.synth_enabled():
+        fixed = model_mesh.lash_restored_uvs(uvs)
         if fixed is not None:
             uvs = fixed
             if restored is not None:
@@ -547,7 +563,7 @@ def test_decode_sub_equals_the_per_vertex_loop(be, stride):
             s = _random_stream(rng, nv, stride, be, finite)
             for vbo in (0, 3):
                 n1, n2 = [], []
-                a = we.decode_mesh_vertices(s, vbo, nv, stride, be, None, n1)
+                a = model_mesh.decode_mesh_vertices(s, vbo, nv, stride, be, None, n1)
                 b = decode_sub_loop(s, vbo, nv, stride, be, None, n2)
                 assert all(_same(x, y) for x, y in zip(a, b)), (nv, finite, vbo)
                 assert n1 == n2
@@ -555,10 +571,10 @@ def test_decode_sub_equals_the_per_vertex_loop(be, stride):
 
 def test_decode_sub_past_the_end_drops_the_attribute_and_keeps_positions():
     s = struct.pack("<3f", 1, 2, 3) + bytes(14)  # room for the normal, not the UV
-    v, n, uv = we.decode_mesh_vertices(s, 0, 1, 44)
+    v, n, uv = model_mesh.decode_mesh_vertices(s, 0, 1, 44)
     assert v == [(1.0, 2.0, 3.0)] and n == [(0.0, 0.0, 0.0)] and uv is None
     with pytest.raises(struct.error):
-        we.decode_mesh_vertices(s, 0, 2, 44)  # positions past the end raise, as in 1.4.0
+        model_mesh.decode_mesh_vertices(s, 0, 2, 44)  # positions past the end raise, as in 1.4.0
 
 
 def _vertex(normal=(0, 0, 1), uv=(0.5, 0.5)):
@@ -569,7 +585,7 @@ def _vertex(normal=(0, 0, 1), uv=(0.5, 0.5)):
 _H1, _H05, _INF, _NAN = 0x3C00, 0x3800, 0x7C00, 0x7E00
 
 
-@pytest.mark.parametrize("decode", [we.decode_mesh_vertices, decode_sub_loop])
+@pytest.mark.parametrize("decode", [model_mesh.decode_mesh_vertices, decode_sub_loop])
 def test_a_non_finite_normal_or_uv_drops_that_attribute_with_a_note(decode):
     s = _vertex((0, 0, _H1), (_H05, _H05)) + _vertex((_NAN, 0, _H1), (_H05, _INF))
     notes = []
@@ -585,16 +601,16 @@ def test_a_non_finite_normal_or_uv_drops_that_attribute_with_a_note(decode):
 
 def test_no_nan_reaches_an_obj_or_the_mesh(tmp_path, capsys):
     h, s = tm.build("<", "part2")
-    M = we.parse_model_header(h, "<")
-    we.model_stream_layout(M, s, "<")
+    M = model_header.parse_model_header(h, "<")
+    model_header.model_stream_layout(M, s, "<")
     vb = M["buffers"][0]["vb"]  # Body vertex 1: u = +inf
     s = s[: vb + 44 + 24] + struct.pack("<H", _INF) + s[vb + 44 + 26 :]
-    mesh = we.decode_model_mesh(h, s)
+    mesh = model_mesh.decode_model_mesh(h, s)
     body = mesh["submeshes"][0]
     assert body["uvs"] is None
     assert body["not_finite"] == ["1 of 4 UVs hold an infinite or NaN half float: UVs not written"]
     logged = []
-    assert we.decode_model(h, s, tmp_path / "m.obj", log=logged.append) is True
+    assert model_export.decode_model(h, s, tmp_path / "m.obj", log=logged.append) is True
     obj = (tmp_path / "m.obj").read_text()
     assert "nan" not in obj.lower() and "inf" not in obj.lower()
     assert any("UVs hold an infinite or NaN half float" in x for x in logged)

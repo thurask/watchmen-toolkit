@@ -6,7 +6,8 @@
 import sys
 import struct
 import numpy as np
-import watchmen_extract as we
+import kapow_block
+import naz_archive
 from wutil import load_npz, order_name, qmats_xyzw
 
 # bake() takes bind= and conj= directly; argv is parsed only under __main__,
@@ -240,9 +241,9 @@ def archive_clip(clipname, naz, marks=None):
     instead of stopping at the clip."""
     clip = None
     # headers only: a clip is all header (its stream half is never read)
-    for st, hs in we.iter_blocks(naz, streams=False):
+    for st, hs in naz_archive.iter_blocks(naz, streams=False):
         try:
-            it = list(we.extract_block(hs["h"], None))
+            it = list(kapow_block.extract_block(hs["h"], None))
         except Exception:
             continue
         for e, h, s in it:

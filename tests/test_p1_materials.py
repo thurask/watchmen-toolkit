@@ -17,7 +17,9 @@ import rig_glb
 import test_formats_v2 as tf
 import test_vcolor as tv
 import variant_glb as vg
-import watchmen_extract as we
+import obj_mtl
+import texture_header
+import texture_sheet
 from conftest import parse_glb
 
 Image = pytest.importorskip("PIL.Image")
@@ -93,10 +95,10 @@ def _header(alpha, fmt=7, bag=b""):
 
 
 def test_texture_alpha_flag_reads_the_header_byte():
-    assert we.texture_alpha_flag(_header(1)) is True
-    assert we.texture_alpha_flag(_header(0)) is False
-    assert we.texture_alpha_flag(_header(0, fmt=5)) is False
-    assert we.texture_alpha_flag(b"\x00" * 64) is None  # not a texture
+    assert texture_header.texture_alpha_flag(_header(1)) is True
+    assert texture_header.texture_alpha_flag(_header(0)) is False
+    assert texture_header.texture_alpha_flag(_header(0, fmt=5)) is False
+    assert texture_header.texture_alpha_flag(b"\x00" * 64) is None  # not a texture
 
 
 def test_flag_and_pixels_together():
@@ -139,16 +141,16 @@ def _sheet_header_with_image(alpha):
 def test_sheet_json_records_the_flag(tmp_path):
     for alpha in (0, 1):
         h = _sheet_header_with_image(alpha)
-        assert we.texture_sheet(h)["renderType"] == 0
-        assert we.texture_alpha_flag(h) is bool(alpha)
+        assert texture_sheet.texture_sheet(h)["renderType"] == 0
+        assert texture_header.texture_alpha_flag(h) is bool(alpha)
         d = tmp_path / str(alpha)
         d.mkdir()
-        we.write_sheet_json(h, d)
-        js = we.read_sheet_json(d)
+        texture_sheet.write_sheet_json(h, d)
+        js = texture_sheet.read_sheet_json(d)
         assert js["textureHasAlpha"] is bool(alpha) and js["alphaThreshold"] == 95
     # a header without an image record: no key (readers fall back to the pixels)
-    we.write_sheet_json(tv._sheet_header(), tmp_path)
-    assert "textureHasAlpha" not in we.read_sheet_json(tmp_path)
+    texture_sheet.write_sheet_json(tv._sheet_header(), tmp_path)
+    assert "textureHasAlpha" not in texture_sheet.read_sheet_json(tmp_path)
 
 
 def _png_mode(g, mat):
@@ -345,23 +347,26 @@ def test_character_legacy_mode_keeps_the_blend_twin(rig, tmp_path, monkeypatch):
 
 
 def test_sheet_blend_covers_a_sheet_blended_for_its_opacity():
-    b = we.sheet_blend({"renderType": 10, "opacity": 0.5, "blendType": 0})
+    b = texture_sheet.sheet_blend({"renderType": 10, "opacity": 0.5, "blendType": 0})
     assert (b["src"], b["dst"], b["op"]) == ("srcAlpha", "invSrcAlpha", "add")  # (5, 6, 1)
     assert b["type"] == "standard" and b["gltf"] == "exact" and b["cause"] == "opacity"
-    assert we.sheet_blend({"renderType": 0, "opacity": 0.98, "blendType": 1})["gltf"] == "glow"
-    man = we.sheet_blend(
+    assert (
+        texture_sheet.sheet_blend({"renderType": 0, "opacity": 0.98, "blendType": 1})["gltf"]
+        == "glow"
+    )
+    man = texture_sheet.sheet_blend(
         {"renderType": 0, "opacity": 0.1, "blendType": 3, "srcBlend": 9, "dstBlend": 6}
     )
     assert (man["type"], man["src"], man["cause"]) == ("manual", "dstColor", "opacity")
     # not below 0.99, no opacity, or a type the engine does not move to the blended list
-    assert we.sheet_blend({"renderType": 0, "opacity": 0.99, "blendType": 1}) is None
-    assert we.sheet_blend({"renderType": 10, "opacity": 1.0}) is None
-    assert we.sheet_blend({"renderType": 0, "blendType": 1}) is None
-    assert we.sheet_blend({"renderType": 11, "opacity": 0.5}) is None
-    assert we.sheet_blend({"renderType": 3, "opacity": 0.5}) is None
+    assert texture_sheet.sheet_blend({"renderType": 0, "opacity": 0.99, "blendType": 1}) is None
+    assert texture_sheet.sheet_blend({"renderType": 10, "opacity": 1.0}) is None
+    assert texture_sheet.sheet_blend({"renderType": 0, "blendType": 1}) is None
+    assert texture_sheet.sheet_blend({"renderType": 11, "opacity": 0.5}) is None
+    assert texture_sheet.sheet_blend({"renderType": 3, "opacity": 0.5}) is None
     # the blending types say why
-    assert we.sheet_blend({"renderType": 1, "opacity": 0.5})["cause"] == "renderType"
-    assert we.sheet_blend({"renderType": 9})["cause"] == "renderType"
+    assert texture_sheet.sheet_blend({"renderType": 1, "opacity": 0.5})["cause"] == "renderType"
+    assert texture_sheet.sheet_blend({"renderType": 9})["cause"] == "renderType"
 
 
 def test_mtl_no_highlight_still_covers_a_faded_standard_sheet(tmp_path):
@@ -369,11 +374,11 @@ def test_mtl_no_highlight_still_covers_a_faded_standard_sheet(tmp_path):
     d.mkdir()
     sheet = dict(STD, opacity=0.5, specularPower=0.0)
     (d / "sheet.json").write_text(json.dumps(sheet), encoding="utf-8")
-    assert we.mtl_no_highlight(d, 0.0, None) is True  # as before the opacity rule
+    assert obj_mtl.mtl_no_highlight(d, 0.0, None) is True  # as before the opacity rule
     (d / "sheet.json").write_text(json.dumps(dict(sheet, blendType=1)), encoding="utf-8")
-    assert we.mtl_no_highlight(d, 0.0, None) is False  # rewritten layer: no engine material
+    assert obj_mtl.mtl_no_highlight(d, 0.0, None) is False  # rewritten layer: no engine material
     (d / "sheet.json").write_text(json.dumps(dict(sheet, renderType=1)), encoding="utf-8")
-    assert we.mtl_no_highlight(d, 0.0, None) is False
+    assert obj_mtl.mtl_no_highlight(d, 0.0, None) is False
 
 
 # ---------------------------------------------------------------------------

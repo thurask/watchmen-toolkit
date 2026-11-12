@@ -30,7 +30,10 @@ import kapow_props
 import parse_model_nodes as pmn
 import skeleton_records as sr
 import text_assets as ta
-import watchmen_extract as we
+import kapow_block
+import model_export
+import model_header
+import naz_archive
 
 import test_audio_v2 as au
 import test_formats_v2 as tf
@@ -246,12 +249,12 @@ def _model_with_surface(weights=(1.0, 1.0), ids=(2, 0)):
 
 def test_model_surfaces_reach_the_sidecar():
     h, _s = _model_with_surface()
-    M = we.parse_model_header(h)
+    M = model_header.parse_model_header(h)
     assert M["parts"][0]["surface_count"] == 1
-    (surf,) = we.model_surfaces(h)
+    (surf,) = model_header.model_surfaces(h)
     assert (surf["node"], surf["part"], surf["surface"]) == ("Barrel", 0, 0)
     assert [t["material_id"] for t in surf["tris"]] == [2, 0]
-    meta = we.model_meta(h)
+    meta = model_export.model_meta(h)
     assert meta["format"] == "watchmen-model-meta/1"
     assert meta["particle_surfaces"] == [
         {
@@ -274,11 +277,11 @@ def test_model_surfaces_reach_the_sidecar():
 
 def test_model_without_surfaces_has_no_new_sidecar_key():
     h, _s = tf._model([{"name": "Wall", "lods": [[("Body", 0, 5, 0.0, 1)]]}], ["/art/t/a.bmp"])
-    assert we.model_surfaces(h) == []
-    meta = we.model_meta(h)
+    assert model_header.model_surfaces(h) == []
+    meta = model_export.model_meta(h)
     assert "particle_surfaces" not in meta and "particle_surface_note" not in meta
     assert pmn.model_physics(h)["nodes"][0]["surfaces"] == []
-    assert we.model_surfaces(b"not a model") is None
+    assert model_header.model_surfaces(b"not a model") is None
 
 
 # ---------------------------------------------------------------------------
@@ -298,11 +301,11 @@ def _real_header(h, signature=0x79D3E0DA, low_violence=0):
 
 def test_block_header_signature_is_at_32_and_328_is_raw_bytes():
     h, _s = tf._block([("/a.bmp", tf._TEX, b"HDR-A", None)])
-    hd = we.parse_block_header(_real_header(h))
+    hd = kapow_block.parse_block_header(_real_header(h))
     assert hd["version_signature"] == 0x79D3E0DA  # was the u32 at 328
     assert hd["unknown_328"] == RAW328 and hd["unknown_327"] == 2
     assert hd["low_violence"] is False
-    assert we.parse_block_header(_real_header(h, low_violence=1))["low_violence"] is True
+    assert kapow_block.parse_block_header(_real_header(h, low_violence=1))["low_violence"] is True
     # the fields around it are untouched
     assert hd["num_entries"] == 1 and hd["fragment_size"] == 8
 
@@ -313,17 +316,17 @@ def test_block_header_328_does_not_follow_the_byte_order():
     h, _s = tf._block([("/a.bmp", tf._TEX, b"HDR-A", None)])
     b = bytearray(_real_header(h))
     struct.pack_into(">I", b, 32, 0x79D3E0DA)
-    hd = we.parse_block_header(bytes(b), order=">")
+    hd = kapow_block.parse_block_header(bytes(b), order=">")
     assert hd["version_signature"] == 0x79D3E0DA and hd["unknown_328"] == RAW328
 
 
 def test_font_and_terrain_coloring_asset_types_are_named():
-    assert we.asset_type_name(0x62F2722A) == "font"
-    assert we.asset_type_name(0xF1FDBE49) == "terrainColoringAsset"
+    assert kapow_block.asset_type_name(0x62F2722A) == "font"
+    assert kapow_block.asset_type_name(0xF1FDBE49) == "terrainColoringAsset"
     assert kapow_props.name_hash("font") == 0x62F2722A
     assert kapow_props.name_hash("terrainColoringAsset") == 0xF1FDBE49
     h, _s = tf._block([("/art/Fonts/DaveGibbons40.font", 0x62F2722A, zlib.compress(b"F"), None)])
-    (e,) = we.parse_block_toc(h)[0]
+    (e,) = kapow_block.parse_block_toc(h)[0]
     assert e.type_name == "font" and e.compressed is True
 
 
@@ -331,24 +334,26 @@ def test_blobs_inflate_by_asset_type_not_by_their_first_byte():
     packed = zlib.compress(b"PAYLOAD" * 9)
     assert packed[0] == 0x78
     # mediastream is the one raw type (0x554a2e): its bytes are never inflated
-    assert we.maybe_inflate(packed, "mediastream") == packed
-    assert we.asset_compressed("mediastream") is False
+    assert kapow_block.maybe_inflate(packed, "mediastream") == packed
+    assert kapow_block.asset_compressed("mediastream") is False
     # every other type is zlib whatever the first byte is
     co = zlib.compressobj(6, zlib.DEFLATED, 12)
     small_window = co.compress(b"PAYLOAD" * 9) + co.flush()
     assert small_window[0] != 0x78
-    assert we.maybe_inflate(small_window, "sound") == b"PAYLOAD" * 9
-    assert we.maybe_inflate(small_window, "ModelEffects(ModelRes)") == b"PAYLOAD" * 9
-    assert we.asset_compressed("TextureEffects(Texture)") is True
+    assert kapow_block.maybe_inflate(small_window, "sound") == b"PAYLOAD" * 9
+    assert kapow_block.maybe_inflate(small_window, "ModelEffects(ModelRes)") == b"PAYLOAD" * 9
+    assert kapow_block.asset_compressed("TextureEffects(Texture)") is True
     # unknown type: sniffed, as before
-    assert we.maybe_inflate(packed) == b"PAYLOAD" * 9
-    assert we.maybe_inflate(small_window) == small_window
-    assert we.maybe_inflate(b"RAW") == b"RAW" and we.asset_compressed("") is None
+    assert kapow_block.maybe_inflate(packed) == b"PAYLOAD" * 9
+    assert kapow_block.maybe_inflate(small_window) == small_window
+    assert kapow_block.maybe_inflate(b"RAW") == b"RAW" and kapow_block.asset_compressed("") is None
 
 
 def test_a_blob_that_should_inflate_and_does_not_is_reported():
     got = []
-    assert we.maybe_inflate(b"\x78\x9cgarbage", "Texture", got.append) == b"\x78\x9cgarbage"
+    assert (
+        kapow_block.maybe_inflate(b"\x78\x9cgarbage", "Texture", got.append) == b"\x78\x9cgarbage"
+    )
     assert len(got) == 1
     h, s = tf._block(
         [
@@ -357,12 +362,12 @@ def test_a_blob_that_should_inflate_and_does_not_is_reported():
         ]
     )
     msgs = []
-    out = list(we.extract_block(h, s, report=msgs.append))
+    out = list(kapow_block.extract_block(h, s, report=msgs.append))
     (a, ah, ast), (m, mh, _mst) = out
     assert ah == b"NOT-ZLIB" and ast == b"stream" and a.inflate_failed == ["header"]
     assert len(msgs) == 1 and "/a.bmp" in msgs[0] and "header" in msgs[0]
     assert mh == b"RAWHDR" and m.inflate_failed == [] and m.compressed is False
-    assert [e.name for e, _h, _s in we.extract_block(h, s)] == ["/a.bmp", "/m.wav"]
+    assert [e.name for e, _h, _s in kapow_block.extract_block(h, s)] == ["/a.bmp", "/m.wav"]
 
 
 def _stream_set(name, entries):
@@ -376,7 +381,7 @@ def _stream_set(name, entries):
 
 def test_block_trailer_two_empty_tables():
     h, _s = tf._block([("/a.bmp", tf._TEX, b"HDR-A", None)])
-    t = we.parse_block_trailer(h)
+    t = kapow_block.parse_block_trailer(h)
     assert t == {"auto_stream_sets": [], "manual_stream_sets": [], "size": 8, "end": len(h)}
 
 
@@ -388,7 +393,7 @@ def test_block_trailer_stream_sets():
     blob += _stream_set("/lv/b.block_s_z", [])
     b = bytearray(h[:-8] + blob)
     struct.pack_into("<I", b, 348, len(blob))
-    t = we.parse_block_trailer(bytes(b))
+    t = kapow_block.parse_block_trailer(bytes(b))
     (auto,), (manual,) = t["auto_stream_sets"], t["manual_stream_sets"]
     assert auto["stream_file"] == "/lv/a.block_s_z" and auto["min"] == (-1.0, -2.0, -3.0, 0.0)
     assert auto["entries"] == [
@@ -397,7 +402,7 @@ def test_block_trailer_stream_sets():
     assert manual["node_path"] == ["aabbccdd", "11223344"] and manual["entries"] == []
     assert t["end"] == len(b) and t["size"] == len(blob)
     with pytest.raises(ValueError):
-        we.parse_block_trailer(bytes(b[:-3]))
+        kapow_block.parse_block_trailer(bytes(b[:-3]))
 
 
 # ---------------------------------------------------------------------------
@@ -416,10 +421,10 @@ def _naz(tmp_path, entries):
     for name, data, method in entries:
         nm = _rotr2(name.encode())
         hoffs = len(body)
-        body += b"\0" * we._LFH + nm + data
+        body += b"\0" * naz_archive._LFH + nm + data
         cd += struct.pack(
-            we._CD_FMT,
-            we.NAZ_LIST,
+            naz_archive._CD_FMT,
+            naz_archive.NAZ_LIST,
             0,
             0,
             0,
@@ -438,31 +443,40 @@ def _naz(tmp_path, entries):
             method,
         )
         cd += nm
-    eocd = struct.pack(we._EOCD_FMT, we.NAZ_HEAD, 0, 0, 0, len(entries), len(cd), len(body), 0)
+    eocd = struct.pack(
+        naz_archive._EOCD_FMT, naz_archive.NAZ_HEAD, 0, 0, 0, len(entries), len(cd), len(body), 0
+    )
     p = tmp_path / "game.naz"
     p.write_bytes(body + cd + eocd)
     return p
 
 
 def test_naz_key_is_the_crc_of_the_lower_cased_slash_name():
-    assert we.naz_key("Data\\Levels/A.BLOCK_h_z") == kapow_props.kapow_hash(
+    assert naz_archive.naz_key("Data\\Levels/A.BLOCK_h_z") == kapow_props.kapow_hash(
         "data/levels/a.block_h_z"
     )
-    assert we.naz_key("a") != kapow_props.name_hash("a")  # raw CRC, no 0xDF fold
+    assert naz_archive.naz_key("a") != kapow_props.name_hash("a")  # raw CRC, no 0xDF fold
 
 
 def test_naz_entries_carry_the_key_and_warn_about_compressed_entries(tmp_path):
     p = _naz(tmp_path, [("Data/A.block_h_z", b"AAAA", 0), ("Data/B.bin", b"BB", 8)])
     warned = []
-    a, b = list(we.naz_entries(p, warn=warned.append))
-    assert (a.name, a.compr, a.key) == ("Data/A.block_h_z", 0, we.naz_key("data/a.block_h_z"))
-    assert we.naz_read(p, a) == b"AAAA"
+    a, b = list(naz_archive.naz_entries(p, warn=warned.append))
+    assert (a.name, a.compr, a.key) == (
+        "Data/A.block_h_z",
+        0,
+        naz_archive.naz_key("data/a.block_h_z"),
+    )
+    assert naz_archive.naz_read(p, a) == b"AAAA"
     assert len(warned) == 1 and "Data/B.bin" in warned[0] and "stored" in warned[0]
-    assert [e.name for e in we.naz_entries(p)] == ["Data/A.block_h_z", "Data/B.bin"]  # no warn
+    assert [e.name for e in naz_archive.naz_entries(p)] == [
+        "Data/A.block_h_z",
+        "Data/B.bin",
+    ]  # no warn
     loose = tmp_path / "files" / "derived_pc"
     loose.mkdir(parents=True)
     (loose / "x.block_h_z").write_bytes(b"x")
-    assert [e.key for e in we.naz_entries(tmp_path / "files")] == [None]
+    assert [e.key for e in naz_archive.naz_entries(tmp_path / "files")] == [None]
 
 
 # ---------------------------------------------------------------------------
@@ -473,16 +487,18 @@ def test_naz_entries_carry_the_key_and_warn_about_compressed_entries(tmp_path):
 def test_engine_language_codes():
     assert ta.ENGINE_CODES == ("uk", "fr", "it", "de", "es", "dk")
     assert ta.LANGUAGE_CODES == ("en", "fr", "it", "de", "es", "da")
-    assert [n for _i, n, _c in ta.LANGUAGES] == [n for n, _e, _c in we.BLOCK_LANGUAGE_NAMES]
-    assert tuple(e for _n, e, _c in we.BLOCK_LANGUAGE_NAMES) == ta.ENGINE_CODES
-    assert tuple(c for _n, _e, c in we.BLOCK_LANGUAGE_NAMES) == ta.LANGUAGE_CODES
+    assert [n for _i, n, _c in ta.LANGUAGES] == [
+        n for n, _e, _c in kapow_block.BLOCK_LANGUAGE_NAMES
+    ]
+    assert tuple(e for _n, e, _c in kapow_block.BLOCK_LANGUAGE_NAMES) == ta.ENGINE_CODES
+    assert tuple(c for _n, _e, c in kapow_block.BLOCK_LANGUAGE_NAMES) == ta.LANGUAGE_CODES
     j = ta.rows_json("/Localize/Menu_uk_pc.txt", [("k", "v")], 3)
     assert j["language"] == {"slot": 3, "name": "German", "code": "de", "engine_code": "de"}
     assert ta.rows_json("/x.txt", [], 0)["language"]["engine_code"] == "uk"
 
 
 def test_language_option_takes_names_and_codes():
-    arg = we.language_arg
+    arg = kapow_block.language_arg
     assert arg("german") == arg("3") == arg("de") == arg("GERMAN") == 3
     assert arg("english") == arg("uk") == arg("en") == arg("0") == 0
     assert arg("danish") == arg("dk") == arg("da") == 5
@@ -490,7 +506,7 @@ def test_language_option_takes_names_and_codes():
     for bad in ("6", "-1", "xx", "", "deutsch"):
         with pytest.raises(argparse.ArgumentTypeError):
             arg(bad)
-    assert we.language_slot("es") == 4 and we.language_slot("klingon") is None
+    assert kapow_block.language_slot("es") == 4 and kapow_block.language_slot("klingon") is None
 
 
 def test_selection_tables():

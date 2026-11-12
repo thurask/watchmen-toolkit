@@ -30,7 +30,9 @@ import ragdoll_rig as rr
 import rig_glb
 import variant_glb as vg
 import watchmen
-import watchmen_extract as we
+import extract_driver
+import model_export
+import model_mesh
 
 import test_face_rule as tface
 import test_formats_v2 as tf
@@ -116,12 +118,12 @@ def test_extract_parser_has_the_option_too(monkeypatch, tmp_path, capsys):
     (python wlib/watchmen_extract.py) takes it as well."""
     monkeypatch.setenv("WATCHMEN_FRAME", "true")
     with pytest.raises(SystemExit):
-        we.main(["--help"])
+        extract_driver.main(["--help"])
     assert "--frame {true,mirrored}" in capsys.readouterr().out
     naz = tmp_path / "empty.naz"
     naz.write_bytes(b"")
     try:
-        we.main([str(naz), "-o", str(tmp_path / "o"), "--frame", "mirrored", "--quiet"])
+        extract_driver.main([str(naz), "-o", str(tmp_path / "o"), "--frame", "mirrored", "--quiet"])
     except Exception:
         pass  # not an archive: only the option handling is of interest
     assert os.environ["WATCHMEN_FRAME"] == "mirrored"
@@ -169,8 +171,10 @@ def test_tangent_handedness_flips_with_the_reflection():
     t = np.cross(n, rng.normal(size=(50, 3)))
     t /= np.linalg.norm(t, axis=1, keepdims=True)
     b = np.cross(n, t) * rng.choice([-1.0, 1.0], size=(50, 1))  # mirrored UV islands too
-    eng = we.gltf_tangents(n, t, b)
-    refl = we.gltf_tangents(n @ S3, t @ S3, b @ S3)  # computed from scratch in the true frame
+    eng = model_mesh.gltf_tangents(n, t, b)
+    refl = model_mesh.gltf_tangents(
+        n @ S3, t @ S3, b @ S3
+    )  # computed from scratch in the true frame
     assert np.array_equal(frame.tangents(eng), refl)
     assert (refl[:, 3] == -eng[:, 3]).all() and (refl[:, 0] == -eng[:, 0]).all()
     # and the bitangent glTF rebuilds is the reflected one in both frames
@@ -342,7 +346,7 @@ QUAD_FILE_TRIS = ((0, 2, 1), (0, 3, 2))
 def _static(path, normals=True, tris=QUAD_FILE_TRIS, tex=None, **kw):
     n = np.tile(np.array([0, 0, 1.0], np.float32), (4, 1))
     # tangent +X, stored bitangent +Y: s = +1, so the engine-number w is -1
-    tg = we.gltf_tangents(n, np.tile([1.0, 0, 0], (4, 1)), np.tile([0, 1.0, 0], (4, 1)))
+    tg = model_mesh.gltf_tangents(n, np.tile([1.0, 0, 0], (4, 1)), np.tile([0, 1.0, 0], (4, 1)))
     extra = dict(normals=n, tangents=tg) if normals else {}
     extra.update(kw)
     rig_glb.build_rigged_glb(
@@ -1177,7 +1181,7 @@ def test_obj_true_frame_negates_x_and_winds_with_its_normals(tmp_path, monkeypat
 
     def write(mode):
         out = tmp_path / mode / "m.obj"
-        assert we.decode_model(h, s, out) is True
+        assert model_export.decode_model(h, s, out) is True
         return _obj(out), out.read_text()
 
     ((vm, nm, fm, hm), text_m), ((vt, nt, ft, ht), text_t) = both(monkeypatch, write)

@@ -32,7 +32,7 @@ import materials
 import nav_data as nd
 import sound_meta
 import text_assets
-import watchmen_extract as wx
+import extract_driver
 
 import test_level_meta as tl
 import test_nav_data as tn
@@ -361,7 +361,7 @@ def test_extract_writes_the_navigation_data(tmp_path):
     files = tt.loose_tree(tmp_path)
     out = tmp_path / "out"
     _nav_files(out)  # what the files pass and the block pass leave behind
-    assert wx.main([str(files), "-o", str(out)] + ARGS) == 0
+    assert extract_driver.main([str(files), "-o", str(out)] + ARGS) == 0
     assert sorted(p.name for p in (out / "nav").iterdir()) == ["Demo.nav.glb", "Demo.nav.json"]
     doc = json.loads((out / "nav" / "Demo.nav.json").read_text(encoding="utf-8"))
     assert doc["format"] == "watchmen-nav/1" and doc["source"]["hpd"] == "demoaipath.hpd"
@@ -372,10 +372,10 @@ def test_extract_no_nav_and_nothing_to_write(tmp_path):
     files = tt.loose_tree(tmp_path)
     off = tmp_path / "off"
     _nav_files(off)
-    assert wx.main([str(files), "-o", str(off), "--no-nav"] + ARGS) == 0
+    assert extract_driver.main([str(files), "-o", str(off), "--no-nav"] + ARGS) == 0
     assert not (off / "nav").exists()
     none = tmp_path / "none"  # an extract without path data gets no empty folder
-    assert wx.main([str(files), "-o", str(none)] + ARGS) == 0
+    assert extract_driver.main([str(files), "-o", str(none)] + ARGS) == 0
     assert not (none / "nav").exists()
 
 

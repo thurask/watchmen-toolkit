@@ -110,11 +110,11 @@ def test_read_bytes_reads_and_closes(tmp_path, strict):
 
 
 def test_write_wav_gives_the_same_file_and_closes(tmp_path, strict):
-    import watchmen_extract as wx
+    import audio_decode
 
     pcm = struct.pack("<8h", 0, 1000, -1000, 32767, -32768, 5, -5, 0)
     out = tmp_path / "sub" / "a.wav"
-    wx.write_wav(pcm, 2, 22050, out)
+    audio_decode.write_wav(pcm, 2, 22050, out)
     with wave.open(str(out), "rb") as w:
         assert (w.getnchannels(), w.getsampwidth(), w.getframerate()) == (2, 2, 22050)
         assert w.readframes(w.getnframes()) == pcm
@@ -127,7 +127,7 @@ def test_write_wav_gives_the_same_file_and_closes(tmp_path, strict):
     w.close()
     assert out.read_bytes() == ref.read_bytes()
     looped = tmp_path / "loop.wav"
-    wx.write_wav(pcm, 2, 22050, looped, loop=True)
+    audio_decode.write_wav(pcm, 2, 22050, looped, loop=True)
     data = looped.read_bytes()
     assert data[:44] != out.read_bytes()[:44] and b"smpl" in data  # RIFF size + loop chunk
     os.remove(str(out))

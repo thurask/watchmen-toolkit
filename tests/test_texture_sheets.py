@@ -21,7 +21,9 @@ import characters_export as ce
 import rig_glb
 import variant_glb as vg
 import kapow_props
-import watchmen_extract as we
+import material_refs
+import obj_mtl
+import texture_sheet
 from conftest import parse_glb
 
 Image = pytest.importorskip("PIL.Image")
@@ -45,7 +47,9 @@ def _str(text):
 
 def _sheet(salt, name, uid, **props):
     b = _rec(salt, "name", "string", _str(name))
-    b += struct.pack("<IIII", salt, kapow_props.name_hash("uniqueID"), we._T_UNIQUE_ID, 2)
+    b += struct.pack(
+        "<IIII", salt, kapow_props.name_hash("uniqueID"), texture_sheet._T_UNIQUE_ID, 2
+    )
     b += struct.pack("<II", uid >> 32, uid & 0xFFFFFFFF)
     base = dict(renderType=0, alphaThreshold=95, twoSided=False, blendType=0, specularSize=15.0)
     base.update(props)
@@ -105,7 +109,7 @@ def _texture(root, path, rgb, header=None, normal=None, sheet_json=None, alpha=N
         h.mkdir(parents=True, exist_ok=True)
         (h / path.split("/")[-1]).write_bytes(header)
         if sheet_json is None:
-            we.write_sheet_json(header, d)
+            texture_sheet.write_sheet_json(header, d)
     if sheet_json:
         (d / "sheet.json").write_text(json.dumps(sheet_json))
     return d
@@ -124,7 +128,7 @@ pytestmark = pytest.mark.usefixtures("character_caches")
 
 
 def test_every_sheet_is_read_with_its_properties_and_overrides():
-    sheets = we.texture_sheets(SKIN_HDR)
+    sheets = texture_sheet.texture_sheets(SKIN_HDR)
     assert [s["name"] for s in sheets] == ["default", "Black", "Red"]
     assert [s["uniqueID"] for s in sheets] == [WHITE, BLACK_ID, RED_ID]
     assert sheets[0]["overrides"] == {} and sheets[1]["overrides"] == {"diffuse": SKIN_BLACK}
@@ -132,32 +136,32 @@ def test_every_sheet_is_read_with_its_properties_and_overrides():
     assert abs(sheets[1]["specularSize"] - 40.0) < 1e-6
     assert sheets[2]["blendType"] == 1 and abs(sheets[2]["uScrollSpeed"] - 0.25) < 1e-6
     # the first-sheet reader of the earlier tree agrees with sheet 0
-    first = we.texture_sheet(SKIN_HDR)
+    first = texture_sheet.texture_sheet(SKIN_HDR)
     assert first and all(sheets[0][k] == v for k, v in first.items())
-    assert we.texture_sheets(b"\0" * 80) == []
+    assert texture_sheet.texture_sheets(b"\0" * 80) == []
 
 
 def test_select_sheet_by_id_by_name_and_the_engines_fallback():
-    sheets = we.texture_sheets(SKIN_HDR)
-    assert we.select_sheet(sheets) is sheets[0]
-    assert we.select_sheet(sheets, BLACK_ID) is sheets[1]
-    assert we.select_sheet(sheets, "Red") is sheets[2]
-    assert we.select_sheet(sheets, 987654321) is sheets[0]  # unknown id: the first sheet
-    assert we.select_sheet(sheets, "nope") is sheets[0]
-    assert we.select_sheet([]) == {}
+    sheets = texture_sheet.texture_sheets(SKIN_HDR)
+    assert texture_sheet.select_sheet(sheets) is sheets[0]
+    assert texture_sheet.select_sheet(sheets, BLACK_ID) is sheets[1]
+    assert texture_sheet.select_sheet(sheets, "Red") is sheets[2]
+    assert texture_sheet.select_sheet(sheets, 987654321) is sheets[0]  # unknown id: the first sheet
+    assert texture_sheet.select_sheet(sheets, "nope") is sheets[0]
+    assert texture_sheet.select_sheet([]) == {}
 
 
 def test_sheet_json_lists_every_sheet_and_keeps_the_first_at_top_level(tmp_path):
-    we.write_sheet_json(SKIN_HDR, tmp_path)
-    d = we.read_sheet_json(tmp_path)
+    texture_sheet.write_sheet_json(SKIN_HDR, tmp_path)
+    d = texture_sheet.read_sheet_json(tmp_path)
     assert d["alphaThreshold"] == 95 and d["twoSided"] is False  # as before: sheet 0
     assert [s["name"] for s in d["sheets"]] == ["default", "Black", "Red"]
     assert d["sheets"][1]["uniqueID"] == BLACK_ID
     assert d["sheets"][1]["overrides"] == {"diffuse": SKIN_BLACK}
     assert "overrides" not in d  # sheet 0 takes nothing from elsewhere
     hdr = _header(_sheet(0x9, "default", 77, diffuseMapOverride="/art/x/Beige.bmp"))
-    we.write_sheet_json(hdr, tmp_path)
-    assert we.read_sheet_json(tmp_path)["overrides"] == {"diffuse": "/art/x/Beige.bmp"}
+    texture_sheet.write_sheet_json(hdr, tmp_path)
+    assert texture_sheet.read_sheet_json(tmp_path)["overrides"] == {"diffuse": "/art/x/Beige.bmp"}
 
 
 # ---------------------------------------------------------------------------
@@ -166,7 +170,7 @@ def test_sheet_json_lists_every_sheet_and_keeps_the_first_at_top_level(tmp_path)
 
 
 def test_blend_states_of_every_type():
-    b = lambda **k: we.sheet_blend(dict(renderType=1, **k))
+    b = lambda **k: texture_sheet.sheet_blend(dict(renderType=1, **k))
     assert b(blendType=0) == dict(
         type="standard",
         src="srcAlpha",
@@ -203,28 +207,28 @@ def test_blend_states_of_every_type():
     assert b(blendType=3, srcBlend=5, dstBlend=6, blendOp=1)["gltf"] == "exact"
     assert b(blendType=3, srcBlend=5, dstBlend=2, blendOp=1)["gltf"] == "glow"
     # the sky box pass uses one/one, and plain subtract there
-    sky = we.sheet_blend(dict(renderType=7, blendType=1))
+    sky = texture_sheet.sheet_blend(dict(renderType=7, blendType=1))
     assert (sky["src"], sky["dst"], sky["op"], sky["pass"]) == ("one", "one", "add", "sky")
-    assert we.sheet_blend(dict(renderType=7, blendType=2))["op"] == "subtract"
+    assert texture_sheet.sheet_blend(dict(renderType=7, blendType=2))["op"] == "subtract"
     # "Standard with blending", SkyBox and Sprite blend; Standard / FallOff only
     # with an opacity below 0.99 (tests/test_p1_materials.py)
-    assert we.sheet_blend(dict(renderType=0, blendType=1)) is None
-    assert we.sheet_blend(dict(renderType=10, blendType=2)) is None
-    assert we.sheet_blend({}) is None and we.sheet_blend(None) is None
+    assert texture_sheet.sheet_blend(dict(renderType=0, blendType=1)) is None
+    assert texture_sheet.sheet_blend(dict(renderType=10, blendType=2)) is None
+    assert texture_sheet.sheet_blend({}) is None and texture_sheet.sheet_blend(None) is None
 
 
 def test_ink_and_glow_images():
     im = Image.new("RGBA", (2, 1), (0, 0, 0, 255))
     im.putpixel((0, 0), (255, 128, 0, 255))
     im.putpixel((1, 0), (100, 100, 100, 128))
-    ink = we.blend_layer_image(im, {"gltf": "ink"})
+    ink = texture_sheet.blend_layer_image(im, {"gltf": "ink"})
     assert ink.getpixel((0, 0))[:3] == (0, 0, 0) and ink.getpixel((0, 0))[3] > 100
     assert ink.getpixel((1, 0)) == (0, 0, 0, 50)  # brightness 100 * alpha 128 / 255
-    glow = we.blend_layer_image(im, {"gltf": "glow"})
+    glow = texture_sheet.blend_layer_image(im, {"gltf": "glow"})
     assert glow.getpixel((0, 0)) == (255, 128, 0, 255)  # already at full brightness
     assert glow.getpixel((1, 0)) == (255, 255, 255, 50)  # colour normalised, coverage in alpha
-    assert we.blend_layer_image(im, {"gltf": "exact"}) is im
-    assert we.blend_layer_image(im, None) is im
+    assert texture_sheet.blend_layer_image(im, {"gltf": "exact"}) is im
+    assert texture_sheet.blend_layer_image(im, None) is im
 
 
 def _quad_glb(tmp_path, mats, idx, name="m.glb"):
@@ -257,8 +261,11 @@ def test_model_glb_writes_add_and_subtract_layers_as_blend_materials(tmp_path):
         root, "/art/fx/odd.bmp", (9, 9, 9),
         sheet_json=dict(renderType=9, blendType=3, srcBlend=9, dstBlend=6, blendOp=1),
     )  # fmt: skip
-    idx = we.build_texture_index(root / "textures")
-    mats = [we.texture_ref(p) for p in ("/art/fx/flare.bmp", "/art/r/spots.bmp", "/art/fx/odd.bmp")]
+    idx = obj_mtl.build_texture_index(root / "textures")
+    mats = [
+        material_refs.texture_ref(p)
+        for p in ("/art/fx/flare.bmp", "/art/r/spots.bmp", "/art/fx/odd.bmp")
+    ]
     g = _quad_glb(tmp_path, mats, idx)
     flare, ink, odd = [g.j["materials"][p["material"]] for p in g.j["meshes"][0]["primitives"]]
     # add: light on top -> emissive, coverage in alpha, nothing reflected
@@ -290,8 +297,8 @@ def test_model_glb_reads_a_manual_blend_from_the_extracted_sheet_table(tmp_path)
     _texture(root, "/art/sky/SunRay.bmp", (200, 100, 0), header=hdr)
     flat = json.loads((root / "textures/art/sky/SunRay.bmp/sheet.json").read_text())
     assert "srcBlend" not in flat and flat["sheets"][0]["dstBlend"] == 2
-    idx = we.build_texture_index(root / "textures")
-    g = _quad_glb(tmp_path, [we.texture_ref("/art/sky/SunRay.bmp")], idx)
+    idx = obj_mtl.build_texture_index(root / "textures")
+    g = _quad_glb(tmp_path, [material_refs.texture_ref("/art/sky/SunRay.bmp")], idx)
     mat = g.j["materials"][g.j["meshes"][0]["primitives"][0]["material"]]
     assert mat["extras"]["watchmen"] == dict(
         mat["extras"]["watchmen"], blend="manual", src="srcAlpha", dst="one", op="add"
@@ -304,8 +311,8 @@ def test_model_exports_use_the_layers_the_first_sheet_takes_from_elsewhere(tmp_p
     hdr = _header(_sheet(0x9, "default", 77, diffuseMapOverride="/art/k/TShirtBeige.bmp"))
     _texture(root, "/art/k/TShirt.bmp", (250, 250, 250), header=hdr, normal=(128, 128, 255))
     _texture(root, "/art/k/TShirtBeige.bmp", (200, 180, 140))
-    idx = we.build_texture_index(root / "textures")
-    shirt = we.texture_ref("/art/k/TShirt.bmp")
+    idx = obj_mtl.build_texture_index(root / "textures")
+    shirt = material_refs.texture_ref("/art/k/TShirt.bmp")
     g = _quad_glb(tmp_path, [shirt], idx)
     mat = g.j["materials"][g.j["meshes"][0]["primitives"][0]["material"]]
     ti = mat["pbrMetallicRoughness"]["baseColorTexture"]["index"]
@@ -314,7 +321,9 @@ def test_model_exports_use_the_layers_the_first_sheet_takes_from_elsewhere(tmp_p
     # OBJ/MTL: the same diffuse file
     out = tmp_path / "models" / "m.obj"
     v = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)]
-    we.write_obj_mtl(out, "m", v, None, None, [(0, 1, 2)], [(0, 3, 0, 1, 44)], [shirt], idx, None)
+    obj_mtl.write_obj_mtl(
+        out, "m", v, None, None, [(0, 1, 2)], [(0, 3, 0, 1, 44)], [shirt], idx, None
+    )
     mtl = out.with_suffix(".mtl").read_text()
     assert "map_Kd ../textures/art/k/TShirtBeige.bmp/0_diffuse" in mtl
     assert "map_Bump -bm 1.000000 ../textures/art/k/TShirt.bmp/1_normal" in mtl
@@ -330,7 +339,7 @@ def _skin_tree(root, with_table=True):
     _texture(root, SKIN_BLACK, (60, 40, 30), alpha=100)
     Image.new("L", (4, 4), 200).save(d / "roughnessGen.png")
     if not with_table:  # a texture tree carved before sheet.json listed the sheets
-        (d / "sheet.json").write_text(json.dumps(we.texture_sheet(SKIN_HDR)))
+        (d / "sheet.json").write_text(json.dumps(texture_sheet.texture_sheet(SKIN_HDR)))
     return [str(root / "textures")]
 
 
@@ -339,7 +348,7 @@ def test_a_selected_sheet_brings_its_layers_and_switches(tmp_path, with_table, m
     # the roughnessGen.png path is the `legacy` material mode (materials.py)
     monkeypatch.setenv("WATCHMEN_MATERIALS", "legacy")
     roots = _skin_tree(tmp_path, with_table)
-    skin = we.texture_ref(SKIN)
+    skin = material_refs.texture_ref(SKIN)
     plain = char_lib.find_layers(skin, roots)
     black = char_lib.find_layers(char_lib.sheet_ref(skin, "Black"), roots)
     assert _rgb(plain["diffuse"]) == (240, 200, 180) and _rgb(black["diffuse"]) == (60, 40, 30)
@@ -356,7 +365,7 @@ def test_a_selected_sheet_brings_its_layers_and_switches(tmp_path, with_table, m
 
 
 def test_sheet_ref_is_a_material_of_its_own():
-    skin = we.texture_ref(SKIN)
+    skin = material_refs.texture_ref(SKIN)
     black = char_lib.sheet_ref(skin, "Black")
     assert black == "Skin_White" and black != skin and black.path == SKIN + "#sheet=Black"
     assert char_lib.sheet_ref(skin, None) is skin
@@ -367,7 +376,7 @@ def test_sheet_ref_is_a_material_of_its_own():
 def test_character_glb_materials_follow_the_selected_sheet(tmp_path, rig, monkeypatch):
     monkeypatch.delenv("WATCHMEN_VERTEX_ATTRS", raising=False)
     roots = _skin_tree(tmp_path)
-    skin = we.texture_ref(SKIN)
+    skin = material_refs.texture_ref(SKIN)
     black = char_lib.sheet_ref(skin, "Black")
     base = rig.parts[0]
     parts = [tuple(base[:5]) + (skin,), tuple(base[:5]) + (black,)]
@@ -439,7 +448,7 @@ def test_variant_sheets_come_from_the_fragment_nodes(tmp_path):
     )
     ex = str(tmp_path)
     assert [n["name"] for n in ce.variant_nodes(ex, "Dom")] == ["Dom_5", "Dom_5", "Dom_6", "Dom_7"]
-    key = we.texture_key(SKIN)
+    key = material_refs.texture_key(SKIN)
     # one outfit
     assert ce.variant_sheets(ex, "Dom", "Dom_5", node=0) == {"suit": {key: "Black"}}
     assert ce.variant_sheets(ex, "Dom", "Dom_5", node=1) == {

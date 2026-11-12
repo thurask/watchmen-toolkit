@@ -14,7 +14,7 @@ import numpy as np
 import pytest
 
 # The wlib modules are FLAT top-level modules that import each other directly
-# (``import watchmen_extract as we``), so the package directory must be on
+# (``import kapow_block``), so the package directory must be on
 # sys.path before any of them can be imported.
 # watchmen.py sits in the toolkit root and the Blender scripts in tools/; the test
 # modules import each other's fixtures, so this folder goes on the path as well.

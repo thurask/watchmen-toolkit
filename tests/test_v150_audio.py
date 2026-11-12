@@ -15,7 +15,8 @@ import sys
 import pytest
 
 import test_audio_v2 as ta
-import watchmen_extract as wx
+import audio_decode
+import sound_header
 
 FIXTURE = os.path.join(os.path.dirname(__file__), "data", "adpcm_ffmpeg.json")
 
@@ -24,17 +25,17 @@ FIXTURE = os.path.join(os.path.dirname(__file__), "data", "adpcm_ffmpeg.json")
 # MS-ADPCM
 # ---------------------------------------------------------------------------
 def test_predictor_truncates_toward_zero():
-    assert wx.adpcm_predict(-3, 0, 256, 0) == -3
-    assert wx.adpcm_predict(-1, 0, 192, 0) == 0  # -192/256 -> 0, `>> 8` gave -1
-    assert wx.adpcm_predict(-1, -1, 460, -208) == 0  # -252/256
-    assert wx.adpcm_predict(-300, 7, 460, -208) == -544  # -139456/256 = -544.75
-    assert wx.adpcm_predict(300, -7, 460, -208) == 544
+    assert audio_decode.adpcm_predict(-3, 0, 256, 0) == -3
+    assert audio_decode.adpcm_predict(-1, 0, 192, 0) == 0  # -192/256 -> 0, `>> 8` gave -1
+    assert audio_decode.adpcm_predict(-1, -1, 460, -208) == 0  # -252/256
+    assert audio_decode.adpcm_predict(-300, 7, 460, -208) == -544  # -139456/256 = -544.75
+    assert audio_decode.adpcm_predict(300, -7, 460, -208) == 544
     assert (-300 * 460 + 7 * -208) >> 8 == -545  # what `>> 8` gave
     for s1 in range(-600, 600, 37):
         for s2 in range(-600, 600, 41):
-            for c1, c2 in wx.ADPCM_COEF_PAIRS:
+            for c1, c2 in audio_decode.ADPCM_COEF_PAIRS:
                 t = s1 * c1 + s2 * c2
-                assert wx.adpcm_predict(s1, s2, c1, c2) == int(t / 256)
+                assert audio_decode.adpcm_predict(s1, s2, c1, c2) == int(t / 256)
 
 
 @pytest.mark.parametrize("tag", ["mono_small", "stereo_small"])
@@ -47,7 +48,7 @@ def test_decoder_is_bit_exact_with_ffmpeg(tag):
     data = base64.b64decode(fx["adpcm"])
     ch, ba = fx["ch"], fx["block_align"]
     assert len(data) % ba >= 7 * ch  # a partial last block is part of the case
-    pcm = (wx._adpcm_stereo if ch == 2 else wx.adpcm_mono)(data, ba)
+    pcm = (audio_decode._adpcm_stereo if ch == 2 else audio_decode.adpcm_mono)(data, ba)
     assert len(pcm) // ch == fx["ffmpeg_samples"]
     assert hashlib.sha1(pcm.tobytes()).hexdigest() == fx["ffmpeg_pcm_sha1"]
 
@@ -64,20 +65,20 @@ def _block(pred, delta, s1, s2, nibbles):
 def test_a_partial_last_block_is_decoded():
     full = _block(0, 16, 10, 5, [1, 2] * 25)  # 7 + 25 bytes = one 32-byte block
     part = _block(0, 16, 10, 5, [1, 2] * 3)  # 7 + 3 bytes
-    pcm = wx.adpcm_mono(full + part, 32)
+    pcm = audio_decode.adpcm_mono(full + part, 32)
     assert len(pcm) == (2 + 50) + (2 + 6)  # 1.4.0 dropped the 8 samples of `part`
-    assert len(wx.adpcm_mono(full + part[:6], 32)) == 52  # no block header: ends
+    assert len(audio_decode.adpcm_mono(full + part[:6], 32)) == 52  # no block header: ends
     st = struct.pack("<BBhhhhhh", 0, 0, 16, 16, 1, 2, 3, 4) + b"\x12" * 2
-    assert len(wx._adpcm_stereo(st, 64)) == 4 + 4
+    assert len(audio_decode._adpcm_stereo(st, 64)) == 4 + 4
 
 
 def test_custom_coefficients_are_used():
     blk = _block(1, 16, 100, 100, [0, 0])
-    std = wx.adpcm_mono(blk, len(blk))
-    own = wx.adpcm_mono(blk, len(blk), [(256, 0), (128, 0)])
+    std = audio_decode.adpcm_mono(blk, len(blk))
+    own = audio_decode.adpcm_mono(blk, len(blk), [(256, 0), (128, 0)])
     assert list(std) == [100, 100, 100, 100]  # pair 1 (512, -256): 2*100 - 100
     assert list(own) == [100, 100, 50, 25]  # pair 1 of the header: 128 / 256
-    assert len(wx.adpcm_mono(_block(2, 16, 1, 1, [0, 0]), 9, [(256, 0), (0, 0)])) == 0
+    assert len(audio_decode.adpcm_mono(_block(2, 16, 1, 1, [0, 0]), 9, [(256, 0), (0, 0)])) == 0
 
 
 def _adpcm_sound(data, samples, ch=1, coefs=None, ba=32, cue=b""):
@@ -86,7 +87,7 @@ def _adpcm_sound(data, samples, ch=1, coefs=None, ba=32, cue=b""):
     h += struct.pack("<5I", 0xA1B2C3D4, 0x11, 0x22, 0, 7)
     h += bytes([0, 1]) + struct.pack("<4I", ch, 44100, 2, 44100)
     h += struct.pack("<3I", 0, samples, ba)
-    h += struct.pack("<14h", *(coefs or wx._COEF))
+    h += struct.pack("<14h", *(coefs or audio_decode._COEF))
     return h + struct.pack("<I", len(data)) + data + (cue or struct.pack("<I", 0))
 
 
@@ -95,20 +96,22 @@ def test_decode_sfx_reads_the_header_layout():
     part = _block(0, 16, 10, 5, [3, 4] * 3)
     cue = struct.pack("<I", 1) + struct.pack("<I", 4) + b"cue\0" + struct.pack("<I", 9)
     h = _adpcm_sound(blk + part, 57, cue=cue)
-    info = wx.sfx_info(h)
+    info = sound_header.sfx_info(h)
     assert info["data_bytes"] == len(blk + part) and info["cue_points"][0]["name"] == "cue"
-    data, ch, rate = wx.decode_sfx(h)
+    data, ch, rate = audio_decode.decode_sfx(h)
     pcm = struct.unpack("<%dh" % (len(data) // 2), data)
     assert len(pcm) == 57  # 52 + 8 decoded, trimmed to the stored sample count
-    assert list(pcm) == list(wx.adpcm_mono(blk + part, 32))[:57]
+    assert list(pcm) == list(audio_decode.adpcm_mono(blk + part, 32))[:57]
     # the header's own table: a non-standard pair 0 changes the decode
-    coefs = list(wx._COEF)
+    coefs = list(audio_decode._COEF)
     coefs[0] = 128
-    other = wx.decode_sfx(_adpcm_sound(blk + part, 57, coefs=coefs))[0]
+    other = audio_decode.decode_sfx(_adpcm_sound(blk + part, 57, coefs=coefs))[0]
     assert other != data
     assert (
         other
-        == wx.adpcm_mono(blk + part, 32, [(128, 0)] + list(wx.ADPCM_COEF_PAIRS[1:]))[:57].tobytes()
+        == audio_decode.adpcm_mono(
+            blk + part, 32, [(128, 0)] + list(audio_decode.ADPCM_COEF_PAIRS[1:])
+        )[:57].tobytes()
     )
 
 
@@ -118,7 +121,7 @@ def test_decode_sfx_falls_back_to_the_table_search():
     blk = _block(0, 16, 10, 5, [1, 2] * 25)
     h = bytearray(_adpcm_sound(blk, 52))
     struct.pack_into("<I", h, len(h) - 4 - len(blk) - 4, 10**6)
-    data, _ch, _rate = wx.decode_sfx(bytes(h))
+    data, _ch, _rate = audio_decode.decode_sfx(bytes(h))
     assert len(data) == 2 * 52
 
 
@@ -188,8 +191,8 @@ def vorbis_setup(blockflags=(0, 1), channels=2):
 
 
 def test_vorbis_setup_block_flags():
-    assert wx.vorbis_blockflags(vorbis_setup((0, 1)), 2) == [0, 1]
-    assert wx.vorbis_blockflags(vorbis_setup((1, 1, 0)), 1) == [1, 1, 0]
+    assert audio_decode.vorbis_blockflags(vorbis_setup((0, 1)), 2) == [0, 1]
+    assert audio_decode.vorbis_blockflags(vorbis_setup((1, 1, 0)), 1) == [1, 1, 0]
 
 
 @pytest.mark.parametrize(
@@ -204,22 +207,22 @@ def test_vorbis_setup_block_flags():
 )
 def test_a_bad_setup_header_raises_value_error(mutate, why):
     with pytest.raises(ValueError, match="vorbis setup: .*" + why):
-        wx.vorbis_blockflags(mutate(vorbis_setup()), 2)
+        audio_decode.vorbis_blockflags(mutate(vorbis_setup()), 2)
 
 
 def test_the_setup_checks_survive_python_O():
     """Under -O an assert vanishes: the checks are explicit raises."""
     code = (
         "import sys; sys.path[:0] = [%r, %r]\n"
-        "import watchmen_extract as wx, test_v150_audio as t\n"
+        "import audio_decode, test_v150_audio as t\n"
         "assert False, 'asserts are on'\n"
-    ) % (os.path.dirname(wx.__file__), os.path.dirname(__file__))
+    ) % (os.path.dirname(audio_decode.__file__), os.path.dirname(__file__))
     code = code.replace("assert False, 'asserts are on'\n", "") + (
         "s = t.vorbis_setup()\n"
-        "print(wx.vorbis_blockflags(s, 2))\n"
+        "print(audio_decode.vorbis_blockflags(s, 2))\n"
         "for bad in (s[:1] + b'VORBIS' + s[7:], s[:8] + b'xxx' + s[11:]):\n"
         "    try:\n"
-        "        wx.vorbis_blockflags(bad, 2)\n"
+        "        audio_decode.vorbis_blockflags(bad, 2)\n"
         "    except ValueError as e:\n"
         "        print('ValueError', e)\n"
         "print(__debug__)\n"
@@ -252,7 +255,7 @@ def _pages(data):
         page = bytearray(data[o:end])
         crc = struct.unpack_from("<I", page, 22)[0]
         page[22:26] = b"\0\0\0\0"
-        assert wx._ogg_crc(bytes(page)) == crc
+        assert audio_decode._ogg_crc(bytes(page)) == crc
         gran, _serial, seq = struct.unpack_from("<qII", data, o + 6)
         out.append((data[o + 5], gran, seq, lac, data[o + 27 + nseg : end]))
         o = end
@@ -266,7 +269,7 @@ def _audio(n, size=100):
 def test_audio_packets_share_pages_of_about_4_kb():
     heads = ta.vorbis_headers()
     audio = _audio(300, 97)
-    ogg, ch, rate, n, last = wx.ogg_from_packets(heads + audio, True, end=28000)
+    ogg, ch, rate, n, last = audio_decode.ogg_from_packets(heads + audio, True, end=28000)
     pages = _pages(ogg)
     assert [p[0] for p in pages][:2] == [0x02, 0x00] and pages[-1][0] == 0x04
     assert all(p[0] == 0 for p in pages[1:-1])
@@ -274,7 +277,7 @@ def test_audio_packets_share_pages_of_about_4_kb():
     assert pages[0][4] == heads[0] and pages[0][1] == 0  # identification alone
     assert pages[1][4] == heads[1] + heads[2] and pages[1][1] == 0  # before any audio
     audio_pages = pages[2:]
-    assert all(len(p[4]) <= wx.OGG_PAGE_BYTES for p in audio_pages)
+    assert all(len(p[4]) <= audio_decode.OGG_PAGE_BYTES for p in audio_pages)
     assert len(audio_pages) == 8  # 300 x 97 bytes: 42 packets a page (1.4.0: 300 pages)
     assert ta.ogg_packets(ogg) == heads + audio
     gr = [(i + 1) * 1024 for i in range(300)]  # this setup has no modes: 1024 a packet
@@ -291,7 +294,7 @@ def test_audio_packets_share_pages_of_about_4_kb():
 def test_a_packet_larger_than_a_page_continues():
     heads = ta.vorbis_headers()
     big = b"\x12" * 70000  # 275 lacing values: more than one page can hold
-    ogg = wx.ogg_from_packets(heads + [b"\x10" * 50, big, b"\x14" * 50], False)[0]
+    ogg = audio_decode.ogg_from_packets(heads + [b"\x10" * 50, big, b"\x14" * 50], False)[0]
     pages = _pages(ogg)
     assert ta.ogg_packets(ogg) == heads + [b"\x10" * 50, big, b"\x14" * 50]
     cont = [p for p in pages if p[0] & 0x01]
@@ -304,7 +307,7 @@ def test_a_packet_larger_than_a_page_continues():
 
 
 def test_the_writer_marks_a_page_where_no_packet_ends():
-    w = wx._OggWriter(1, page_bytes=1000)
+    w = audio_decode._OggWriter(1, page_bytes=1000)
     w.packet(b"\x01" * 10, 0)
     w.flush()
     w.packet(b"\x02" * (255 * 300), 77)

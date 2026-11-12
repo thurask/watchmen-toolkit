@@ -1,5 +1,5 @@
 """Restored content: the eyelash strips of the generic female heads
-(watchmen_extract.LASH_RESTORE).
+(model_mesh.LASH_RESTORE).
 
     layout        the small stored layout is recognised by its own numbers; any
                   other set of 72 UVs is left alone
@@ -17,7 +17,8 @@ import numpy as np
 import pytest
 
 import variant_glb as vg
-import watchmen_extract as we
+import model_export
+import model_mesh
 
 import test_formats_v2 as tf
 from conftest import parse_glb
@@ -55,29 +56,29 @@ def synth_on(monkeypatch):
 
 def test_the_fixture_is_the_stored_box():
     uv = np.array(_half(_stored()))
-    assert np.allclose(uv.min(0), we.LASH_RESTORE["stored_uv_min"], atol=1e-5)
-    assert np.allclose(uv.max(0), we.LASH_RESTORE["stored_uv_max"], atol=1e-5)
+    assert np.allclose(uv.min(0), model_mesh.LASH_RESTORE["stored_uv_min"], atol=1e-5)
+    assert np.allclose(uv.max(0), model_mesh.LASH_RESTORE["stored_uv_max"], atol=1e-5)
     assert (U_MIN, V_MIN) < (0.0034, 0.3915)
 
 
 def test_the_layout_is_recognised_by_its_own_numbers():
     uv = _half(_stored())
-    assert we.lash_strips(uv) == ["upper", "lower", "upper", "lower"]
-    assert we.lash_strips(uv[:-1]) is None  # 71 vertices
-    assert we.lash_strips(None) is None
-    assert we.lash_strips([(u + 0.01, v) for u, v in uv]) is None  # another box
-    assert we.lash_strips([(u, v + 0.001) for u, v in uv]) is None
-    assert we.lash_strips([(u * 11.0, v) for u, v in uv]) is None  # a full-size layout
+    assert model_mesh.lash_strips(uv) == ["upper", "lower", "upper", "lower"]
+    assert model_mesh.lash_strips(uv[:-1]) is None  # 71 vertices
+    assert model_mesh.lash_strips(None) is None
+    assert model_mesh.lash_strips([(u + 0.01, v) for u, v in uv]) is None  # another box
+    assert model_mesh.lash_strips([(u, v + 0.001) for u, v in uv]) is None
+    assert model_mesh.lash_strips([(u * 11.0, v) for u, v in uv]) is None  # a full-size layout
     # the same box with blocks that are neither strip
     mixed = uv[:9] + uv[18:27] + uv[9:18] + uv[27:]
-    assert we.lash_strips(mixed) is None
+    assert model_mesh.lash_strips(mixed) is None
 
 
 def test_each_strip_is_scaled_and_moved():
     uv = _half(_stored())
-    out = we.lash_restored_uvs(uv)
+    out = model_mesh.lash_restored_uvs(uv)
     assert len(out) == NV
-    up, lo = we.LASH_RESTORE["strips"]["upper"], we.LASH_RESTORE["strips"]["lower"]
+    up, lo = model_mesh.LASH_RESTORE["strips"]["upper"], model_mesh.LASH_RESTORE["strips"]["lower"]
     assert (up[1], up[2]) == (11.7691, (0.4736, -4.4107))
     assert (lo[1], lo[2]) == (11.5133, (-0.0358, -4.5707))
     for i, ((u, v), (u2, v2)) in enumerate(zip(uv, out)):
@@ -87,18 +88,20 @@ def test_each_strip_is_scaled_and_moved():
     # on the painted lashes: the range Twilight Lady's strips have (-0.002..1.045, 0.196..0.779)
     assert -0.01 < a[:, 0].min() < 0.02 and 1.0 < a[:, 0].max() < 1.06
     assert 0.18 < a[:, 1].min() < 0.21 and 0.76 < a[:, 1].max() < 0.80
-    assert we.lash_restored_uvs(out) is None  # a second pass changes nothing
-    assert we.lash_restored_uvs([(0.5, 0.5)] * NV) is None
+    assert model_mesh.lash_restored_uvs(out) is None  # a second pass changes nothing
+    assert model_mesh.lash_restored_uvs([(0.5, 0.5)] * NV) is None
 
 
 def test_the_restored_layout_is_told_from_the_stored_one():
     uv = _half(_stored())
-    out = we.lash_restored_uvs(uv)
-    assert we.lash_is_restored(out) and we.lash_is_restored(np.array(out, np.float32))
-    assert not we.lash_is_restored(uv) and not we.lash_is_restored(out[:-1])
-    assert not we.lash_is_restored(None)
-    assert not we.lash_is_restored(np.zeros((NV, 4)))  # not a UV array
-    assert not we.lash_is_restored([(0.5, 0.5)] * NV)
+    out = model_mesh.lash_restored_uvs(uv)
+    assert model_mesh.lash_is_restored(out) and model_mesh.lash_is_restored(
+        np.array(out, np.float32)
+    )
+    assert not model_mesh.lash_is_restored(uv) and not model_mesh.lash_is_restored(out[:-1])
+    assert not model_mesh.lash_is_restored(None)
+    assert not model_mesh.lash_is_restored(np.zeros((NV, 4)))  # not a UV array
+    assert not model_mesh.lash_is_restored([(0.5, 0.5)] * NV)
 
 
 def _pc_buffer(uv):
@@ -127,22 +130,25 @@ def test_decode_sub_restores_on_both_vertex_layouts(be, monkeypatch):
     buf, stride = (_console_buffer(uv), 44) if be else (_pc_buffer(uv), 56)
     assert len(buf) == NV * stride
     noted = []
-    _v, _n, got = we.decode_mesh_vertices(buf, 0, NV, stride, be, noted)
+    _v, _n, got = model_mesh.decode_mesh_vertices(buf, 0, NV, stride, be, noted)
     assert noted == ["eyelash_uvs"]
-    assert got == we.lash_restored_uvs(_half(uv))
-    assert we.decode_mesh_vertices(buf, 0, NV, stride, be)[2] == got  # the list is optional
+    assert got == model_mesh.lash_restored_uvs(_half(uv))
+    assert model_mesh.decode_mesh_vertices(buf, 0, NV, stride, be)[2] == got  # the list is optional
     monkeypatch.setenv("WATCHMEN_NO_SYNTH", "1")
     noted = []
-    assert we.decode_mesh_vertices(buf, 0, NV, stride, be, noted)[2] == _half(uv) and noted == []
+    assert (
+        model_mesh.decode_mesh_vertices(buf, 0, NV, stride, be, noted)[2] == _half(uv)
+        and noted == []
+    )
 
 
 def test_decode_sub_leaves_every_other_buffer_alone():
     uv = [(0.01 * i, 0.5) for i in range(NV)]
     noted = []
-    assert we.decode_mesh_vertices(_pc_buffer(uv), 0, NV, 56, False, noted)[2] == _half(uv)
+    assert model_mesh.decode_mesh_vertices(_pc_buffer(uv), 0, NV, 56, False, noted)[2] == _half(uv)
     assert noted == []
     short = _stored()[:40]
-    assert we.decode_mesh_vertices(_pc_buffer(short), 0, 40, 56)[2] == _half(short)
+    assert model_mesh.decode_mesh_vertices(_pc_buffer(short), 0, 40, 56)[2] == _half(short)
 
 
 @pytest.fixture
@@ -172,20 +178,20 @@ def _vt(path):
 
 def test_decode_model_mesh_marks_the_submesh(lash_model, monkeypatch):
     h, s = lash_model
-    head, lash = we.decode_model_mesh(h, s)["submeshes"]
+    head, lash = model_mesh.decode_model_mesh(h, s)["submeshes"]
     assert "restored" not in head and lash["restored"] == ["eyelash_uvs"]
-    assert we.lash_is_restored(lash["uvs"])
+    assert model_mesh.lash_is_restored(lash["uvs"])
     monkeypatch.setenv("WATCHMEN_NO_SYNTH", "1")
-    lash = we.decode_model_mesh(h, s)["submeshes"][1]
+    lash = model_mesh.decode_model_mesh(h, s)["submeshes"][1]
     assert "restored" not in lash and lash["uvs"] == _half(_stored())
 
 
 def test_decode_model_writes_the_restored_uvs_and_says_so(lash_model, tmp_path, monkeypatch):
     pytest.importorskip("PIL")
     h, s = lash_model
-    assert we.decode_model(h, s, tmp_path / "on" / "m.obj") is True
+    assert model_export.decode_model(h, s, tmp_path / "on" / "m.obj") is True
     vt = _vt(tmp_path / "on" / "m.obj")
-    want = we.lash_restored_uvs(_half(_stored()))
+    want = model_mesh.lash_restored_uvs(_half(_stored()))
     assert len(vt) == 4 + NV
     for (u, v), (u2, v2) in zip(vt[4:], want):  # an OBJ has v counted from the bottom
         assert u == pytest.approx(u2, abs=1e-5) and v == pytest.approx(1.0 - v2, abs=1e-5)
@@ -199,7 +205,7 @@ def test_decode_model_writes_the_restored_uvs_and_says_so(lash_model, tmp_path, 
     }
     # the switch of the reconstructed Dominatrix_3: the stored UVs, no note
     monkeypatch.setenv("WATCHMEN_NO_SYNTH", "1")
-    assert we.decode_model(h, s, tmp_path / "off" / "m.obj") is True
+    assert model_export.decode_model(h, s, tmp_path / "off" / "m.obj") is True
     off = _vt(tmp_path / "off" / "m.obj")
     for (u, v), (u2, v2) in zip(off[4:], _half(_stored())):
         assert u == pytest.approx(u2, abs=1e-5) and v == pytest.approx(1.0 - v2, abs=1e-5)
@@ -215,7 +221,7 @@ def test_decode_model_writes_the_restored_uvs_and_says_so(lash_model, tmp_path, 
 def test_a_model_without_the_layout_has_no_note(tmp_path):
     pytest.importorskip("PIL")
     h, s = tf._lod_model()
-    assert we.decode_model(h, s, tmp_path / "m.obj") is True
+    assert model_export.decode_model(h, s, tmp_path / "m.obj") is True
     assert "reconstruction" not in json.loads((tmp_path / "m.model.json").read_text())
 
 
@@ -229,11 +235,11 @@ def _lash_part(rig, uv):
 
 
 def test_a_character_glb_names_the_restored_piece(tmp_path, rig):
-    restored = we.lash_restored_uvs(_half(_stored()))
+    restored = model_mesh.lash_restored_uvs(_half(_stored()))
     out = tmp_path / "c.glb"
     vg.write_glb(rig.parts + [_lash_part(rig, restored)], rig.manifest, str(out), str(rig.bind_npz))
     rec = parse_glb(out).j["asset"]["extras"]["watchmen"]["reconstruction"]
-    assert rec == we.lash_reconstruction_note()
+    assert rec == model_mesh.lash_reconstruction_note()
     # beside the record of a variant the game does not ship, which stays
     base = {"reconstruction": {"shipped": False, "base": "Dominatrix_2", "note": "x"}}
     vg.write_glb(
@@ -268,6 +274,6 @@ def test_a_character_glb_with_stored_uvs_has_no_record(tmp_path, rig):
 
 
 def test_synth_enabled_follows_the_variable(monkeypatch):
-    assert we.synth_enabled() is True
+    assert model_mesh.synth_enabled() is True
     monkeypatch.setenv("WATCHMEN_NO_SYNTH", "1")
-    assert we.synth_enabled() is False
+    assert model_mesh.synth_enabled() is False

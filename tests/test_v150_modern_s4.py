@@ -261,11 +261,12 @@ def test_bake_failure_names_the_clip(tmp_path, monkeypatch):
 
 
 def test_mesh_loader_failure_names_the_model_and_submesh(monkeypatch):
-    import watchmen_extract as we
+    import material_refs
+    import model_mesh
 
-    monkeypatch.setattr(we, "find_descriptors", lambda mh, order: [(3, 56, 6)])
-    monkeypatch.setattr(we, "extract_materials", lambda mh: [])
-    monkeypatch.setattr(we, "submesh_materials", lambda mh, order: [])
+    monkeypatch.setattr(model_mesh, "find_descriptors", lambda mh, order: [(3, 56, 6)])
+    monkeypatch.setattr(material_refs, "extract_materials", lambda mh: [])
+    monkeypatch.setattr(material_refs, "submesh_materials", lambda mh, order: [])
     monkeypatch.setattr(mesh_loader, "_header_path", lambda mh, ms, order: (None, "test"))
 
     def broken(*a):

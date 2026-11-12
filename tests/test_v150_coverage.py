@@ -7,8 +7,8 @@
                                and the weight transfer onto the static head
     characters_export._brown_hair_layers the brown-tinted hair layer of a
                                synthetic variant
-    watchmen_extract.rsx_unswizzle      against a reference RSX swizzle
-    watchmen_extract.carve_texture_console  a PS3 L8 and an X360 DXT1 texture with
+    texture_decode.rsx_unswizzle      against a reference RSX swizzle
+    texture_carve.carve_texture_console  a PS3 L8 and an X360 DXT1 texture with
                                known pixels, the early returns
     mesh_loader.mesh_arrays    the archive walk and mesh_arrays' skipped pieces
 
@@ -24,7 +24,9 @@ import pytest
 from PIL import Image
 
 import characters_export as ce
-import watchmen_extract as we
+import naz_archive
+import texture_carve
+import texture_decode
 from conftest import parse_glb
 
 # ---------------------------------------------------------------------------
@@ -257,7 +259,7 @@ def test_brown_hair_layers(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# watchmen_extract.rsx_unswizzle
+# texture_decode.rsx_unswizzle
 # ---------------------------------------------------------------------------
 
 
@@ -306,16 +308,18 @@ def test_rsx_unswizzle_inverts_the_reference_swizzle(w, h, unit):
     rng = np.random.default_rng(w * 100 + h * 10 + unit)
     linear = rng.integers(0, 256, w * h * unit, dtype=np.uint8).tobytes()
     sw = _swizzle(linear, w, h, unit)
-    assert we.rsx_unswizzle(sw + b"\xee" * 16, w, h, unit) == linear  # chain bytes ignored
+    assert (
+        texture_decode.rsx_unswizzle(sw + b"\xee" * 16, w, h, unit) == linear
+    )  # chain bytes ignored
 
 
 def test_rsx_unswizzle_leaves_what_it_cannot_untile():
-    assert we.rsx_unswizzle(b"x" * 12, 3, 4) == b"x" * 12  # not a power of two
-    assert we.rsx_unswizzle(b"x" * 8, 4, 4) == b"x" * 8  # too short
+    assert texture_decode.rsx_unswizzle(b"x" * 12, 3, 4) == b"x" * 12  # not a power of two
+    assert texture_decode.rsx_unswizzle(b"x" * 8, 4, 4) == b"x" * 8  # too short
 
 
 # ---------------------------------------------------------------------------
-# watchmen_extract.carve_texture_console with known pixels
+# texture_carve.carve_texture_console with known pixels
 # ---------------------------------------------------------------------------
 
 
@@ -327,7 +331,7 @@ def test_ps3_l8_layer_is_unswizzled(tmp_path):
     stream = _ps3_seg(_swizzle(linear, w, h, 1), 0x81, 1, w, h)
     hdr = _header([({0: _desc(">", w, h, 3, 1)}, "/data/art/x/Mask.bmp")])
     out = tmp_path / "t"
-    assert we.carve_texture_console(stream, hdr, out)  # log=None: no output
+    assert texture_carve.carve_texture_console(stream, hdr, out)  # log=None: no output
     png = sorted(p.name for p in out.glob("*.png"))
     assert png == ["0_diffuse_16x8_L8.png"]
     px = np.asarray(Image.open(out / png[0]))
@@ -341,7 +345,9 @@ def test_x360_dxt1_layer_with_known_pixels(tmp_path):
     lin = _dxt1(cols, 8, 8)
     hdr = _header([({0: _desc(">", 32, 32, 5, 1, size=8192)}, "/data/art/x/Quad.bmp")])
     log = []
-    assert we.carve_texture_console(_x360_tile(lin, 8, 8, 8), hdr, tmp_path / "t", log.append)
+    assert texture_carve.carve_texture_console(
+        _x360_tile(lin, 8, 8, 8), hdr, tmp_path / "t", log.append
+    )
     px = np.asarray(Image.open(tmp_path / "t" / "0_diffuse_32x32_DXT1.png"))[..., :3]
     for by in range(8):
         for bx in range(8):
@@ -351,7 +357,7 @@ def test_x360_dxt1_layer_with_known_pixels(tmp_path):
 
 
 def test_console_carve_of_something_that_is_not_a_texture(tmp_path):
-    assert we.carve_texture_console(b"\0" * 64, b"\0" * 64, tmp_path / "t") is False
+    assert texture_carve.carve_texture_console(b"\0" * 64, b"\0" * 64, tmp_path / "t") is False
     assert not (tmp_path / "t").exists()
 
 
@@ -365,7 +371,7 @@ def test_archive_walk_and_mesh_arrays(monkeypatch, capsys):
     import watchmenlib as wl
 
     blocks = [("a", {"h": b"1", "s": b"2"}), ("b", {"h": b"3", "s": b"4"})]
-    monkeypatch.setattr(we, "iter_blocks", lambda naz, streams=True: iter(blocks))
+    monkeypatch.setattr(naz_archive, "iter_blocks", lambda naz, streams=True: iter(blocks))
     assert list(wl.iter_blocks("x.naz")) == blocks and wl.grab_blocks("x.naz") == dict(blocks)
     V = np.zeros((3, 3), np.float32)
     pieces = [

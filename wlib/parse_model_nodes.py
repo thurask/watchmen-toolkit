@@ -29,12 +29,12 @@ from wutil import (  # noqa: E402  (one copy, in wlib/wutil.py)
 
 def _detect_order(mb):
     """'<' PC / '>' X360+PS3: the order the header states (its opening class-name
-    length, watchmen_extract.header_order); when it does not say, the order that
+    length, kapow_block.header_order); when it does not say, the order that
     finds more length-prefixed node names."""
     try:  # the header states its order (5,490 of 5,490 models of the six sets)
-        import watchmen_extract as _we
+        import kapow_block
 
-        o = _we.header_order(mb)
+        o = kapow_block.header_order(mb)
     except ImportError:
         o = None
     if o is not None:
@@ -65,17 +65,17 @@ def _names(mb, order="<"):
 
 def parse_header_driven(mb):
     """Node table straight from the engine-exact ModelRes header walk
-    (watchmen_extract.parse_model_header: FUN_00547006 -> FUN_00545927), or None
+    (model_header.parse_model_header: FUN_00547006 -> FUN_00545927), or None
     when the blob is not a little-endian header of either layout (Part 2, or the
     stand-alone Part 1 build).  Same return shape as parse(); every
     part of the file is a node, so parent indices can never be misaligned."""
     try:
-        import watchmen_extract as _we
+        import model_header
     except ImportError:
         if _HERE not in sys.path:
             sys.path.append(_HERE)  # append, never insert(0)
-        import watchmen_extract as _we
-    M = _we.parse_model_header(bytes(mb), "<")
+        import model_header
+    M = model_header.parse_model_header(bytes(mb), "<")
     if not M or not M["parts"]:
         return None
     parts = M["parts"]
@@ -269,7 +269,7 @@ def parse_node_aux(mb, start, end, order="<", meshes=False):
 
 def model_physics(mb, order="<"):
     """Header-driven read of everything physical in a ModelRes header, in either
-    header layout (watchmen_extract.MODEL_LAYOUTS: Part 2 / PS3 Part 1, and the
+    header layout (model_header.MODEL_LAYOUTS: Part 2 / PS3 Part 1, and the
     stand-alone Part 1 build): every node with its two collision-volume lists
     (Node::Deserialize 0x545927) and the articulated-body section that follows
     the node array (0x51e1ad).  Works on models with meshes too (the
@@ -280,13 +280,13 @@ def model_physics(mb, order="<"):
     skeleton_records.parse_articulated_body(...), end, layout) or None when the
     blob follows neither layout."""
     try:
-        import watchmen_extract as _we
+        import model_header
     except ImportError:
         if _HERE not in sys.path:
             sys.path.append(_HERE)  # append, never insert(0)
-        import watchmen_extract as _we
+        import model_header
     _sr = _skeleton_records()
-    M = _we.parse_model_header(mb, order)
+    M = model_header.parse_model_header(mb, order)
     if M is None:
         return None
     try:
@@ -329,17 +329,19 @@ def model_tail(mb, order="<"):
     [[target, key]]}], end) with end == len(mb), or None when the tail does not
     read to the end of the blob."""
     try:
-        import watchmen_extract as _we
+        import byte_reader
+        import model_header
     except ImportError:
         if _HERE not in sys.path:
             sys.path.append(_HERE)  # append, never insert(0)
-        import watchmen_extract as _we
-    M = _we.parse_model_header(mb, order)
+        import byte_reader
+        import model_header
+    M = model_header.parse_model_header(mb, order)
     phys = model_physics(mb, order)
     if M is None or phys is None:
         return None
     try:
-        r = _we.ByteReader(mb, order)
+        r = byte_reader.ByteReader(mb, order)
         r.p = phys["end"]
         animation = r.string() if M.get("has_animation") else None
         channels = []

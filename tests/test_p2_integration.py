@@ -16,7 +16,9 @@ import kapow_fragment as kf
 import parse_model_nodes as pmn
 import ragdoll_rig as rr
 import skeleton_records as sr
-import watchmen_extract as we
+import extract_driver
+import kapow_block
+import model_export
 
 import test_p2_part1 as tp1
 from conftest import class_name_record
@@ -28,18 +30,18 @@ from conftest import class_name_record
 @pytest.mark.parametrize("order", ["<", ">"])
 def test_every_standalone_reader_takes_the_order_the_header_states(order):
     hdr = class_name_record(order) + b"\0" * 64
-    assert we.header_order(hdr) == order
+    assert kapow_block.header_order(hdr) == order
     assert char_lib.header_order(hdr) == order  # the same function, not a second rule
     assert rr.byte_order(hdr) == order
     assert pmn._detect_order(hdr) == order
     assert extract_skeletons._header_order(hdr) == order
     # asset_class reads that very field
-    assert we.asset_class(hdr, order) == "ModelRes"
+    assert kapow_block.asset_class(hdr, order) == "ModelRes"
 
 
 def test_readers_keep_their_own_rule_when_the_header_does_not_say():
     blob = struct.pack("<I", 6) + b"\x9a\x99\x19\x3f" * 8
-    assert we.header_order(blob) is None and we.header_order(b"") is None
+    assert kapow_block.header_order(blob) is None and kapow_block.header_order(b"") is None
     assert pmn._detect_order(blob) == "<"
     assert extract_skeletons._ordered_names(blob) == []
 
@@ -123,7 +125,7 @@ def test_extract_names_an_asset_without_stream_once_for_all_blocks(tmp_path):
     real = builtins.print
     builtins.print = lambda *x, **k: lines.append(" ".join(str(v) for v in x))
     try:
-        rc = we.main(
+        rc = extract_driver.main(
             [str(tmp_path / "derived_pc"), "-o", str(tmp_path / "out")]
             + ["--no-textures", "--no-models", "--no-audio", "--no-text", "--no-nav"]
         )
@@ -139,7 +141,7 @@ def test_extract_names_an_asset_without_stream_once_for_all_blocks(tmp_path):
 def test_an_empty_stream_model_is_an_expected_absence_not_a_warning(tmp_path):
     lines = []
     hdr = class_name_record("<") + bytes(64)
-    assert we.decode_model(hdr, b"", tmp_path / "X.model.obj", {}, lines.append) is False
+    assert model_export.decode_model(hdr, b"", tmp_path / "X.model.obj", {}, lines.append) is False
     assert lines == [
         "      note: model X.model.obj: not decoded: empty stream: the model has no mesh data"
     ]

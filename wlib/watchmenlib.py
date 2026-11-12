@@ -21,7 +21,11 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.append(_HERE)  # append, never insert: must not shadow stdlib
 
-import watchmen_extract as _we  # naz walk, block extract, model decode  # noqa: E402
+import extract_driver  # noqa: E402
+import kapow_block  # noqa: E402
+import material_refs  # noqa: E402
+import model_mesh  # noqa: E402
+import naz_archive  # noqa: E402
 import extract_skeletons as _es  # skeleton .model record parsing  # noqa: E402
 import rig_glb as _rig  # skin indices/weights decode  # noqa: E402
 import kapow_props as _kp  # property hash + prop-bag JSON  # noqa: E402
@@ -73,7 +77,7 @@ def extract_all(naz, out, *extra):
     """Full asset extraction (files/textures/models/audio/JSON) from game.naz.
     Extra args are passed through to watchmen_extract (e.g. '--vgmstream-cli',
     '/path/to/vgmstream-cli' for console X360/PS3 audio -> wav)."""
-    return _we.main([str(naz), "-o", str(out)] + [str(x) for x in extra])
+    return extract_driver.main([str(naz), "-o", str(out)] + [str(x) for x in extra])
 
 
 _SKEL_ASSETS = {  # skeleton source per bind (block asset name endswith)
@@ -172,15 +176,15 @@ def grab_blocks(naz=None):
     reads one at a time)."""
     if naz is None:
         naz = default_naz()  # 01_game.naz, else game.naz
-    return dict(_we.iter_blocks(naz))
+    return dict(naz_archive.iter_blocks(naz))
 
 
 def iter_blocks(naz=None, streams=True):
     """(stem, {"h": header, "s": stream}) one block at a time
-    (watchmen_extract.iter_blocks; streams=False reads the headers only)."""
+    (naz_archive.iter_blocks; streams=False reads the headers only)."""
     if naz is None:
         naz = default_naz()  # 01_game.naz, else game.naz
-    return _we.iter_blocks(naz, streams)
+    return naz_archive.iter_blocks(naz, streams)
 
 
 def block_order(naz=None):
@@ -189,21 +193,21 @@ def block_order(naz=None):
     if naz is None:
         naz = default_naz()  # 01_game.naz, else game.naz
     for _stem, _hs in iter_blocks(naz, streams=False):
-        return _we.detect_block_order(_hs["h"])
+        return kapow_block.detect_block_order(_hs["h"])
     return "<"
 
 
 def extract_block(header, stream=None):
-    return _we.extract_block(header, stream)
+    return kapow_block.extract_block(header, stream)
 
 
 # ---- assets -----------------------------------------------------------------
 def model_descriptors(mb):
-    return _we.find_descriptors(mb)
+    return model_mesh.find_descriptors(mb)
 
 
 def model_materials(mb):
-    return _we.extract_materials(mb)
+    return material_refs.extract_materials(mb)
 
 
 def model_bone_names(mb):

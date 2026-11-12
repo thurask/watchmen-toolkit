@@ -218,10 +218,11 @@ def mesh_vertex_attributes(header, stream, subs, lod=0):
     `colors` is None unless at least one submesh is flagged.  TANGENT xyz is the
     stored tangent (dP/du) normalised, w = -sign(dot(cross(normal, tangent),
     stored bitangent)): the handedness for the green-inverted glTF normal texture
-    (watchmen_extract.gltf_tangents); a vertex whose stored tangent has no length
+    (model_mesh.gltf_tangents); a vertex whose stored tangent has no length
     makes `tangents` None for the whole model."""
     try:
-        import watchmen_extract as we
+        import model_header
+        import model_mesh
     except ImportError:
         import os
         import sys
@@ -229,12 +230,15 @@ def mesh_vertex_attributes(header, stream, subs, lod=0):
         here = os.path.dirname(os.path.abspath(__file__))
         if here not in sys.path:
             sys.path.append(here)  # append, never insert(0)
-        import watchmen_extract as we
+        import model_header
+        import model_mesh
 
-    mesh = we.decode_model_mesh(header, stream, lod)
+    mesh = model_mesh.decode_model_mesh(header, stream, lod)
     if mesh is None:
         return None
-    bufs = [b for b in we.select_model_buffers(mesh["model"], lod) if b["format"] in (5, 6)]
+    bufs = [
+        b for b in model_header.select_model_buffers(mesh["model"], lod) if b["format"] in (5, 6)
+    ]
     sm = [m for m in mesh["submeshes"] if m["format"] in (5, 6)]
     if len(sm) != len(subs) or len(bufs) != len(sm):
         return None
@@ -252,7 +256,7 @@ def mesh_vertex_attributes(header, stream, subs, lod=0):
     if np.isfinite(raw_t).all() and (np.linalg.norm(raw_t, axis=1) > 1e-6).all():
         un = unit_normals(normals)
         if un is not None:
-            tangents = we.gltf_tangents(un, raw_t, raw_b)
+            tangents = model_mesh.gltf_tangents(un, raw_t, raw_b)
     return {
         "normals": normals,
         "colors": colors,
@@ -451,9 +455,9 @@ def build_rigged_glb(
         # the first sheet in full, as the MTL writer reads it
         if not (engine_materials and td):
             return {}
-        import watchmen_extract as _we
+        import texture_sheet
 
-        return _we.first_sheet(td)
+        return texture_sheet.first_sheet(td)
 
     import materials as _mt
 
@@ -474,20 +478,21 @@ def build_rigged_glb(
         if key in matmap:
             return matmap[key]
         mi = None
-        if hasattr(tex_index, "resolve"):  # watchmen_extract.TextureIndex: by path, then name
+        if hasattr(tex_index, "resolve"):  # obj_mtl.TextureIndex: by path, then name
             td = tex_index.resolve(texname, log if callable(log) else None)
         else:
             td = tex_index.get(str(texname).lower()) if tex_index else None
         dif = None
         sheet = _sheet(td)
         # the sheet may take single layers from another texture, and may not be
-        # a plain alpha blend (watchmen_extract.sheet_blend)
+        # a plain alpha blend (texture_sheet.sheet_blend)
         over, sblend = {}, None
         if engine_materials and sheet:
-            import watchmen_extract as _we
+            import obj_mtl
+            import texture_sheet
 
-            over = _we.sheet_layer_dirs(tex_index, sheet, log if callable(log) else None)
-            sblend = _we.sheet_blend(sheet)
+            over = obj_mtl.sheet_layer_dirs(tex_index, sheet, log if callable(log) else None)
+            sblend = texture_sheet.sheet_blend(sheet)
         # a type 0 / 10 sheet that is drawn blended only for its opacity is written
         # by materials.alpha (BLEND + opacity factor) with its engine material; only
         # an additive / subtractive one needs the rewritten layer (engine mode)
@@ -506,7 +511,7 @@ def build_rigged_glb(
                 src = Image.open(dif)
                 tex_alpha = False
                 if sblend and sblend.get("gltf") in ("ink", "glow"):
-                    src = _we.blend_layer_image(src, sblend)
+                    src = texture_sheet.blend_layer_image(src, sblend)
                 if engine_materials and src.mode in ("RGBA", "LA", "PA"):
                     rgba = src.convert("RGBA")
                     tex_alpha = rgba.getextrema()[3][0] < 255
@@ -515,7 +520,7 @@ def build_rigged_glb(
                     # the engine's alpha test follows the texture header's alpha
                     # flag (0x429e77 -> 0x571d5d), not the pixels
                     tex_alpha, _hdr = _mt.texture_has_alpha(
-                        _we.read_sheet_json(over.get("diffuse", td)), pix_alpha
+                        texture_sheet.read_sheet_json(over.get("diffuse", td)), pix_alpha
                     )
 
                 def _amode(va):
@@ -572,7 +577,7 @@ def build_rigged_glb(
                     if afac is not None:
                         mat["pbrMetallicRoughness"]["baseColorFactor"] = [1.0, 1.0, 1.0, afac]
                     if sblend:
-                        _we.blend_material(
+                        texture_sheet.blend_material(
                             mat, sblend, len(j["textures"]) - 1, sheet.get("opacity")
                         )
                     nrm = None

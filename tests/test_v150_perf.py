@@ -8,7 +8,8 @@ import struct
 import time
 
 
-import watchmen_extract as we
+import material_refs
+import texture_sheet
 import test_texture_sheets as tts
 import test_v120_regressions as tv
 
@@ -17,7 +18,7 @@ import test_v120_regressions as tv
 # frozen 1.4.0 copies (reference)
 # ---------------------------------------------------------------------------
 def old_texture_sheet(header, order="<"):
-    H = we.sheet_hashes()
+    H = texture_sheet.sheet_hashes()
     n = len(header)
     salt = None
     rt = H["renderType"]
@@ -29,22 +30,24 @@ def old_texture_sheet(header, order="<"):
             start = o
             break
     if salt is None:
-        for sh in we._untyped_sheets(header, order):
+        for sh in texture_sheet._untyped_sheets(header, order):
             if "renderType" in sh:
                 return {
-                    k: (sh[k] & 0xFFFFFFFF) if we.TEXTURE_SHEET_PROPS[k] == "integer" else sh[k]
-                    for k in we.TEXTURE_SHEET_PROPS
+                    k: (sh[k] & 0xFFFFFFFF)
+                    if texture_sheet.TEXTURE_SHEET_PROPS[k] == "integer"
+                    else sh[k]
+                    for k in texture_sheet.TEXTURE_SHEET_PROPS
                     if k in sh
                 }
         return {}
     out = {}
-    want = {H[k]: k for k in we.TEXTURE_SHEET_PROPS}
+    want = {H[k]: k for k in texture_sheet.TEXTURE_SHEET_PROPS}
     for o in range(start, n - 20):
         s0, lo, hi = struct.unpack_from(order + "III", header, o)
         if s0 != salt or lo not in want:
             continue
         nm = want[lo]
-        typ = we.TEXTURE_SHEET_PROPS[nm]
+        typ = texture_sheet.TEXTURE_SHEET_PROPS[nm]
         if hi != H[typ] or nm in out:
             continue
         if typ == "number":
@@ -57,8 +60,8 @@ def old_texture_sheet(header, order="<"):
 
 
 def old_submesh_materials(header, order="<"):
-    _u32 = we._u32
-    nmats = len(we.extract_materials(header))
+    _u32 = material_refs.u32_at
+    nmats = len(material_refs.extract_materials(header))
     recs = []
     i = 0
     n = len(header)
@@ -144,11 +147,11 @@ def test_texture_sheet_equals_the_1_4_0_scan():
     for base in _sheet_headers():
         for h in _mutants(base, rng):
             for order in "<>":
-                assert we.texture_sheet(h, order) == old_texture_sheet(h, order)
+                assert texture_sheet.texture_sheet(h, order) == old_texture_sheet(h, order)
                 n += 1
     for _ in range(150):
         h = _noise(rng, rng.randrange(0, 600))
-        assert we.texture_sheet(h) == old_texture_sheet(h)
+        assert texture_sheet.texture_sheet(h) == old_texture_sheet(h)
     assert n >= 70
 
 
@@ -156,7 +159,7 @@ def test_texture_sheet_finds_overlapping_salt_words():
     """A salt whose bytes repeat (a record right after a matching byte run)."""
     h = tts._header(tts._sheet(0x01010101, "a", 5, renderType=1))
     h = b"\x01\x01\x01" + h
-    assert we.texture_sheet(h) == old_texture_sheet(h) != {}
+    assert texture_sheet.texture_sheet(h) == old_texture_sheet(h) != {}
 
 
 def _model_headers():
@@ -176,12 +179,12 @@ def test_submesh_materials_equals_the_1_4_0_scan():
     n = 0
     for order, base in _model_headers():
         for h in _mutants(base, rng, 10):
-            assert we.submesh_materials(h, order) == old_submesh_materials(h, order)
+            assert material_refs.submesh_materials(h, order) == old_submesh_materials(h, order)
             n += 1
     for _ in range(100):
         h = _noise(rng, rng.randrange(0, 500))
         for order in "<>":
-            assert we.submesh_materials(h, order) == old_submesh_materials(h, order)
+            assert material_refs.submesh_materials(h, order) == old_submesh_materials(h, order)
     assert n >= 40
 
 
@@ -190,7 +193,7 @@ def test_u32_view_of_every_offset():
     for n in range(0, 23):
         b = bytes(rng.getrandbits(8) for _ in range(n))
         for order in "<>":
-            W = we._u32_all(b, order)
+            W = material_refs._u32_all(b, order)
             assert W.tolist() == [struct.unpack_from(order + "I", b, o)[0] for o in range(n - 3)]
 
 
@@ -198,7 +201,7 @@ def test_the_scans_are_faster(capsys):
     """Report the speed-up on a 400 KB header (no assertion on the machine)."""
     rng = random.Random(9)
     big = _noise(rng, 400_000)
-    for new, old in ((we.texture_sheet, old_texture_sheet),):
+    for new, old in ((texture_sheet.texture_sheet, old_texture_sheet),):
         t0 = time.perf_counter()
         a = new(big)
         t1 = time.perf_counter()

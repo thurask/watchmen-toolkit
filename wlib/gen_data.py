@@ -146,13 +146,14 @@ def exe_string_map(d):
 def naz_source_strings(src):
     """String harvest over every decompressed block payload of a naz archive
     (or Part 1 loose directory): asset names + all inline string payloads."""
-    import watchmen_extract as we
+    import kapow_block
+    import naz_archive
 
     out = set()
-    for _stem, b in we.iter_blocks(src):
+    for _stem, b in naz_archive.iter_blocks(src):
         if "h" not in b:
             continue
-        for e, h, st in we.extract_block(b["h"], b.get("s")):
+        for e, h, st in kapow_block.extract_block(b["h"], b.get("s")):
             if e.name:
                 out.add(e.name)
                 out.update(p for p in e.name.replace("\\", "/").split("/") if p)
