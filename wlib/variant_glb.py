@@ -10,13 +10,14 @@ import json
 import struct
 import zlib
 import numpy as np
-from wutil import GlbPacker, glb_bytes, load_npz, order_name, platform_name, restricted_load
+from wutil import glb_bytes, load_npz, order_name, platform_name, restricted_load
 
 _D = os.path.dirname(os.path.abspath(__file__))
 if _D not in sys.path:
     sys.path.append(_D)  # append, never insert(0): flat module names must not shadow the stdlib
 import watchmen_extract as we  # noqa: E402
 import rig_glb  # noqa: E402
+import gltf_build  # noqa: E402
 
 # AXIS: the Kapow engine is ALREADY Y-up, so no axis conversion is needed for
 # glTF.  This module applies no Z-up->Y-up rotation C to POSITION and no inverse
@@ -579,8 +580,8 @@ def write_glb(
     _hier = _jnames is not None
     if _hier:
         _skel = _am.skeleton_extras(_bnames, _bpar, rig="hierarchy", joint_nodes=_jnames)
-    j = {
-        "asset": {
+    doc = gltf_build.GltfDoc(
+        {
             "version": "2.0",
             "generator": "watchmen_extract variant_glb",
             "extras": {
@@ -591,25 +592,23 @@ def write_glb(
                 }
             },
         },
-        "scene": 0,
-        "scenes": [{"nodes": []}],
-        "nodes": [],
-        "meshes": [],
-        "skins": [],
-        "accessors": [],
-        "bufferViews": [],
-        "buffers": [],
-        "materials": [],
-        "animations": [],
-        "images": [],
-        "textures": [],
-        "samplers": [{"magFilter": 9729, "minFilter": 9987, "wrapS": 10497, "wrapT": 10497}],
-    }
-    # outfit nodes of the same model: identical data is written once and the
-    # ACCESSOR is shared (_pk.share; a buffer view shared by two accessors would
-    # need a byteStride; a shared accessor needs nothing)
-    _pk = GlbPacker(j["bufferViews"], j["accessors"])
-    BIN = _pk.bin
+        (
+            "nodes",
+            "meshes",
+            "skins",
+            "accessors",
+            "bufferViews",
+            "buffers",
+            "materials",
+            "animations",
+            "images",
+            "textures",
+        ),
+        {"magFilter": 9729, "minFilter": 9987, "wrapS": 10497, "wrapT": 10497},
+    )
+    j = doc.j
+    _pk = doc.packer
+    BIN = doc.bin
 
     _used_joints = used_joints
 
@@ -1279,26 +1278,7 @@ def write_glb(
             flip = np.einsum("kc,kc->k", Qk[f], Qk[f - 1]) < 0
             Qk[f, flip] *= -1
         for k in _facemask:
-            vo = ac(
-                av(np.ascontiguousarray(Qk[:, k].astype(np.float32)).tobytes()),
-                5126,
-                len(kt),
-                "VEC4",
-            )
-            to = ac(
-                av(np.ascontiguousarray(Tk[:, k].astype(np.float32)).tobytes()),
-                5126,
-                len(kt),
-                "VEC3",
-            )
-            sm.append({"input": ta3, "output": vo, "interpolation": "LINEAR"})
-            chn.append(
-                {"sampler": len(sm) - 1, "target": {"node": facenodes[k], "path": "rotation"}}
-            )
-            sm.append({"input": ta3, "output": to, "interpolation": "LINEAR"})
-            chn.append(
-                {"sampler": len(sm) - 1, "target": {"node": facenodes[k], "path": "translation"}}
-            )
+            doc.add_trs(sm, chn, facenodes[k], ta3, Qk[:, k], Tk[:, k])
         return info
 
     for entry in manifest:
@@ -1335,16 +1315,7 @@ def write_glb(
             Q[f, flip] *= -1
         Tt = W[:, :, :3, 3]
         for k in range(NB) if bmask is None else bmask:
-            vo = ac(av(np.ascontiguousarray(Q[:, k].astype(np.float32)).tobytes()), 5126, F, "VEC4")
-            to = ac(
-                av(np.ascontiguousarray(Tt[:, k].astype(np.float32)).tobytes()), 5126, F, "VEC3"
-            )
-            sm.append({"input": ta, "output": vo, "interpolation": "LINEAR"})
-            chn.append({"sampler": len(sm) - 1, "target": {"node": bnode[k], "path": "rotation"}})
-            sm.append({"input": ta, "output": to, "interpolation": "LINEAR"})
-            chn.append(
-                {"sampler": len(sm) - 1, "target": {"node": bnode[k], "path": "translation"}}
-            )
+            doc.add_trs(sm, chn, bnode[k], ta, Q[:, k], Tt[:, k])
         if _faceride is not None and bmask is None:
             # face armature rides via ONE anchor joint (face bones are its
             # children with LOCAL channels -> expressions follow the head, and
@@ -1360,19 +1331,7 @@ def write_glb(
                 for f in range(1, F):
                     if (Qf[f] * Qf[f - 1]).sum() < 0:
                         Qf[f] *= -1
-                vo = ac(av(np.ascontiguousarray(Qf.astype(np.float32)).tobytes()), 5126, F, "VEC4")
-                to = ac(
-                    av(np.ascontiguousarray(La[:, :3, 3].astype(np.float32)).tobytes()),
-                    5126,
-                    F,
-                    "VEC3",
-                )
-                sm.append({"input": ta, "output": vo, "interpolation": "LINEAR"})
-                chn.append({"sampler": len(sm) - 1, "target": {"node": anchor, "path": "rotation"}})
-                sm.append({"input": ta, "output": to, "interpolation": "LINEAR"})
-                chn.append(
-                    {"sampler": len(sm) - 1, "target": {"node": anchor, "path": "translation"}}
-                )
+                doc.add_trs(sm, chn, anchor, ta, Qf, La[:, :3, 3])
             # ENGINE RULE: the face track of the state(s) that play this clip
             _eng = _engine and _fpose and _fs is not None
             if _eng:
@@ -1392,22 +1351,13 @@ def write_glb(
             for k in () if _eng else _facemask:
                 if k in _blinkset:
                     continue  # blink channel written below
-                vo = ac(
-                    av(np.tile(_base[0][k].astype(np.float32), (2, 1)).tobytes()), 5126, 2, "VEC4"
-                )
-                to = ac(
-                    av(np.tile(_base[1][k].astype(np.float32), (2, 1)).tobytes()), 5126, 2, "VEC3"
-                )
-                sm.append({"input": ta2, "output": vo, "interpolation": "LINEAR"})
-                chn.append(
-                    {"sampler": len(sm) - 1, "target": {"node": facenodes[k], "path": "rotation"}}
-                )
-                sm.append({"input": ta2, "output": to, "interpolation": "LINEAR"})
-                chn.append(
-                    {
-                        "sampler": len(sm) - 1,
-                        "target": {"node": facenodes[k], "path": "translation"},
-                    }
+                doc.add_trs(
+                    sm,
+                    chn,
+                    facenodes[k],
+                    ta2,
+                    np.tile(_base[0][k].astype(np.float32), (2, 1)),
+                    np.tile(_base[1][k].astype(np.float32), (2, 1)),
                 )
             if _blinkset:
                 # sparse blink keys on the lid bones: neutral->closed->neutral
@@ -1439,22 +1389,7 @@ def write_glb(
                     _Q = np.array([(_qn * (1 - w) + _qc * w) for w in _wts], np.float32)
                     _Q /= np.linalg.norm(_Q, axis=1, keepdims=True)
                     _T = np.array([(_tn * (1 - w) + _tc * w) for w in _wts], np.float32)
-                    vo = ac(av(_Q.tobytes()), 5126, len(_kt), "VEC4")
-                    to = ac(av(_T.tobytes()), 5126, len(_kt), "VEC3")
-                    sm.append({"input": _ta3, "output": vo, "interpolation": "LINEAR"})
-                    chn.append(
-                        {
-                            "sampler": len(sm) - 1,
-                            "target": {"node": facenodes[k], "path": "rotation"},
-                        }
-                    )
-                    sm.append({"input": _ta3, "output": to, "interpolation": "LINEAR"})
-                    chn.append(
-                        {
-                            "sampler": len(sm) - 1,
-                            "target": {"node": facenodes[k], "path": "translation"},
-                        }
-                    )
+                    doc.add_trs(sm, chn, facenodes[k], _ta3, _Q, _T)
             for pi, bs in enumerate(_pslots):
                 _MkCi = _palign[pi] if _palign is not None else _M4Ci
                 Lp = np.einsum("fab,bc->fac", A4[:, bs], _MkCi)
@@ -1462,24 +1397,7 @@ def write_glb(
                 for f in range(1, F):
                     if (Qf[f] * Qf[f - 1]).sum() < 0:
                         Qf[f] *= -1
-                vo = ac(av(np.ascontiguousarray(Qf.astype(np.float32)).tobytes()), 5126, F, "VEC4")
-                to = ac(
-                    av(np.ascontiguousarray(Lp[:, :3, 3].astype(np.float32)).tobytes()),
-                    5126,
-                    F,
-                    "VEC3",
-                )
-                sm.append({"input": ta, "output": vo, "interpolation": "LINEAR"})
-                chn.append(
-                    {"sampler": len(sm) - 1, "target": {"node": proxynodes[pi], "path": "rotation"}}
-                )
-                sm.append({"input": ta, "output": to, "interpolation": "LINEAR"})
-                chn.append(
-                    {
-                        "sampler": len(sm) - 1,
-                        "target": {"node": proxynodes[pi], "path": "translation"},
-                    }
-                )
+                doc.add_trs(sm, chn, proxynodes[pi], ta, Qf, Lp[:, :3, 3])
         j["animations"].append(_anim(animname, sm, chn, F, fps, _finfo))
     if face is not None:
         fb = load_npz(face["bind"])
@@ -1512,23 +1430,7 @@ def write_glb(
             for k in _facemask:  # only bones BELOW Head: the rig's own
                 # Bip01/Neck/Head tracks carry the cutscene neck posture and
                 # would double-rotate the head that already rides the body.
-                vo = ac(
-                    av(np.ascontiguousarray(Q[:, k].astype(np.float32)).tobytes()), 5126, F, "VEC4"
-                )
-                to = ac(
-                    av(np.ascontiguousarray(Tt[:, k].astype(np.float32)).tobytes()), 5126, F, "VEC3"
-                )
-                sm.append({"input": ta, "output": vo, "interpolation": "LINEAR"})
-                chn.append(
-                    {"sampler": len(sm) - 1, "target": {"node": facenodes[k], "path": "rotation"}}
-                )
-                sm.append({"input": ta, "output": to, "interpolation": "LINEAR"})
-                chn.append(
-                    {
-                        "sampler": len(sm) - 1,
-                        "target": {"node": facenodes[k], "path": "translation"},
-                    }
-                )
+                doc.add_trs(sm, chn, facenodes[k], ta, Q[:, k], Tt[:, k])
             _fa = {"name": animname, "samplers": sm, "channels": chn}
             if _engine:
                 _fa["extras"] = {"watchmen": {"face_pose": _fr.pose_extras(meta, animname)}}
