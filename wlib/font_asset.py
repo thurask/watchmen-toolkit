@@ -9,7 +9,7 @@ Xbox 360 / PS3:
     u8      has_data          0 = no font buffer follows (0x540c75)
     -- texture descriptor, 29 bytes (0x429e77) --
     u32     width, height
-    u32     enum              texture format id (watchmen_extract.TEX_FMT; 1 = A8R8G8B8)
+    u32     enum              texture format id (texture_header.TEX_FMT; 1 = A8R8G8B8)
     u32     usage             texture usage (0x456d46); 0 in all 18 files; JSON keys usage
                               and x
     u32     type              1 = 2D
@@ -66,8 +66,7 @@ if _HERE not in sys.path:
     sys.path.append(_HERE)
 
 FORMAT = "kapow-font/1"
-_DESC = "5IBII"  # width height enum x type alpha mips size
-_DESC_LEN = 29
+_DESC_LEN = 29  # the texture descriptor (texture_header.read_descriptor)
 _GLYPH_LEN = 27
 
 #: what in the JSON is a reading of the values and not of the loader code
@@ -104,38 +103,30 @@ class FontError(ValueError):
 
 
 def detect_order(data):
-    """'<' or '>' from the texture descriptor (width and height are small powers of two)."""
+    """'<' or '>' from the texture descriptor (texture_header.descriptor_ok)."""
+    import texture_header as th
+
     for bo in "<>":
         try:
-            w, h, en, _x, typ, alpha, mips, _size = struct.unpack_from(bo + _DESC, data, 1)
-        except struct.error:
+            d = th.read_descriptor(data, 1, bo)
+        except th.TextureHeaderError:
             break
-        if 0 < w <= 8192 and 0 < h <= 8192 and typ in (1, 2) and alpha <= 1 and 1 <= mips <= 14:
+        if th.descriptor_ok(d):
             return bo
     raise FontError("no texture descriptor at offset 1")
 
 
-def _tex_fmt():
-    import watchmen_extract as wx
-
-    return wx
-
-
 def _pixel_bytes(data, tex, bo):
-    """(offset, length) of the inline atlas block that follows the descriptor."""
+    """(offset, length) of the inline atlas block that follows the descriptor
+    (texture_header.layer_bytes: PC mip chain, Xbox 360 stored size, PS3 RSX
+    descriptor and chain)."""
+    import texture_header as th
+
     p = 1 + _DESC_LEN
-    if bo == "<":
-        wx = _tex_fmt()
-        if tex["enum"] not in wx.TEX_FMT:
-            raise FontError("texture format id %d" % tex["enum"])
-        return p, wx.chain_bytes_exact(tex["enum"], tex["width"], tex["height"], tex["mips"])
-    if tex["size"]:  # Xbox 360: the descriptor carries the stored size
-        return p, tex["size"]
-    # PS3: 36-byte RSX descriptor, byte count at +8
-    if p + 36 > len(data):
-        raise FontError("truncated RSX descriptor")
-    (n,) = struct.unpack_from(">I", data, p + 8)
-    return p, 36 + n
+    try:
+        return p, th.layer_bytes(tex, bo, data, p)
+    except th.TextureHeaderError as ex:
+        raise FontError(str(ex)) from None
 
 
 def parse(data, order=None):
@@ -149,21 +140,24 @@ def parse(data, order=None):
         return {"format": FORMAT, "order": order or "<", "has_data": False, "glyphs": []}
     if data[0] != 1:
         raise FontError("has_data byte is %d" % data[0])
+    import texture_header as th
+
     bo = order or detect_order(data)
     try:
-        w, h, en, x, typ, alpha, mips, size = struct.unpack_from(bo + _DESC, data, 1)
-    except struct.error:
-        raise FontError("truncated texture descriptor")  # noqa: B904
+        d = th.read_descriptor(data, 1, bo)
+    except th.TextureHeaderError:
+        raise FontError("truncated texture descriptor") from None
+    w, h, en = d["width"], d["height"], d["enum"]
     tex = {
         "width": w,
         "height": h,
         "enum": en,
-        "x": x,
-        "usage": x,  # TextureBuffer +0x10 (0x456d46)
-        "type": typ,
-        "alpha": bool(alpha),
-        "mips": mips,
-        "size": size,
+        "x": d["usage"],
+        "usage": d["usage"],  # TextureBuffer +0x10 (0x456d46)
+        "type": d["type"],
+        "alpha": bool(d["alpha"]),
+        "mips": d["mips"],
+        "size": d["size"],
     }
     off, n = _pixel_bytes(data, tex, bo)
     p = off + n
@@ -199,8 +193,7 @@ def parse(data, order=None):
         }
         glyphs.append(g)
     try:
-        wx = _tex_fmt()
-        tex["fmt"] = wx.TEX_FMT[en][0]
+        tex["fmt"] = th.TEX_FMT[en][0]
     except KeyError:  # an image enum the texture reader does not name: no "fmt"
         pass
     tex["data_offset"] = off
@@ -243,20 +236,10 @@ def build(doc, pixel_block=b""):
         return b"\0"
     bo = doc["order"]
     t = doc["texture"]
+    import texture_header as th
+
     out = [b"\1"]
-    out.append(
-        struct.pack(
-            bo + _DESC,
-            t["width"],
-            t["height"],
-            t["enum"],
-            _named(t, "usage", "x"),
-            t["type"],
-            int(t["alpha"]),
-            t["mips"],
-            t["size"],
-        )
-    )
+    out.append(th.pack_descriptor(dict(t, usage=_named(t, "usage", "x")), bo))
     out.append(bytes(pixel_block))
     f = {name: _named(doc, name, alias) for name, alias in ALIASES}
     out.append(struct.pack(bo + "4I", doc["glyph_height"], f["flags"], f["h_align"], f["v_align"]))
@@ -282,21 +265,13 @@ def build(doc, pixel_block=b""):
 
 def atlas_image(data, doc):
     """Top mip of the atlas as a numpy array (h, w, 4) RGBA / (h, w) L8, or None when the
-    format or platform layout is not decoded.  Uses the texture decoders of
-    watchmen_extract (PC linear; Xbox 360 tiled; PS3 RSX)."""
+    format or platform layout is not decoded (texture_decode.layer_image: PC
+    linear; Xbox 360 tiled; PS3 RSX)."""
     if not doc.get("has_data"):
         return None
-    wx = _tex_fmt()
-    t = doc["texture"]
-    en, w, h = t["enum"], t["width"], t["height"]
-    if en not in wx.TEX_FMT or t["type"] != 1:
-        return None
-    blk = pixels(data, doc)
-    if doc["order"] == "<":
-        return wx.decode_one_layer(blk, en, w, h)
-    if t["size"]:
-        return wx.x360_base_level(blk, en, w, h)
-    return wx.ps3_layer_image(blk[36:], {"enum": en, "aw": w, "ah": h}, False)
+    import texture_decode
+
+    return texture_decode.layer_image(doc["texture"], pixels(data, doc), doc["order"])
 
 
 def checks(doc):

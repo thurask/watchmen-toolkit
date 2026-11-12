@@ -118,6 +118,12 @@
   reader gives the same result as before on all 6,441 carved Texture headers, and `pc_p2`,
   `ps3_p2`, `x360_p2` and `pc_p1` are byte-identical to the 1.7.0 export, `_extract_done.txt`
   excluded (measured). (2026-11-12)
+- **Fonts and terrain colouring read their texture through `texture_header`.** `font_asset` and
+  `terrain_asset` read and write the descriptor with `read_descriptor` / `pack_descriptor`
+  (their own `5IBII` copies are gone), size the atlas with `layer_bytes` and decode it with
+  `texture_decode.layer_image`, instead of reaching the texture code through
+  `watchmen_extract`. Messages and JSON unchanged: `pc_p2`, `ps3_p2`, `x360_p2` and `pc_p1`
+  byte-identical to the 1.7.0 export, `_extract_done.txt` excluded (measured). (2026-11-12)
 
 ## 1.7.0 — 2026-11-11
 

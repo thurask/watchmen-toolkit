@@ -1050,24 +1050,36 @@ def notes(name, doc):
 # ---------------------------------------------------------------------------
 # .terraincoloringasset
 # ---------------------------------------------------------------------------
-_TCA = "4I2fIf3B"  # 35 bytes
-_DESC = "5IBII"  # 29 bytes
+_TCA = "4I2fIf3B"  # 35 bytes, then the texture descriptor (texture_header.read_descriptor)
+_TCA_DESC = 29
 
 
 def coloring_parse(data, order=None):
     """.terraincoloringasset header -> JSON dict (reader 0x52da01)."""
-    if len(data) != struct.calcsize("<" + _TCA) + struct.calcsize("<" + _DESC):
+    import texture_header as th
+
+    if len(data) != struct.calcsize("<" + _TCA) + _TCA_DESC:
         raise TerrainError("a terrain colouring header is 64 bytes, not %d" % len(data))
     bo = order
     if bo is None:
         for bo in "<>":
-            w, h = struct.unpack_from(bo + "2I", data, 35)
-            if 0 < w <= 16384 and 0 < h <= 16384:
+            d = th.read_descriptor(data, 35, bo)
+            if 0 < d["width"] <= 16384 and 0 < d["height"] <= 16384:
                 break
         else:
             raise TerrainError("no texture descriptor at 35")
     a0, a4, s98, s9c, fa8, fac, ub0, fb8, bbd, bbc, bbe = struct.unpack_from(bo + _TCA, data, 0)
-    w, h, en, x, typ, alpha, mips, size = struct.unpack_from(bo + _DESC, data, 35)
+    d = th.read_descriptor(data, 35, bo)
+    w, h, en, x, typ, alpha, mips, size = (
+        d["width"],
+        d["height"],
+        d["enum"],
+        d["usage"],
+        d["type"],
+        d["alpha"],
+        d["mips"],
+        d["size"],
+    )
     if max(bbd, bbc, bbe, alpha) > 1:
         raise TerrainError("flag byte above 1")
     doc = {
@@ -1134,67 +1146,52 @@ COLORING_ALIASES = (
 
 
 def coloring_build(doc):
+    import texture_header as th
+
     bo = doc["order"]
     t = doc["texture"]
     return struct.pack(
         bo + _TCA, *[_named(doc, name, alias) for name, alias in COLORING_ALIASES]
-    ) + struct.pack(
-        bo + _DESC,
-        t["width"],
-        t["height"],
-        t["enum"],
-        _named(t, "usage", "x"),
-        t["type"],
-        int(t["alpha"]),
-        t["mips"],
-        t["size"],
-    )
+    ) + th.pack_descriptor(dict(t, usage=_named(t, "usage", "x")), bo)
 
 
 def coloring_image(doc, stream):
     """The texture of a colouring asset as a numpy array, or None when the platform
     layout / format is not decoded.  Sets doc['stream'] = {bytes, expected_bytes,
     leftover_bytes}."""
-    import watchmen_extract as wx
+    import texture_decode
+    import texture_header as th
 
     t = doc["texture"]
     en, w, h = t["enum"], t["width"], t["height"]
     info = {"bytes": len(stream)}
     doc["stream"] = info
-    if en not in wx.TEX_FMT or t["type"] != 1:
+    if en not in th.TEX_FMT or t["type"] != 1:
         info["not_decoded"] = "texture format id %d / type %d" % (en, t["type"])
         info["leftover_bytes"] = len(stream)
         return None
-    t["fmt"] = wx.TEX_FMT[en][0]
+    t["fmt"] = th.TEX_FMT[en][0]
     if doc["order"] == "<":
-        want = wx.chain_bytes_exact(en, w, h, t["mips"])
-        kind, unit = wx.TEX_FMT[en][1]
-        if kind == "lin":  # rows are padded to 4 bytes: take them apart
-            np = _np()
-            pitch = (w * unit + 3) & ~3
-            if len(stream) < pitch * h:
-                info["not_decoded"] = "stream shorter than %d rows of %d bytes" % (h, pitch)
-                info["leftover_bytes"] = len(stream)
-                return None
-            rows = np.frombuffer(stream, np.uint8, pitch * h).reshape(h, pitch)
-            img = wx.decode_one_layer(np.ascontiguousarray(rows[:, : w * unit]).tobytes(), en, w, h)
-        else:
-            img = wx.decode_one_layer(stream, en, w, h)
+        want = th.layer_bytes(t, "<", stream)
+        kind, unit = th.TEX_FMT[en][1]
+        pitch = (w * unit + 3) & ~3
+        if kind == "lin" and len(stream) < pitch * h:  # rows are padded to 4 bytes
+            info["not_decoded"] = "stream shorter than %d rows of %d bytes" % (h, pitch)
+            info["leftover_bytes"] = len(stream)
+            return None
+        img = texture_decode.layer_image(t, stream, "<")
     elif t["size"]:
-        want = t["size"]
-        img = wx.x360_base_level(stream, en, w, h) if len(stream) >= want else None
-        if img is not None and min(w, h) < 4 and wx.TEX_FMT[en][1][0] == "blk":
+        want = th.layer_bytes(t, ">", stream)
+        img = texture_decode.layer_image(t, stream, ">") if len(stream) >= want else None
+        if img is not None and min(w, h) < 4 and th.TEX_FMT[en][1][0] == "blk":
             # measured: the 1 x 1 map of Part 1 reads 204 here and 255 on PC / PS3
             info["unverified"] = (
                 "Xbox 360 map smaller than one 4x4 block: where its texels sit in the "
                 "stored block is not established, the image may be wrong"
             )
     else:
-        want = len(stream)
-        if len(stream) >= 36:
-            (n,) = struct.unpack_from(">I", stream, 8)
-            want = 36 + n
-        img = wx.ps3_layer_image(stream[36:], {"enum": en, "aw": w, "ah": h}, False)
+        want = th.layer_bytes(t, ">", stream) if len(stream) >= 36 else len(stream)
+        img = texture_decode.layer_image(t, stream, ">")
     info["expected_bytes"] = want
     info["leftover_bytes"] = len(stream) - want
     if img is None:
