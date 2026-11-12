@@ -920,6 +920,223 @@ class VariantGlb:
             j["nodes"].append({"name": aname, "mesh": mi_, "skin": 0})
         pk.share = False
 
+    # ----------------------------------------------------------------- skins
+    def face_rig(self):
+        """SECOND SKIN: the face rig parented under the body's Head joint -- rides
+        every body animation via hierarchy; face poses = local channels on the
+        face joints only.  face = dict(bind, parts, anims, attach_idx, M (3,3),
+        t (3)) with M,t mapping face-model space -> body bind space.  Sets
+        `facenodes`, `proxynodes`, `anchor`, `frn` (face_root, flat rig only),
+        `fmnode` (the face mesh node) and, from the face bind (read once here),
+        `fb`, `NF`, `B4f`, `M4`.
+
+        Flat rig: `face_root` is a scene root; f_anchor and the proxies under it
+        carry WORLD channels, A4[Head]·M4 and A4[bs]·Mk, on every body clip.
+        Hierarchy: no face_root; f_anchor is a child of the attach joint (Head)
+        and each proxy a child of its body joint bs, with the CONSTANT local
+        transforms inv(B4[Head])·M4 and inv(B4[bs])·Mk -- their world transform is
+        the same product on every key, and between keys they follow the joint
+        they ride instead of being interpolated in world space on their own
+        (which let the face drift off the head mid-key).  No channels are written
+        for them."""
+        self.facenodes = []
+        self.proxynodes = []
+        self.anchor = self.frn = self.fmnode = None
+        face = self.face
+        if face is None:
+            return
+        j, hier, B4, bnode, doc = self.j, self.hier, self.B4, self.bnode, self.doc
+        fb = self.fb = load_npz(face["bind"])
+        fRb, ftb = fb["Rb"], fb["tb"]
+        NF = self.NF = len(fRb)
+        B4f = self.B4f = np.tile(np.eye(4), (NF, 1, 1))
+        B4f[:, :3, :3] = fRb
+        B4f[:, :3, 3] = ftb
+        M4 = self.M4 = np.eye(4)
+        M4[:3, :3] = face["M"]
+        M4[:3, 3] = face["t"]
+        ai = face["attach_idx"]
+        if not hier:
+            self.frn = len(j["nodes"])
+            j["nodes"].append({"name": "face_root"})
+        anchor = self.anchor = len(j["nodes"])
+        nd = {"name": "f_anchor"}
+        nd.update(self.node_trs(np.linalg.inv(B4[ai]) @ M4 if hier else M4))
+        j["nodes"].append(nd)
+        if hier:
+            j["nodes"][bnode[ai]].setdefault("children", []).append(anchor)
+        proxynodes = self.proxynodes
+        _palign = face.get("proxy_align") or None  # per-proxy 4x4 alignment
+        for pi, bs in enumerate(face.get("proxy_slots", [])):
+            _Mk = _palign[pi] if _palign is not None else M4
+            Lp = np.linalg.inv(B4[bs]) @ _Mk if hier else _Mk
+            nd = {"name": "face_proxy_b%d_%d" % (bs, pi)}
+            nd.update(self.node_trs(Lp))
+            pn = len(j["nodes"])
+            j["nodes"].append(nd)
+            proxynodes.append(pn)
+            if hier:
+                j["nodes"][bnode[bs]].setdefault("children", []).append(pn)
+        facenodes = self.facenodes
+        for k in range(NF):
+            L = B4f[k]  # LOCAL under f_anchor
+            nd = {"name": "f_%s" % str(fb["names"][k])}
+            nd.update(self.node_trs(L))
+            facenodes.append(len(j["nodes"]))
+            j["nodes"].append(nd)
+        j["nodes"][anchor]["children"] = facenodes[:]
+        if self.frn is not None:
+            j["nodes"][self.frn]["children"] = [anchor] + proxynodes
+        _fj_ibms = (
+            [np.linalg.inv(B4f[k]) for k in range(NF)]
+            + [np.eye(4) for _ in proxynodes]
+            + [np.linalg.inv(M4)]
+        )
+        fibm = doc.accessor(
+            doc.view(np.array([m.T.reshape(16) for m in _fj_ibms], np.float32).tobytes()),
+            5126,
+            len(_fj_ibms),
+            "MAT4",
+        )
+        fprims = []
+        for part in face["parts"]:
+            fprims.append(self.primitive(part, True))
+        fmi = len(j["meshes"])
+        j["meshes"].append({"name": "face", "primitives": fprims})
+        self.fmnode = len(j["nodes"])
+        j["nodes"].append({"name": "face_mesh", "mesh": fmi, "skin": 1})
+        j["skins"].append(
+            {"joints": facenodes + proxynodes + [anchor], "inverseBindMatrices": fibm}
+        )
+
+    def scene_roots(self):
+        """The node "root" (`root`), the scene's root nodes and the skins'
+        skeletons; the face skin's extras under the engine face rule."""
+        import face_rule as _fr
+
+        j, hier, bnode, face = self.j, self.hier, self.bnode, self.face
+        root = self.root = len(j["nodes"])
+        _shown = [a for a in self.attnodes if a not in self.hidden]
+        if hier:
+            # skinned meshes at the scene root (glTF ignores a skinned mesh node's
+            # transform; the validator flags one with a parent): the joints alone
+            # hang under `root`
+            j["nodes"].append(
+                {"name": "root", "children": [bnode[k] for k in range(self.NB) if self.bpar[k] < 0]}
+            )
+            j["scenes"][0]["nodes"] = [root, self.mnode] + _shown
+        else:
+            j["nodes"].append({"name": "root", "children": bnode + [self.mnode] + _shown})
+            j["scenes"][0]["nodes"] = [root]
+        j["skins"][0]["skeleton"] = root
+        if face is None:
+            return
+        if hier:
+            # the face joints hang under body joints: the body root is their
+            # common root
+            j["scenes"][0]["nodes"].append(self.fmnode)
+            j["skins"][1]["skeleton"] = root
+        else:
+            j["scenes"][0]["nodes"].append(self.frn)
+            j["nodes"][self.frn].setdefault("children", []).append(self.fmnode)
+            j["skins"][1]["skeleton"] = self.frn
+        if self.engine:
+            _fm = (self.meta or {}).get("face") or {}
+            _sx = {
+                "head_model": face.get("head"),
+                "pose_family": face.get("family"),
+                "face_classes": sorted(
+                    n
+                    for n, r in (_fm.get("classes") or {}).items()
+                    if r.get("pose_family") == face.get("family")
+                ),
+                "anchor_node": "f_anchor" if hier else "face_root",
+                "rule": "engine",
+                "track_choice": _fr.TRACK_CHOICE,
+                "idle_cycle_baked": bool(self.idle),
+            }
+            if hier:
+                _sx["anchor_parent"] = self.jnames[face["attach_idx"]]
+            if face.get("game_head"):
+                _sx["game_head"] = face["game_head"]
+            j["skins"][1]["extras"] = {"watchmen": {"face": _sx}}
+
+    def below_head(self, k):
+        """True when face joint k hangs below the face bind's "Head"."""
+        fn, fp = self._fn, self.fb["par"]
+        p = fp[k]
+        while p >= 0:
+            if fn[p] == "Head":
+                return True
+            p = fp[p]
+        return False
+
+    def face_locals(self, A):
+        """pose palettes frame (NF,3,4) -> (quat,(NF,3)) LOCALS under anchor."""
+        B4f = self.B4f
+        _A4 = np.concatenate(
+            [
+                A.astype(np.float64),
+                np.tile(np.array([0, 0, 0, 1.0]).reshape(1, 1, 4), (self.NF, 1, 1)),
+            ],
+            axis=1,
+        )
+        _W = np.einsum("kab,kbc->kac", _A4, B4f)
+        _fx = B4f[self.fhead] @ np.linalg.inv(_W[self.fhead])
+        _L = np.einsum("ab,kbc->kac", _fx, _W)
+        return batch_m2q(_L[:, :3, :3]), _L[:, :3, 3]
+
+    def face_poses(self):
+        """`facemask` (the face joints below Head; the only ones animated),
+        `fhead`, and `faceride`: (attach_idx, proxy slots, proxy alignment,
+        neutral locals, per-pose locals, blink data, face_synth) when the face
+        has poses, else None."""
+        self.facemask = None
+        self.faceride = None
+        face = self.face
+        if face is None:
+            return
+        fb, NF = self.fb, self.NF
+        self._fn = [str(x) for x in fb["names"]]
+        self.facemask = [k for k in range(len(self._fn)) if self.below_head(k)]
+        self.fhead = self._fn.index("Head")
+        if not face.get("anims"):
+            return
+        _cand = [a for a in face["anims"] if "MouthClosed_EyesOpen" in a[0]] or list(face["anims"])
+        _fneut = self.face_locals(_cand[0][1][0])
+        # per-category pose locals (AUTO-PAIRING: ATT face on attack clips etc.)
+        # guard ONLY the import: a blanket except would also swallow
+        # face_locals errors and silently disable ALL auto-pairing (and blink
+        # categorization) on the first bad pose.
+        _fpose = {}
+        try:
+            import face_synth as _fs
+        except Exception:
+            _fs = None
+        if _fs is not None:
+            for _pn, _pp in (face.get("auto_poses") or {}).items():
+                try:
+                    _fpose[_pn] = self.face_locals(_pp)
+                except Exception as _pe:
+                    print("  ! auto-pose %s failed: %s" % (_pn, _pe))
+        # blink data: EyeLid bone locals for neutral vs eyes-closed
+        _fblink = None
+        _fn2 = [str(x) for x in fb["names"]]
+        if face.get("blink_closed") is not None and "EyeLid" in _fn2:
+            _lidk = [
+                k for k in range(NF) if "eyelid" in _fn2[k].lower() or _fn2[k] in ("Leye", "Reye")
+            ]
+            _fblink = (_lidk, self.face_locals(face["blink_closed"]))
+        self.faceride = (
+            face["attach_idx"],
+            face.get("proxy_slots", []),
+            face.get("proxy_align") or None,
+            _fneut,
+            _fpose,
+            _fblink,
+            _fs,
+        )
+
 
 def write_glb(
     parts,
@@ -1023,7 +1240,7 @@ def write_glb(
     g.joint_nodes()
     g.body_mesh()
     g.extra_meshes()
-    bnode, mnode, attnodes, _hidden = g.bnode, g.mnode, g.attnodes, g.hidden
+    bnode, attnodes, _hidden = g.bnode, g.attnodes, g.hidden
 
     def _anim(animname, sm, chn, frames, fps, finfo=None):
         a = {"name": animname, "samplers": sm, "channels": chn}
@@ -1036,196 +1253,12 @@ def write_glb(
             a["extras"] = {"watchmen": ex}
         return a
 
-    facenodes = []
-    if face is not None:
-        # SECOND SKIN: face rig parented under the body's Head joint -- rides
-        # every body animation via hierarchy; face poses = local channels on
-        # the face joints only.  face = dict(bind, parts, anims, attach_idx,
-        # M (3,3), t (3)) with M,t mapping face-model space -> body bind space.
-        # the face bind, read once: the face rig, the face mask, the pose
-        # locals and the face clips below all use fb / NF / B4f / M4
-        fb = load_npz(face["bind"])
-        fRb, ftb = fb["Rb"], fb["tb"]
-        NF = len(fRb)
-        B4f = np.tile(np.eye(4), (NF, 1, 1))
-        B4f[:, :3, :3] = fRb
-        B4f[:, :3, 3] = ftb
-        M4 = np.eye(4)
-        M4[:3, :3] = face["M"]
-        M4[:3, 3] = face["t"]
-        ai = face["attach_idx"]
-
-        # Flat rig: `face_root` is a scene root; f_anchor and the proxies
-        # under it carry WORLD channels, A4[Head]·M4 and A4[bs]·Mk, on every body
-        # clip.  Hierarchy: no face_root; f_anchor is a child of the attach
-        # joint (Head) and each proxy a child of its body joint bs, with the
-        # CONSTANT local transforms inv(B4[Head])·M4 and inv(B4[bs])·Mk -- their
-        # world transform is the same product on every key, and between keys
-        # they follow the joint they ride instead of being interpolated in
-        # world space on their own (which let the face drift off the head
-        # mid-key).  No channels are written for them.
-        frn = None
-        if not _hier:
-            frn = len(j["nodes"])
-            j["nodes"].append({"name": "face_root"})
-        anchor = len(j["nodes"])
-        nd = {"name": "f_anchor"}
-        nd.update(g.node_trs(np.linalg.inv(B4[ai]) @ M4 if _hier else M4))
-        j["nodes"].append(nd)
-        if _hier:
-            j["nodes"][bnode[ai]].setdefault("children", []).append(anchor)
-        proxynodes = []
-        _palign = face.get("proxy_align") or None  # per-proxy 4x4 alignment
-        for pi, bs in enumerate(face.get("proxy_slots", [])):
-            _Mk = _palign[pi] if _palign is not None else M4
-            Lp = np.linalg.inv(B4[bs]) @ _Mk if _hier else _Mk
-            nd = {"name": "face_proxy_b%d_%d" % (bs, pi)}
-            nd.update(g.node_trs(Lp))
-            pn = len(j["nodes"])
-            j["nodes"].append(nd)
-            proxynodes.append(pn)
-            if _hier:
-                j["nodes"][bnode[bs]].setdefault("children", []).append(pn)
-        for k in range(NF):
-            L = B4f[k]  # LOCAL under f_anchor
-            nd = {"name": "f_%s" % str(fb["names"][k])}
-            nd.update(g.node_trs(L))
-            facenodes.append(len(j["nodes"]))
-            j["nodes"].append(nd)
-        j["nodes"][anchor]["children"] = facenodes[:]
-        if frn is not None:
-            j["nodes"][frn]["children"] = [anchor] + proxynodes
-        _fj_ibms = (
-            [np.linalg.inv(B4f[k]) for k in range(NF)]
-            + [np.eye(4) for _ in proxynodes]
-            + [np.linalg.inv(M4)]
-        )
-        fibm = ac(
-            av(np.array([m.T.reshape(16) for m in _fj_ibms], np.float32).tobytes()),
-            5126,
-            len(_fj_ibms),
-            "MAT4",
-        )
-        fprims = []
-        for _part in face["parts"]:
-            fprims.append(g.primitive(_part, True))
-        fmi = len(j["meshes"])
-        j["meshes"].append({"name": "face", "primitives": fprims})
-        fmnode = len(j["nodes"])
-        j["nodes"].append({"name": "face_mesh", "mesh": fmi, "skin": 1})
-        j["skins"].append(
-            {"joints": facenodes + proxynodes + [anchor], "inverseBindMatrices": fibm}
-        )
-    root = len(j["nodes"])
-    _shown = [a for a in attnodes if a not in _hidden]
-    if _hier:
-        # skinned meshes at the scene root (glTF ignores a skinned mesh node's
-        # transform; the validator flags one with a parent): the joints alone
-        # hang under `root`
-        j["nodes"].append(
-            {"name": "root", "children": [bnode[k] for k in range(NB) if _bpar[k] < 0]}
-        )
-        j["scenes"][0]["nodes"] = [root, mnode] + _shown
-    else:
-        j["nodes"].append({"name": "root", "children": bnode + [mnode] + _shown})
-        j["scenes"][0]["nodes"] = [root]
-    j["skins"][0]["skeleton"] = root
-    if face is not None:
-        if _hier:
-            # the face joints hang under body joints: the body root is their
-            # common root
-            j["scenes"][0]["nodes"].append(fmnode)
-            j["skins"][1]["skeleton"] = root
-        else:
-            j["scenes"][0]["nodes"].append(frn)
-            j["nodes"][frn].setdefault("children", []).append(fmnode)
-            j["skins"][1]["skeleton"] = frn
-        if _engine:
-            _fm = (meta or {}).get("face") or {}
-            _sx = {
-                "head_model": face.get("head"),
-                "pose_family": face.get("family"),
-                "face_classes": sorted(
-                    n
-                    for n, r in (_fm.get("classes") or {}).items()
-                    if r.get("pose_family") == face.get("family")
-                ),
-                "anchor_node": "f_anchor" if _hier else "face_root",
-                "rule": "engine",
-                "track_choice": _fr.TRACK_CHOICE,
-                "idle_cycle_baked": bool(_idle),
-            }
-            if _hier:
-                _sx["anchor_parent"] = _jnames[face["attach_idx"]]
-            if face.get("game_head"):
-                _sx["game_head"] = face["game_head"]
-            j["skins"][1]["extras"] = {"watchmen": {"face": _sx}}
-    _facemask = None
-    if face is not None:
-        _fn = [str(x) for x in fb["names"]]
-        _fp = fb["par"]
-
-        def _below_head(k):
-            p = _fp[k]
-            while p >= 0:
-                if _fn[p] == "Head":
-                    return True
-                p = _fp[p]
-            return False
-
-        _facemask = [k for k in range(len(_fn)) if _below_head(k)]
-        _fhead = _fn.index("Head")
-    _faceride = None
-    if face is not None and face.get("anims"):
-
-        def _locals_for(_A):
-            """pose palettes frame (NF,3,4) -> (quat,(NF,3)) LOCALS under anchor."""
-            _A4 = np.concatenate(
-                [
-                    _A.astype(np.float64),
-                    np.tile(np.array([0, 0, 0, 1.0]).reshape(1, 1, 4), (NF, 1, 1)),
-                ],
-                axis=1,
-            )
-            _W = np.einsum("kab,kbc->kac", _A4, B4f)
-            _fx = B4f[_fhead] @ np.linalg.inv(_W[_fhead])
-            _L = np.einsum("ab,kbc->kac", _fx, _W)
-            return batch_m2q(_L[:, :3, :3]), _L[:, :3, 3]
-
-        _cand = [a for a in face["anims"] if "MouthClosed_EyesOpen" in a[0]] or list(face["anims"])
-        _fneut = _locals_for(_cand[0][1][0])
-        # per-category pose locals (AUTO-PAIRING: ATT face on attack clips etc.)
-        # guard ONLY the import: a blanket except would also swallow
-        # _locals_for errors and silently disable ALL auto-pairing (and blink
-        # categorization) on the first bad pose.
-        _fpose = {}
-        try:
-            import face_synth as _fs
-        except Exception:
-            _fs = None
-        if _fs is not None:
-            for _pn, _pp in (face.get("auto_poses") or {}).items():
-                try:
-                    _fpose[_pn] = _locals_for(_pp)
-                except Exception as _pe:
-                    print("  ! auto-pose %s failed: %s" % (_pn, _pe))
-        # blink data: EyeLid bone locals for neutral vs eyes-closed
-        _fblink = None
-        _fn2 = [str(x) for x in fb["names"]]
-        if face.get("blink_closed") is not None and "EyeLid" in _fn2:
-            _lidk = [
-                k for k in range(NF) if "eyelid" in _fn2[k].lower() or _fn2[k] in ("Leye", "Reye")
-            ]
-            _fblink = (_lidk, _locals_for(face["blink_closed"]))
-        _faceride = (
-            face["attach_idx"],
-            face.get("proxy_slots", []),
-            face.get("proxy_align") or None,
-            _fneut,
-            _fpose,
-            _fblink,
-            _fs,
-        )
+    g.face_rig()
+    g.scene_roots()
+    g.face_poses()
+    facenodes, proxynodes, anchor = g.facenodes, g.proxynodes, g.anchor
+    NF, B4f, M4 = (g.NF, g.B4f, g.M4) if face is not None else (None, None, None)
+    _facemask, _fhead, _faceride = g.facemask, getattr(g, "fhead", None), g.faceride
 
     def _face_track_channels(animname, F, fps, sm, chn):
         """Engine rule: face-bone channels of one body clip from the face track
