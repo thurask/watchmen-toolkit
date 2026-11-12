@@ -1,6 +1,18 @@
 # Changelog
 
-## Unreleased
+## 1.8.0 — 2026-11-12
+
+**`watchmen_extract.py` is split into flat modules, and `import watchmen_extract` no longer
+works.** The 9,092-line extractor is seventeen modules in `wlib/` (`docs/INDEX.md` lists what
+each holds): the archive, the block, the texture header, sheet, decode and carve, material
+references, the model header, mesh and export, the OBJ / MTL writer, the sound header and audio
+decode, the log, the byte reader and the driver. Callers import the module that holds a name;
+the stand-alone extractor is `python wlib/extract_driver.py game.naz -o OUT`. The driver is one
+run object with a method per pass; read errors are typed `ValueError` subclasses; one reader
+serves the Texture header, fonts and terrain colouring, and the descriptor scan is retired;
+`variant_glb.write_glb` is a `VariantGlb` object over a shared `gltf_build.GltfDoc` that
+`rig_glb` uses too. Output unchanged: all six sets are byte-identical to the 1.7.0 export,
+`_extract_done.txt` excluded.
 
 - **Golden GLB tests.** `tests/test_glb_golden.py` runs `variant_glb.write_glb` and
   `rig_glb.build_rigged_glb` on fixed synthetic input over the switches a `pc_p2` export does
