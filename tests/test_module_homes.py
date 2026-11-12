@@ -36,6 +36,7 @@ HOMES = {
     "model_header",
     "model_mesh",
     "obj_mtl",
+    "model_export",
 }
 
 
