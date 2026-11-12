@@ -24,7 +24,8 @@ from bake_v4; this module has no clip decoder.
 import io
 import numpy as np
 
-from wutil import GlbPacker, glb_bytes
+import gltf_build
+from wutil import glb_bytes
 
 
 # ---------------- skin read ----------------
@@ -423,26 +424,26 @@ def build_rigged_glb(
         rig_rec, rig_W, rig_par = header_rig(tpl, nodes, rig)
     V = np.asarray(V, np.float64)
     Vg = np.ascontiguousarray(V, np.float32)
-    j = {
-        "asset": {"version": "2.0", "generator": "watchmen_extract"},
-        "scene": 0,
-        "scenes": [{"nodes": []}],
-        "nodes": [],
-        "meshes": [],
-        "skins": [],
-        "accessors": [],
-        "bufferViews": [],
-        "buffers": [],
-        "animations": [],
-        "images": [],
-        "textures": [],
-        "materials": [],
-        "samplers": [{"wrapS": 10497, "wrapT": 10497}],
-    }
-    _pk = GlbPacker(j["bufferViews"], j["accessors"])
-    BIN = _pk.bin
-    av = _pk.view  # (data, target=None) -> bufferView index
-    ac = _pk.accessor  # (bv, ct, count, type, mn=None, mx=None, normalized=False)
+    doc = gltf_build.GltfDoc(
+        {"version": "2.0", "generator": "watchmen_extract"},
+        (
+            "nodes",
+            "meshes",
+            "skins",
+            "accessors",
+            "bufferViews",
+            "buffers",
+            "animations",
+            "images",
+            "textures",
+            "materials",
+        ),
+        {"wrapS": 10497, "wrapT": 10497},
+    )
+    j = doc.j
+    BIN = doc.bin
+    av = doc.view  # (data, target=None) -> bufferView index
+    ac = doc.accessor  # (bv, ct, count, type, mn=None, mx=None, normalized=False)
 
     matmap = {}
 
