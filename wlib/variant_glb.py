@@ -10,7 +10,7 @@ import json
 import struct
 import zlib
 import numpy as np
-from wutil import glb_bytes, load_npz, order_name, platform_name, restricted_load
+from wutil import load_npz, order_name, platform_name, restricted_load
 
 _D = os.path.dirname(os.path.abspath(__file__))
 if _D not in sys.path:
@@ -1137,133 +1137,36 @@ class VariantGlb:
             _fs,
         )
 
+    # ------------------------------------------------------------- animation
+    def time_accessor(self, times):
+        """The float32 SCALAR key-time accessor of `times` (float32, from 0)."""
+        doc = self.doc
+        return doc.accessor(
+            doc.view(times.tobytes()), 5126, len(times), "SCALAR", [0.0], [float(times[-1])]
+        )
 
-def write_glb(
-    parts,
-    manifest,
-    out,
-    bindnpz,
-    textures=None,
-    face=None,
-    attachments=None,
-    meta=None,
-    face_rule=None,
-    face_idle=None,
-    alt_parts=None,
-    parts_record=None,
-    outfit_parts=None,
-    asset_extras=None,
-    ragdoll=None,
-    rig=None,
-):
-    """meta: optional anim_meta.build() table -> per-animation `extras` (events,
-    loop, pair partner + placement).  Bone names/parents and the coordinate
-    conventions are written to `extras` whether or not meta is given.
+    def anim_record(self, animname, sm, chn, frames, fps, finfo=None):
+        """The glTF animation of one body clip, with its clip extras."""
+        import anim_meta as _am
 
-    textures: optional {material_name: png_bytes | dict} -> embedded maps.
-    dict form: {'diffuse':png, 'normal':png, 'mr':png, 'spec':png} (all optional).
-    normal = glTF convention (green up); mr = occlusion/roughness/metallic in R/G/B;
-    spec -> KHR_materials_specular specularColorTexture.
-
-    face_rule: "engine" (default; $WATCHMEN_FACE_RULE) bakes into every body
-    clip the face track the game plays with it (face_rule.choose_track, from
-    meta["face"]); "legacy" = the rule of releases before 1.4.0: a pose picked from the clip NAME
-    plus synthetic blink keys.  face_idle: also bake the seeded idle cycle (default
-    on; $WATCHMEN_FACE_IDLE=0 turns it off).
-
-    alt_parts: [(node name, parts)] -- models the game does NOT show for this
-    variant (other collection members' hair, jackets ...).  Each becomes a mesh
-    node of its own on skin 0, like an attachment.  parts_record: the `parts`
-    extras (parts_rule.record, with `weapons`).  When it is given, the scene
-    ("game") holds what the game shows; the alt_parts nodes and the attachments
-    not named in parts_record["weapons"]["shown"] hang under a node
-    "alternatives" that is in no scene.  Viewers draw scenes and never show it;
-    Blender imports it into a switched-off collection ("Orphan Nodes").
-    Without parts_record nothing is hidden.
-    outfit_parts: [(node name, parts, shown)] -- the models that differ between the
-    variant's outfits (parts_rule.outfits), one node `OUTFIT <k> <model>` per outfit
-    and model on skin 0: the shown outfit's nodes are in the scene (scene roots in the
-    hierarchical rig, children of the root in the flat one), the others hang under
-    "alternatives".  Nodes of the same model share their vertex
-    data (identical data is written once and the accessor shared), only the
-    materials differ.  asset_extras: merged into asset.extras.watchmen.  A piece with restored
-    eyelash UVs (watchmen_extract.LASH_RESTORE) adds reconstruction.eyelash_uvs there.
-    ragdoll: ragdoll_rig.glb_helpers(...) -- the character's ragdoll rig as helper
-    nodes under a node "ragdoll" that is in no scene (hidden like "alternatives"):
-    `RB.<bone>.<i>` proxy meshes skinned rigidly to the bone's joint, `RJ.<child
-    bone>` empties at the joint frames; parameters in the nodes' extras.  Appended
-    after everything else, so the rest of the file is the same with or without it.
-
-    rig: "hierarchy" / "flat" (None = rig_mode(): $WATCHMEN_RIG, default "hierarchy").
-    The hierarchy names joint node k after its bone (joint_node_names), parents it to
-    the joint of the bone's parent, writes rest and animation TRS local to that
-    parent, hangs the face rig on the body joints (f_anchor under the attach joint,
-    each face proxy under its joint, constant local transforms, no channels; no
-    face_root) and puts the skinned mesh nodes the scene shows at the scene root; a bind
-    without names and parents, or with a parent table that is not a tree, is
-    written flat.  "flat" is the flat layout (see RIG_MODES).  The mode written,
-    and why a requested hierarchy was not, is in asset.extras.watchmen.rig."""
-    g = VariantGlb(
-        parts,
-        manifest,
-        bindnpz,
-        textures=textures,
-        face=face,
-        attachments=attachments,
-        meta=meta,
-        face_rule=face_rule,
-        face_idle=face_idle,
-        alt_parts=alt_parts,
-        parts_record=parts_record,
-        outfit_parts=outfit_parts,
-        asset_extras=asset_extras,
-        ragdoll=ragdoll,
-        rig=rig,
-    )
-    import anim_meta as _am
-    import face_rule as _fr
-    import frame as _frame
-
-    _engine, _idle = g.engine, g.idle
-    parts, attachments, alt_parts = g.parts, g.attachments, g.alt_parts
-    outfit_parts, face, meta = g.outfit_parts, g.face, g.meta
-    NB, B4 = g.NB, g.B4
-    _bnames, _bpar, _skel, _jnames, _hier = g.bnames, g.bpar, g.skel, g.jnames, g.hier
-    doc = g.doc
-    j = doc.j
-    _pk = doc.packer
-    BIN = doc.bin
-    _used_joints = used_joints
-    av = _pk.view  # (data, target=None) -> bufferView index
-    ac = _pk.accessor  # (bv, ct, count, type, mn=None, mx=None)
-
-    g.joint_nodes()
-    g.body_mesh()
-    g.extra_meshes()
-    bnode, attnodes, _hidden = g.bnode, g.attnodes, g.hidden
-
-    def _anim(animname, sm, chn, frames, fps, finfo=None):
         a = {"name": animname, "samplers": sm, "channels": chn}
         ex = None
-        if meta is not None:
-            ex = _am.clip_extras(meta, animname, fps=fps, frames=frames)
+        if self.meta is not None:
+            ex = _am.clip_extras(self.meta, animname, fps=fps, frames=frames)
         if finfo is not None:  # what the face channels of this clip show
             ex = dict(ex or {}, face=finfo)
         if ex is not None:
             a["extras"] = {"watchmen": ex}
         return a
 
-    g.face_rig()
-    g.scene_roots()
-    g.face_poses()
-    facenodes, proxynodes, anchor = g.facenodes, g.proxynodes, g.anchor
-    NF, B4f, M4 = (g.NF, g.B4f, g.M4) if face is not None else (None, None, None)
-    _facemask, _fhead, _faceride = g.facemask, getattr(g, "fhead", None), g.faceride
-
-    def _face_track_channels(animname, F, fps, sm, chn):
+    def face_track_channels(self, animname, F, fps, sm, chn):
         """Engine rule: face-bone channels of one body clip from the face track
         of the state(s) that play it.  Returns the `face` extras record."""
-        _fpose_all = _faceride[4]
+        import face_rule as _fr
+
+        face, meta, idle = self.face, self.meta, self.idle
+        _fs = self.faceride[6]
+        _fpose_all = self.faceride[4]
         dur = max((F - 1) / fps, 1e-3)
         fam = face.get("family")
         fmeta = (meta or {}).get("face") or {}
@@ -1273,7 +1176,7 @@ def write_glb(
         if chosen is not None:
             fclass = fmeta["classes"][chosen["source"]["class_face"]]
             sched, skipped = _fr.pose_schedule(
-                chosen, fclass, animname, lambda pp: None if pp is None else pp * dur, _idle, dur
+                chosen, fclass, animname, lambda pp: None if pp is None else pp * dur, idle, dur
             )
             sched = [x for x in sched if x[1] in _fpose_all and x[0] <= dur + 1e-6]
             info.update(
@@ -1284,7 +1187,7 @@ def write_glb(
                 confidence=chosen["confidence"],
                 track=chosen["track"],
                 not_baked=skipped,
-                idle_cycle_baked=bool(_idle),
+                idle_cycle_baked=bool(idle),
             )
         else:
             info["note"] = "no face track for this clip in the metadata: neutral pose"
@@ -1306,21 +1209,114 @@ def write_glb(
         ]
         kt = _fr.key_times(sched, dur) if len(sched) > 1 else [0.0, dur]
         ktf = np.array(kt, np.float32)
-        ta3 = ac(av(ktf.tobytes()), 5126, len(ktf), "SCALAR", [0.0], [float(ktf[-1])])
+        ta3 = self.time_accessor(ktf)
         QT = [_fs.blend_locals(_fpose_all, _fr.pose_weights(sched, t)) for t in kt]
         Qk = np.stack([q for q, _t in QT])  # (K, NF, 4)
         Tk = np.stack([t for _q, t in QT])
         for f in range(1, len(kt)):
             flip = np.einsum("kc,kc->k", Qk[f], Qk[f - 1]) < 0
             Qk[f, flip] *= -1
-        for k in _facemask:
-            doc.add_trs(sm, chn, facenodes[k], ta3, Qk[:, k], Tk[:, k])
+        for k in self.facemask:
+            self.doc.add_trs(sm, chn, self.facenodes[k], ta3, Qk[:, k], Tk[:, k])
         return info
 
-    for entry in manifest:
-        # (name, pal, fps) or (name, pal, fps, bone_indices) -- the 4-tuple
-        # form writes channels ONLY for the listed bones (partial overlay
-        # anims, e.g. GRIP hand poses layered over body clips in NLA).
+    def blink_channels(self, animname, times, sm, chn):
+        """Legacy rule: sparse blink keys on the lid bones, neutral -> closed ->
+        neutral every ~3 s (deterministic per clip), 0.24 s per blink."""
+        _fneut, _fblink = self.faceride[3], self.faceride[5]
+        _dur = max(float(times[-1]), 0.5)
+        _per = 2.7 + ((zlib.crc32(animname.encode()) % 100) / 100.0) * 0.9  # hash() is per-process
+        _keys = [0.0]
+        _t = _per * 0.6
+        while _t + 0.3 < _dur:
+            _keys += [_t, _t + 0.07, _t + 0.14, _t + 0.24]
+            _t += _per
+        _keys.append(_dur)
+        _kt = np.array(_keys, np.float32)
+        # weights per blink group [start, closed, closed, open] ->
+        # w=[0,1,1,0]
+        _wts = np.zeros(len(_kt))
+        for _i in range(1, len(_kt) - 4, 4):
+            _wts[_i + 1] = 1.0
+            _wts[_i + 2] = 1.0
+        _ta3 = self.time_accessor(_kt)
+        _lidk, _fcl = _fblink
+        for k in _lidk:
+            _qn, _tn = _fneut[0][k], _fneut[1][k]
+            _qc, _tc = _fcl[0][k], _fcl[1][k]
+            if float(np.dot(_qn, _qc)) < 0:
+                _qc = -_qc
+            _Q = np.array([(_qn * (1 - w) + _qc * w) for w in _wts], np.float32)
+            _Q /= np.linalg.norm(_Q, axis=1, keepdims=True)
+            _T = np.array([(_tn * (1 - w) + _tc * w) for w in _wts], np.float32)
+            self.doc.add_trs(sm, chn, self.facenodes[k], _ta3, _Q, _T)
+
+    def face_ride_channels(self, animname, A4, F, fps, times, ta, sm, chn):
+        """The face channels of one full body clip; returns the `face` extras
+        record under the engine rule, else None.
+
+        The face armature rides via ONE anchor joint (face bones are its children
+        with LOCAL channels -> expressions follow the head, and a FACE action
+        layered/posed on top keeps riding).  Hierarchy rig: the anchor and the
+        proxies ride their body joints with constant local transforms -- no
+        channels of their own."""
+        doc, hier, M4 = self.doc, self.hier, self.M4
+        _ai, _pslots, _palign, _fneut, _fpose, _fblink, _fs = self.faceride
+        _pslots = () if hier else _pslots
+        _finfo = None
+        if not hier:
+            FH = A4[:, _ai]  # (F,4,4)
+            La = np.einsum("fab,bc->fac", FH, M4)
+            Qf = batch_m2q(La[:, :3, :3])
+            for f in range(1, F):
+                if (Qf[f] * Qf[f - 1]).sum() < 0:
+                    Qf[f] *= -1
+            doc.add_trs(sm, chn, self.anchor, ta, Qf, La[:, :3, 3])
+        # ENGINE RULE: the face track of the state(s) that play this clip
+        _eng = self.engine and _fpose and _fs is not None
+        if _eng:
+            _finfo = self.face_track_channels(animname, F, fps, sm, chn)
+        # LEGACY AUTO-PAIRED face: category pose for combat/damage/dance
+        # clips, neutral otherwise
+        _base = _fneut
+        if not _eng and _fs is not None and _fpose:
+            _pn = _fs.category_pose(animname, _fpose)
+            if _pn:
+                _base = _fpose[_pn]
+        t2 = np.array([0.0, max(float(times[-1]), 1e-3)], np.float32)
+        ta2 = None if _eng else self.time_accessor(t2)
+        _blinkset = set(_fblink[0]) if (_fblink is not None and _base is _fneut) else set()
+        if _eng:
+            _blinkset = set()
+        for k in () if _eng else self.facemask:
+            if k in _blinkset:
+                continue  # blink channel written below
+            doc.add_trs(
+                sm,
+                chn,
+                self.facenodes[k],
+                ta2,
+                np.tile(_base[0][k].astype(np.float32), (2, 1)),
+                np.tile(_base[1][k].astype(np.float32), (2, 1)),
+            )
+        if _blinkset:
+            self.blink_channels(animname, times, sm, chn)
+        for pi, bs in enumerate(_pslots):
+            _MkCi = _palign[pi] if _palign is not None else M4
+            Lp = np.einsum("fab,bc->fac", A4[:, bs], _MkCi)
+            Qf = batch_m2q(Lp[:, :3, :3])
+            for f in range(1, F):
+                if (Qf[f] * Qf[f - 1]).sum() < 0:
+                    Qf[f] *= -1
+            doc.add_trs(sm, chn, self.proxynodes[pi], ta, Qf, Lp[:, :3, 3])
+        return _finfo
+
+    def body_clip(self, entry):
+        """The animation of one manifest entry: (name, pal, fps) or (name, pal,
+        fps, bone_indices) -- the 4-tuple form writes channels ONLY for the
+        listed bones (partial overlay anims, e.g. GRIP hand poses layered over
+        body clips in NLA); the full form also writes the face channels."""
+        NB = self.NB
         if len(entry) == 4:
             animname, A, fps, bmask = entry
         else:
@@ -1329,7 +1325,7 @@ def write_glb(
         _finfo = None
         F = len(A)
         times = (np.arange(F) / fps).astype(np.float32)
-        ta = ac(av(times.tobytes()), 5126, F, "SCALAR", [0.0], [float(times[-1])])
+        ta = self.time_accessor(times)
         sm = []
         chn = []
         A4 = np.concatenate(
@@ -1339,11 +1335,11 @@ def write_glb(
             ],
             axis=2,
         )  # (F,NB,4,4)
-        W = np.einsum("fkab,kbc->fkac", A4, B4)  # (F,NB,4,4) joint world
-        if _hier:
+        W = np.einsum("fkab,kbc->fkac", A4, self.B4)  # (F,NB,4,4) joint world
+        if self.hier:
             # local to the parent joint, from this entry's own palette (a masked
             # overlay's bones are posed relative to whatever drives their parents)
-            W = local_from_world(W, _bpar)
+            W = local_from_world(W, self.bpar)
         Q = batch_m2q(W[:, :, :3, :3].reshape(-1, 3, 3)).reshape(F, NB, 4)
         # sign continuity along time per bone
         for f in range(1, F):
@@ -1351,95 +1347,21 @@ def write_glb(
             Q[f, flip] *= -1
         Tt = W[:, :, :3, 3]
         for k in range(NB) if bmask is None else bmask:
-            doc.add_trs(sm, chn, bnode[k], ta, Q[:, k], Tt[:, k])
-        if _faceride is not None and bmask is None:
-            # face armature rides via ONE anchor joint (face bones are its
-            # children with LOCAL channels -> expressions follow the head, and
-            # a FACE action layered/posed on top keeps riding).
-            _ai, _pslots, _palign, _fneut, _fpose, _fblink, _fs = _faceride
-            # hierarchy rig: the anchor and the proxies ride their body joints
-            # with constant local transforms -- no channels of their own
-            _pslots = () if _hier else _pslots
-            if not _hier:
-                FH = A4[:, _ai]  # (F,4,4)
-                La = np.einsum("fab,bc->fac", FH, M4)
-                Qf = batch_m2q(La[:, :3, :3])
-                for f in range(1, F):
-                    if (Qf[f] * Qf[f - 1]).sum() < 0:
-                        Qf[f] *= -1
-                doc.add_trs(sm, chn, anchor, ta, Qf, La[:, :3, 3])
-            # ENGINE RULE: the face track of the state(s) that play this clip
-            _eng = _engine and _fpose and _fs is not None
-            if _eng:
-                _finfo = _face_track_channels(animname, F, fps, sm, chn)
-            # LEGACY AUTO-PAIRED face: category pose for combat/damage/dance
-            # clips, neutral otherwise
-            _base = _fneut
-            if not _eng and _fs is not None and _fpose:
-                _pn = _fs.category_pose(animname, _fpose)
-                if _pn:
-                    _base = _fpose[_pn]
-            t2 = np.array([0.0, max(float(times[-1]), 1e-3)], np.float32)
-            ta2 = None if _eng else ac(av(t2.tobytes()), 5126, 2, "SCALAR", [0.0], [float(t2[-1])])
-            _blinkset = set(_fblink[0]) if (_fblink is not None and _base is _fneut) else set()
-            if _eng:
-                _blinkset = set()
-            for k in () if _eng else _facemask:
-                if k in _blinkset:
-                    continue  # blink channel written below
-                doc.add_trs(
-                    sm,
-                    chn,
-                    facenodes[k],
-                    ta2,
-                    np.tile(_base[0][k].astype(np.float32), (2, 1)),
-                    np.tile(_base[1][k].astype(np.float32), (2, 1)),
-                )
-            if _blinkset:
-                # sparse blink keys on the lid bones: neutral->closed->neutral
-                # every ~3s (deterministic per clip), 0.24s per blink
-                _dur = max(float(times[-1]), 0.5)
-                import zlib as _z  # hash() is per-process random
+            self.doc.add_trs(sm, chn, self.bnode[k], ta, Q[:, k], Tt[:, k])
+        if self.faceride is not None and bmask is None:
+            _finfo = self.face_ride_channels(animname, A4, F, fps, times, ta, sm, chn)
+        self.j["animations"].append(self.anim_record(animname, sm, chn, F, fps, _finfo))
 
-                _per = 2.7 + ((_z.crc32(animname.encode()) % 100) / 100.0) * 0.9
-                _keys = [0.0]
-                _t = _per * 0.6
-                while _t + 0.3 < _dur:
-                    _keys += [_t, _t + 0.07, _t + 0.14, _t + 0.24]
-                    _t += _per
-                _keys.append(_dur)
-                _kt = np.array(_keys, np.float32)
-                # weights per blink group [start, closed, closed, open] ->
-                # w=[0,1,1,0]
-                _wts = np.zeros(len(_kt))
-                for _i in range(1, len(_kt) - 4, 4):
-                    _wts[_i + 1] = 1.0
-                    _wts[_i + 2] = 1.0
-                _ta3 = ac(av(_kt.tobytes()), 5126, len(_kt), "SCALAR", [0.0], [float(_kt[-1])])
-                _lidk, _fcl = _fblink
-                for k in _lidk:
-                    _qn, _tn = _fneut[0][k], _fneut[1][k]
-                    _qc, _tc = _fcl[0][k], _fcl[1][k]
-                    if float(np.dot(_qn, _qc)) < 0:
-                        _qc = -_qc
-                    _Q = np.array([(_qn * (1 - w) + _qc * w) for w in _wts], np.float32)
-                    _Q /= np.linalg.norm(_Q, axis=1, keepdims=True)
-                    _T = np.array([(_tn * (1 - w) + _tc * w) for w in _wts], np.float32)
-                    doc.add_trs(sm, chn, facenodes[k], _ta3, _Q, _T)
-            for pi, bs in enumerate(_pslots):
-                _MkCi = _palign[pi] if _palign is not None else M4
-                Lp = np.einsum("fab,bc->fac", A4[:, bs], _MkCi)
-                Qf = batch_m2q(Lp[:, :3, :3])
-                for f in range(1, F):
-                    if (Qf[f] * Qf[f - 1]).sum() < 0:
-                        Qf[f] *= -1
-                doc.add_trs(sm, chn, proxynodes[pi], ta, Qf, Lp[:, :3, 3])
-        j["animations"].append(_anim(animname, sm, chn, F, fps, _finfo))
-    if face is not None:
-        for animname, A, fps in face["anims"]:
+    def face_clips(self):
+        """One animation per face clip of the face rig: LOCAL channels of the
+        face joints below Head."""
+        import face_rule as _fr
+
+        NF, B4f, fhead = self.NF, self.B4f, self.fhead
+        for animname, A, fps in self.face["anims"]:
             F = len(A)
             times = (np.arange(F) / fps).astype(np.float32)
-            ta = ac(av(times.tobytes()), 5126, F, "SCALAR", [0.0], [float(times[-1])])
+            ta = self.time_accessor(times)
             A4 = np.concatenate(
                 [
                     A.astype(np.float64),
@@ -1448,7 +1370,7 @@ def write_glb(
                 axis=2,
             )
             Wp = np.einsum("fkab,kbc->fkac", A4, B4f)
-            fix = np.einsum("ab,fbc->fac", B4f[_fhead], np.linalg.inv(Wp[:, _fhead]))
+            fix = np.einsum("ab,fbc->fac", B4f[fhead], np.linalg.inv(Wp[:, fhead]))
             L = np.einsum("fab,fkbc->fkac", fix, Wp)  # LOCAL under anchor
             Q = batch_m2q(L[:, :, :3, :3].reshape(-1, 3, 3)).reshape(F, NF, 4)
             for f in range(1, F):
@@ -1457,54 +1379,70 @@ def write_glb(
             Tt = L[:, :, :3, 3]
             sm = []
             chn = []
-            for k in _facemask:  # only bones BELOW Head: the rig's own
+            for k in self.facemask:  # only bones BELOW Head: the rig's own
                 # Bip01/Neck/Head tracks carry the cutscene neck posture and
                 # would double-rotate the head that already rides the body.
-                doc.add_trs(sm, chn, facenodes[k], ta, Q[:, k], Tt[:, k])
+                self.doc.add_trs(sm, chn, self.facenodes[k], ta, Q[:, k], Tt[:, k])
             _fa = {"name": animname, "samplers": sm, "channels": chn}
-            if _engine:
-                _fa["extras"] = {"watchmen": {"face_pose": _fr.pose_extras(meta, animname)}}
-            j["animations"].append(_fa)
-    if parts_record is not None:
-        # The one scene holds the character as the game shows it.  The hidden
-        # parts hang under a node "alternatives" that is in NO scene: viewers
-        # draw scenes, so they never show it, and Blender's importer puts such
-        # nodes in a switched-off collection ("Orphan Nodes"), still bound to the
-        # armature.  (Ruled out: a second scene sharing the skeleton root is valid,
-        # but three.js clones a node used by two scenes and the animations then
-        # drive the copy that is not displayed.)
-        j["scenes"][0]["name"] = "game"
-        _alt = [a for a in attnodes if a in _hidden]
-        if _alt:
-            j["nodes"].append({"name": "alternatives", "children": _alt})
-        _names = {j["nodes"][a]["name"] for a in attnodes}
-        _rec = dict(parts_record)
-        _rec["hidden_nodes"] = [j["nodes"][a]["name"] for a in attnodes if a in _hidden]
-        _rec["alternatives"] = [x for x in _rec.get("alternatives", []) if x["node"] in _names]
-        _rec["hidden_under"] = (
-            "node 'alternatives', which is in no scene; skinned to the same skeleton "
-            "(skin 0).  Blender: collection 'Orphan Nodes', switched off after import"
-            if _alt
-            else None
-        )
-        j["asset"].setdefault("extras", {}).setdefault("watchmen", {})["parts"] = _rec
-    if asset_extras:  # e.g. {"reconstruction": {...}} for a variant the game does not ship
-        j["asset"].setdefault("extras", {}).setdefault("watchmen", {}).update(asset_extras)
-    # restored content among the mesh pieces is named in the same record
-    _pieces = [parts, (face or {}).get("parts")]
-    _pieces += [p for _a, p in attachments or []] + [p for _a, p in alt_parts or []]
-    _pieces += [p for _a, p, _s in outfit_parts or []]
-    if any(we.lash_is_restored(pt[4]) for _pl in _pieces for pt in _pl or ()):
-        _w = j["asset"].setdefault("extras", {}).setdefault("watchmen", {})
-        _w["reconstruction"] = (_w.get("reconstruction") or {}) | we.lash_reconstruction_note()
-    if ragdoll and (ragdoll.get("shapes") or ragdoll.get("joints")):
+            if self.engine:
+                _fa["extras"] = {"watchmen": {"face_pose": _fr.pose_extras(self.meta, animname)}}
+            self.j["animations"].append(_fa)
+
+    # ------------------------------------------------------------------ file
+    def asset_records(self):
+        """The parts record (scene "game", node "alternatives"), asset_extras and
+        the restored-content note in asset.extras.watchmen.
+
+        The one scene holds the character as the game shows it.  The hidden
+        parts hang under a node "alternatives" that is in NO scene: viewers
+        draw scenes, so they never show it, and Blender's importer puts such
+        nodes in a switched-off collection ("Orphan Nodes"), still bound to the
+        armature.  (Ruled out: a second scene sharing the skeleton root is valid,
+        but three.js clones a node used by two scenes and the animations then
+        drive the copy that is not displayed.)"""
+        j, attnodes, hidden = self.j, self.attnodes, self.hidden
+        if self.parts_record is not None:
+            j["scenes"][0]["name"] = "game"
+            _alt = [a for a in attnodes if a in hidden]
+            if _alt:
+                j["nodes"].append({"name": "alternatives", "children": _alt})
+            _names = {j["nodes"][a]["name"] for a in attnodes}
+            _rec = dict(self.parts_record)
+            _rec["hidden_nodes"] = [j["nodes"][a]["name"] for a in attnodes if a in hidden]
+            _rec["alternatives"] = [x for x in _rec.get("alternatives", []) if x["node"] in _names]
+            _rec["hidden_under"] = (
+                "node 'alternatives', which is in no scene; skinned to the same skeleton "
+                "(skin 0).  Blender: collection 'Orphan Nodes', switched off after import"
+                if _alt
+                else None
+            )
+            j["asset"].setdefault("extras", {}).setdefault("watchmen", {})["parts"] = _rec
+        if self.asset_extras:  # e.g. {"reconstruction": {...}} for a variant the game does not ship
+            j["asset"].setdefault("extras", {}).setdefault("watchmen", {}).update(self.asset_extras)
+        # restored content among the mesh pieces is named in the same record
+        _pieces = [self.parts, (self.face or {}).get("parts")]
+        _pieces += [p for _a, p in self.attachments or []]
+        _pieces += [p for _a, p in self.alt_parts or []]
+        _pieces += [p for _a, p, _s in self.outfit_parts or []]
+        if any(we.lash_is_restored(pt[4]) for _pl in _pieces for pt in _pl or ()):
+            _w = j["asset"].setdefault("extras", {}).setdefault("watchmen", {})
+            _w["reconstruction"] = (_w.get("reconstruction") or {}) | we.lash_reconstruction_note()
+
+    def ragdoll_helpers(self):
+        """The ragdoll rig (ragdoll_rig.glb_helpers) as helper nodes under a node
+        "ragdoll" that is in no scene: `RB.<bone>.<i>` proxy meshes skinned rigidly
+        to their joint, `RJ.<child bone>` empties.  Appended last, nothing above
+        refers to them."""
+        ragdoll = self.ragdoll
+        if not (ragdoll and (ragdoll.get("shapes") or ragdoll.get("joints"))):
+            return
         import ragdoll_rig as _rr
 
+        j, av, ac = self.j, self.doc.view, self.doc.accessor
         # the joint node names in the helpers' extras are this file's
         ragdoll = _rr.relabel_joint_nodes(
-            ragdoll, _jnames if _hier else ["b%d" % k for k in range(NB)]
+            ragdoll, self.jnames if self.hier else ["b%d" % k for k in range(self.NB)]
         )
-        # helper nodes only: appended last, nothing above refers to them
         _rk = []
         _rmat = None
         for _sh in ragdoll.get("shapes", []):
@@ -1575,14 +1513,121 @@ def write_glb(
         j["asset"].setdefault("extras", {}).setdefault("watchmen", {})["ragdoll"] = ragdoll.get(
             "extras", {}
         )
-    for kk in ("animations", "skins", "images", "textures", "materials"):
-        if not j.get(kk):
-            j.pop(kk, None)
-    if "textures" not in j:
-        del j["samplers"]
-    _frame.finish_gltf(j, BIN)
-    j["buffers"].append({"byteLength": len(BIN)})
-    _glb = glb_bytes(j, BIN)
+
+    def build(self):
+        """The whole document, in file order."""
+        self.joint_nodes()
+        self.body_mesh()
+        self.extra_meshes()
+        self.face_rig()
+        self.scene_roots()
+        self.face_poses()
+        for entry in self.manifest:
+            self.body_clip(entry)
+        if self.face is not None:
+            self.face_clips()
+        self.asset_records()
+        self.ragdoll_helpers()
+        return self
+
+    def glb(self):
+        """The .glb bytes of the built document (empty lists dropped, the
+        sampler only with textures, frame.finish_gltf applied)."""
+        j = self.j
+        for kk in ("animations", "skins", "images", "textures", "materials"):
+            if not j.get(kk):
+                j.pop(kk, None)
+        if "textures" not in j:
+            del j["samplers"]
+        return self.doc.finish()
+
+
+def write_glb(
+    parts,
+    manifest,
+    out,
+    bindnpz,
+    textures=None,
+    face=None,
+    attachments=None,
+    meta=None,
+    face_rule=None,
+    face_idle=None,
+    alt_parts=None,
+    parts_record=None,
+    outfit_parts=None,
+    asset_extras=None,
+    ragdoll=None,
+    rig=None,
+):
+    """meta: optional anim_meta.build() table -> per-animation `extras` (events,
+    loop, pair partner + placement).  Bone names/parents and the coordinate
+    conventions are written to `extras` whether or not meta is given.
+
+    textures: optional {material_name: png_bytes | dict} -> embedded maps.
+    dict form: {'diffuse':png, 'normal':png, 'mr':png, 'spec':png} (all optional).
+    normal = glTF convention (green up); mr = occlusion/roughness/metallic in R/G/B;
+    spec -> KHR_materials_specular specularColorTexture.
+
+    face_rule: "engine" (default; $WATCHMEN_FACE_RULE) bakes into every body
+    clip the face track the game plays with it (face_rule.choose_track, from
+    meta["face"]); "legacy" = the rule of releases before 1.4.0: a pose picked from the clip NAME
+    plus synthetic blink keys.  face_idle: also bake the seeded idle cycle (default
+    on; $WATCHMEN_FACE_IDLE=0 turns it off).
+
+    alt_parts: [(node name, parts)] -- models the game does NOT show for this
+    variant (other collection members' hair, jackets ...).  Each becomes a mesh
+    node of its own on skin 0, like an attachment.  parts_record: the `parts`
+    extras (parts_rule.record, with `weapons`).  When it is given, the scene
+    ("game") holds what the game shows; the alt_parts nodes and the attachments
+    not named in parts_record["weapons"]["shown"] hang under a node
+    "alternatives" that is in no scene.  Viewers draw scenes and never show it;
+    Blender imports it into a switched-off collection ("Orphan Nodes").
+    Without parts_record nothing is hidden.
+    outfit_parts: [(node name, parts, shown)] -- the models that differ between the
+    variant's outfits (parts_rule.outfits), one node `OUTFIT <k> <model>` per outfit
+    and model on skin 0: the shown outfit's nodes are in the scene (scene roots in the
+    hierarchical rig, children of the root in the flat one), the others hang under
+    "alternatives".  Nodes of the same model share their vertex
+    data (identical data is written once and the accessor shared), only the
+    materials differ.  asset_extras: merged into asset.extras.watchmen.  A piece with restored
+    eyelash UVs (watchmen_extract.LASH_RESTORE) adds reconstruction.eyelash_uvs there.
+    ragdoll: ragdoll_rig.glb_helpers(...) -- the character's ragdoll rig as helper
+    nodes under a node "ragdoll" that is in no scene (hidden like "alternatives"):
+    `RB.<bone>.<i>` proxy meshes skinned rigidly to the bone's joint, `RJ.<child
+    bone>` empties at the joint frames; parameters in the nodes' extras.  Appended
+    after everything else, so the rest of the file is the same with or without it.
+
+    rig: "hierarchy" / "flat" (None = rig_mode(): $WATCHMEN_RIG, default "hierarchy").
+    The hierarchy names joint node k after its bone (joint_node_names), parents it to
+    the joint of the bone's parent, writes rest and animation TRS local to that
+    parent, hangs the face rig on the body joints (f_anchor under the attach joint,
+    each face proxy under its joint, constant local transforms, no channels; no
+    face_root) and puts the skinned mesh nodes the scene shows at the scene root; a bind
+    without names and parents, or with a parent table that is not a tree, is
+    written flat.  "flat" is the flat layout (see RIG_MODES).  The mode written,
+    and why a requested hierarchy was not, is in asset.extras.watchmen.rig."""
+    _glb = (
+        VariantGlb(
+            parts,
+            manifest,
+            bindnpz,
+            textures=textures,
+            face=face,
+            attachments=attachments,
+            meta=meta,
+            face_rule=face_rule,
+            face_idle=face_idle,
+            alt_parts=alt_parts,
+            parts_record=parts_record,
+            outfit_parts=outfit_parts,
+            asset_extras=asset_extras,
+            ragdoll=ragdoll,
+            rig=rig,
+        )
+        .build()
+        .glb()
+    )
     _tmp = str(out) + ".tmp"
     with open(_tmp, "wb") as fh:
         fh.write(_glb)

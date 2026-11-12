@@ -9,7 +9,7 @@ the order they write them, so the output of either writer does not change.
 
 import numpy as np
 
-from wutil import GlbPacker
+from wutil import GlbPacker, glb_bytes
 
 #: glTF constants used below
 FLOAT = 5126
@@ -104,3 +104,12 @@ class GltfDoc:
         chn.append({"sampler": len(sm) - 1, "target": {"node": node, "path": "rotation"}})
         sm.append({"input": input_acc, "output": to, "interpolation": "LINEAR"})
         chn.append({"sampler": len(sm) - 1, "target": {"node": node, "path": "translation"}})
+
+    def finish(self):
+        """The .glb bytes: frame.finish_gltf on the document, its one buffer
+        entry, the two chunks."""
+        import frame as _frame
+
+        _frame.finish_gltf(self.j, self.bin)
+        self.j["buffers"].append({"byteLength": len(self.bin)})
+        return glb_bytes(self.j, self.bin)
