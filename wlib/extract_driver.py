@@ -265,6 +265,7 @@ class ExtractRun:
         # (header, stream, out_path, order, platform) -- deferred until all textures
         # are dumped; header and stream wait in a spool file under the output folder
         self.model_jobs = None
+        self.setups = []  # MusicSetup records of the music fragments (music pass)
 
     def plan(self):
         """Pass 1, archive order: files/, the standalone audio streams, and the
@@ -694,6 +695,202 @@ class ExtractRun:
                     except Exception as ex:
                         log("      ! audio %s: %s" % (name, ex))
 
+    def stream_set_report(self):
+        """The stream-only block files the stream sets read or no set names, and
+        the textures / models the block pass left without stream data."""
+        log, plan, rep = self.log, self.block_plan, self.report
+        if rep.from_sets or plan.stream_only:
+            log("\nSTREAM SETS: %d stream-only block file(s)" % len(plan.stream_only))
+            for sfile, cnt in sorted(rep.from_sets.items()):
+                log("  %s: %d asset stream(s) read" % (sfile, cnt))
+            _find = kapow_block.stream_file_lookup({k: k for k in plan.stream_only})
+            _hit = {_find(sfile) for sfile in plan.stream_used}
+            for k in sorted(plan.stream_only):
+                if k not in _hit:
+                    log("  WARNING: %s: no stream set of any block names this file; not read" % k)
+        if rep.no_stream:
+            log("\nNO STREAM: %d texture / model asset(s) without stream data" % len(rep.no_stream))
+            for _nm, (_cls, _why) in sorted(rep.no_stream.items()):
+                log("  note: no stream: %s (%s): %s" % (_nm, _cls, _why))
+
+    def music(self):
+        """The MusicSetup fragments (track names, track states) of the block pass,
+        then the PC music streams: one file per track and a sidecar, now that the
+        descriptors (tracks, cue points) are known.  A stream that does not
+        split is written as one file, one that does not decode goes to the
+        console pass."""
+        a, log = self.a, self.log
+        aq, stats = self.audio, self.report.stats
+        setups = self.setups
+        for fname, fhead, forder in aq.music_frags:
+            try:
+                import sound_meta as _sm
+
+                setups += _sm.music_setups_from_bytes(fhead, fname, forder)
+            except Exception as ex:
+                log("      ! music setup %s: %s" % (fname, ex))
+
+        for name, ent in aq.pc_audio:
+            try:
+                raw = self.block_plan.entry_bytes(ent)
+                tr = audio_decode.decode_audio_tracks(
+                    raw, a.out / "audio", name, True, log, self._slot_labels(name)
+                )
+                if tr:
+                    stats["aud"] += len(tr)
+                    self._music_sidecar(name, tr, "one file per track")
+                elif audio_decode.decode_audio(
+                    raw, extract_paths.safe(a.out / "audio", name + ".ogg"), True, log
+                ):
+                    stats["aud"] += 1
+                    log("      ! %s does not split into tracks: written as one file" % name)
+                else:
+                    aq.console_audio.append((name, ent))
+            except Exception as ex:
+                log("      ! audio %s: %s" % (name, ex))
+            raw = None
+
+    def _desc_of(self, name):
+        """(descriptor asset name, descriptor) of a stream entry: by its path,
+        else by the one descriptor whose stream path ends with it (a loose tree
+        rooted below `derived_<platform>/`)."""
+        media_desc = self.audio.media_desc
+        key = name.lower().lstrip("/")
+        if key in media_desc:
+            return media_desc[key]
+        hits = [v for k, v in media_desc.items() if k.endswith("/" + key)]
+        return hits[0] if len(hits) == 1 else (None, None)
+
+    def _music_sidecar(self, name, tracks, layout):
+        """audio/<name>.json: the tracks of a music stream, their cue points and
+        the MusicSetup that plays it."""
+        dname, desc = self._desc_of(name)
+        mine = [
+            s
+            for s in self.setups
+            if dname
+            and (s.get("stream_asset") or "").replace("\\", "/").lstrip("/").lower()
+            == dname.replace("\\", "/").lstrip("/").lower()
+        ]
+        slot = mine[0]["track_names"] if mine else []
+        for k, t in enumerate(tracks):
+            dt = desc["tracks"][k] if desc and k < len(desc["tracks"]) else {}
+            t["slot_track_name"] = slot[k] if k < len(slot) else None
+            t["source"] = dt.get("source")
+            if dt.get("samples"):
+                t["descriptor_samples"] = dt["samples"]
+            rate = t.get("rate") or dt.get("rate")
+            t["cue_points"] = [
+                dict(c, time_s=round(c["sample"] / float(rate), 4) if rate else None)
+                for c in dt.get("cue_points", [])
+            ]
+        doc = {
+            "format": "watchmen-music-stream/1",
+            "stream": name.replace("\\", "/").lstrip("/"),
+            "descriptor": dname,
+            "layout": layout,
+            "tracks": tracks,
+            "setups": mine,
+        }
+        import json as _json
+
+        jp = extract_paths.safe(self.a.out / "audio", name + ".json")
+        jp.parent.mkdir(parents=True, exist_ok=True)
+        with open(jp, "w", encoding="utf-8", newline="\n") as _f:
+            _f.write(_json.dumps(doc, indent=1))
+
+    def _slot_labels(self, name):
+        """--music-track-labels: the MusicStreamSlot track names of a stream."""
+        if not self.a.music_track_labels:
+            return None
+        dname = self._desc_of(name)[0]
+        for s in self.setups:
+            if (
+                dname
+                and (s.get("stream_asset") or "").lstrip("/").lower() == dname.lstrip("/").lower()
+            ):
+                return s["track_names"]
+        return None
+
+    def sounds(self):
+        """audio/sound_info.json: the header facts of every sound asset, and the
+        sound assets no reader took."""
+        a, log = self.a, self.log
+        sound_info, sfx_failed = self.audio.sound_info, self.audio.sfx_failed
+        if not (sound_info or sfx_failed):
+            return
+        import json as _json
+
+        doc = {"format": "watchmen-sound-info/1", "sounds": dict(sorted(sound_info.items()))}
+        if sfx_failed:  # marker: sound assets whose header no reader took
+            doc["not_decoded"] = sorted(n.replace("\\", "/").lstrip("/") for n in sfx_failed)
+        (a.out / "audio").mkdir(parents=True, exist_ok=True)
+        with open(
+            extract_paths.safe(a.out / "audio", "sound_info.json"),
+            "w",
+            encoding="utf-8",
+            newline="\n",
+        ) as _f:
+            _f.write(_json.dumps(doc, indent=1))
+        src = {}
+        for si in sound_info.values():
+            if "duration_source" in si:  # console records only
+                src[si["duration_source"]] = src.get(si["duration_source"], 0) + 1
+        if src or sfx_failed:
+            kept = sum(1 for si in sound_info.values() if not si["file"].lower().endswith(".wav"))
+            log(
+                "\nSOUND INFO: %d sounds -> audio/sound_info.json (duration from: %s; "
+                "%d not decoded)"
+                % (
+                    len(sound_info),
+                    ", ".join("%s %d" % kv for kv in sorted(src.items())) or "the PC header",
+                    len(sfx_failed),
+                )
+            )
+            if src:
+                log(
+                    "CONSOLE SFX: %d of %d sounds written as .mp3 / .xma containers (vgmstream: %s)"
+                    % (kept, len(sound_info), a.vgmstream_cli or "not set")
+                )
+
+    def console_music(self):
+        """The console music streams (and PC streams the music pass could not
+        decode), with the per-stream channel / rate the block pass read."""
+        a, log = self.a, self.log
+        aq, stats = self.audio, self.report.stats
+        if not aq.console_audio:
+            return
+        log(
+            "\nCONSOLE AUDIO: %d streams (vgmstream: %s)"
+            % (len(aq.console_audio), a.vgmstream_cli or "not set")
+        )
+        for name, ent in aq.console_audio:
+            try:
+                raw = self.block_plan.entry_bytes(ent)
+                meta = aq.media_meta.get(name.lower().lstrip("/"))
+                r = audio_decode.decode_console_audio(
+                    name,
+                    raw,
+                    a.out / "audio",
+                    meta,
+                    a.vgmstream_cli,
+                    log,
+                    a.keep_xma,
+                    tracks=not a.flat_music,
+                    labels=self._slot_labels(name),
+                    desc=self._desc_of(name)[1],
+                )
+                if isinstance(r, list):
+                    stats["aud"] += len(r)
+                    self._music_sidecar(name, r, "one file per track")
+                elif r:
+                    stats["aud"] += 1
+                else:
+                    log("      ! unrecognized mediastream %s" % name)
+            except Exception as ex:
+                log("      ! console audio %s: %s" % (name, ex))
+            raw = None
+
 
 def main(argv):
     """`extract`: see --help.  The run's name record (canonical_names.Run) is
@@ -855,6 +1052,10 @@ def _extract_main(argv):
     extract_log.push(log)
     try:
         run.blocks()
+        run.stream_set_report()
+        run.music()
+        run.sounds()
+        run.console_music()
         return _extract_after_blocks(run)
     finally:
         extract_log.pop()
@@ -862,207 +1063,24 @@ def _extract_main(argv):
 
 
 def _extract_after_blocks(run):
-    """Everything after the block pass (`extract`, see _extract_main) over `run`.
+    """Everything after the audio passes (`extract`, see _extract_main) over `run`.
     Returns 1 when a block could not be read or parsed (its assets are missing),
     else 0."""
     a = run.a
     log = run.log
     blocks = run.block_plan.blocks
-    _entry_bytes = run.block_plan.entry_bytes
-    _stream_only = run.block_plan.stream_only
-    _stream_used = run.block_plan.stream_used
     model_jobs = run.model_jobs
-    console_audio = run.audio.console_audio
-    pc_audio = run.audio.pc_audio
-    media_meta = run.audio.media_meta
-    media_desc = run.audio.media_desc
-    music_frags = run.audio.music_frags
-    sound_info = run.audio.sound_info
-    sfx_failed = run.audio.sfx_failed
     stats = run.report.stats
     name_run = run.name_run
     names = run.names
     model_stored = run.model_stored
     text_writer = run.text_writer
-    no_stream = run.report.no_stream
     misc = run.report.misc
     raw_only = run.report.raw_only
-    from_sets = run.report.from_sets
     n_assets = run.report.n_assets
     failed_blocks = run.report.failed_blocks
     tex_repeats = run.report.tex_repeats
     mdl_repeats = run.report.mdl_repeats
-
-    if from_sets or _stream_only:
-        log("\nSTREAM SETS: %d stream-only block file(s)" % len(_stream_only))
-        for sfile, cnt in sorted(from_sets.items()):
-            log("  %s: %d asset stream(s) read" % (sfile, cnt))
-        _find = kapow_block.stream_file_lookup({k: k for k in _stream_only})
-        _hit = {_find(sfile) for sfile in _stream_used}
-        for k in sorted(_stream_only):
-            if k not in _hit:
-                log("  WARNING: %s: no stream set of any block names this file; not read" % k)
-    if no_stream:
-        log("\nNO STREAM: %d texture / model asset(s) without stream data" % len(no_stream))
-        for _nm, (_cls, _why) in sorted(no_stream.items()):
-            log("  note: no stream: %s (%s): %s" % (_nm, _cls, _why))
-
-    # music: block pass done -> descriptors (tracks, cue points) and the
-    # MusicSetup fragments (track names, track states) are known
-    setups = []
-    for fname, fhead, forder in music_frags:
-        try:
-            import sound_meta as _sm
-
-            setups += _sm.music_setups_from_bytes(fhead, fname, forder)
-        except Exception as ex:
-            log("      ! music setup %s: %s" % (fname, ex))
-
-    def _desc_of(name):
-        """(descriptor asset name, descriptor) of a stream entry: by its path,
-        else by the one descriptor whose stream path ends with it (a loose tree
-        rooted below `derived_<platform>/`)."""
-        key = name.lower().lstrip("/")
-        if key in media_desc:
-            return media_desc[key]
-        hits = [v for k, v in media_desc.items() if k.endswith("/" + key)]
-        return hits[0] if len(hits) == 1 else (None, None)
-
-    def _music_sidecar(name, tracks, layout):
-        dname, desc = _desc_of(name)
-        mine = [
-            s
-            for s in setups
-            if dname
-            and (s.get("stream_asset") or "").replace("\\", "/").lstrip("/").lower()
-            == dname.replace("\\", "/").lstrip("/").lower()
-        ]
-        slot = mine[0]["track_names"] if mine else []
-        for k, t in enumerate(tracks):
-            dt = desc["tracks"][k] if desc and k < len(desc["tracks"]) else {}
-            t["slot_track_name"] = slot[k] if k < len(slot) else None
-            t["source"] = dt.get("source")
-            if dt.get("samples"):
-                t["descriptor_samples"] = dt["samples"]
-            rate = t.get("rate") or dt.get("rate")
-            t["cue_points"] = [
-                dict(c, time_s=round(c["sample"] / float(rate), 4) if rate else None)
-                for c in dt.get("cue_points", [])
-            ]
-        doc = {
-            "format": "watchmen-music-stream/1",
-            "stream": name.replace("\\", "/").lstrip("/"),
-            "descriptor": dname,
-            "layout": layout,
-            "tracks": tracks,
-            "setups": mine,
-        }
-        import json as _json
-
-        jp = extract_paths.safe(a.out / "audio", name + ".json")
-        jp.parent.mkdir(parents=True, exist_ok=True)
-        with open(jp, "w", encoding="utf-8", newline="\n") as _f:
-            _f.write(_json.dumps(doc, indent=1))
-
-    def _slot_labels(name):
-        if not a.music_track_labels:
-            return None
-        dname = _desc_of(name)[0]
-        for s in setups:
-            if (
-                dname
-                and (s.get("stream_asset") or "").lstrip("/").lower() == dname.lstrip("/").lower()
-            ):
-                return s["track_names"]
-        return None
-
-    for name, ent in pc_audio:
-        try:
-            raw = _entry_bytes(ent)
-            tr = audio_decode.decode_audio_tracks(
-                raw, a.out / "audio", name, True, log, _slot_labels(name)
-            )
-            if tr:
-                stats["aud"] += len(tr)
-                _music_sidecar(name, tr, "one file per track")
-            elif audio_decode.decode_audio(
-                raw, extract_paths.safe(a.out / "audio", name + ".ogg"), True, log
-            ):
-                stats["aud"] += 1
-                log("      ! %s does not split into tracks: written as one file" % name)
-            else:
-                console_audio.append((name, ent))
-        except Exception as ex:
-            log("      ! audio %s: %s" % (name, ex))
-        raw = None
-
-    if sound_info or sfx_failed:
-        import json as _json
-
-        doc = {"format": "watchmen-sound-info/1", "sounds": dict(sorted(sound_info.items()))}
-        if sfx_failed:  # marker: sound assets whose header no reader took
-            doc["not_decoded"] = sorted(n.replace("\\", "/").lstrip("/") for n in sfx_failed)
-        (a.out / "audio").mkdir(parents=True, exist_ok=True)
-        with open(
-            extract_paths.safe(a.out / "audio", "sound_info.json"),
-            "w",
-            encoding="utf-8",
-            newline="\n",
-        ) as _f:
-            _f.write(_json.dumps(doc, indent=1))
-        src = {}
-        for si in sound_info.values():
-            if "duration_source" in si:  # console records only
-                src[si["duration_source"]] = src.get(si["duration_source"], 0) + 1
-        if src or sfx_failed:
-            kept = sum(1 for si in sound_info.values() if not si["file"].lower().endswith(".wav"))
-            log(
-                "\nSOUND INFO: %d sounds -> audio/sound_info.json (duration from: %s; "
-                "%d not decoded)"
-                % (
-                    len(sound_info),
-                    ", ".join("%s %d" % kv for kv in sorted(src.items())) or "the PC header",
-                    len(sfx_failed),
-                )
-            )
-            if src:
-                log(
-                    "CONSOLE SFX: %d of %d sounds written as .mp3 / .xma containers (vgmstream: %s)"
-                    % (kept, len(sound_info), a.vgmstream_cli or "not set")
-                )
-
-    # console music: per-stream channel/rate metadata known
-    if console_audio:
-        log(
-            "\nCONSOLE AUDIO: %d streams (vgmstream: %s)"
-            % (len(console_audio), a.vgmstream_cli or "not set")
-        )
-        for name, ent in console_audio:
-            try:
-                raw = _entry_bytes(ent)
-                meta = media_meta.get(name.lower().lstrip("/"))
-                r = audio_decode.decode_console_audio(
-                    name,
-                    raw,
-                    a.out / "audio",
-                    meta,
-                    a.vgmstream_cli,
-                    log,
-                    a.keep_xma,
-                    tracks=not a.flat_music,
-                    labels=_slot_labels(name),
-                    desc=_desc_of(name)[1],
-                )
-                if isinstance(r, list):
-                    stats["aud"] += len(r)
-                    _music_sidecar(name, r, "one file per track")
-                elif r:
-                    stats["aud"] += 1
-                else:
-                    log("      ! unrecognized mediastream %s" % name)
-            except Exception as ex:
-                log("      ! console audio %s: %s" % (name, ex))
-            raw = None
 
     # all blocks parsed -> textures are now on disk; decode models last with the
     # full texture index so per-submesh materials resolve correctly.
