@@ -184,7 +184,7 @@ def platform_name(plat, order):
 #   * qmat_xyzw / qmats_xyzw give the matrix M of the rotation v -> q v q* (the
 #     "standard" one: M @ v rotates the column vector v);
 #   * qrows_conj_xyzw gives the rows of the engine's own rule v -> q* v q, which
-#     is the transpose of M (watchmen_extract's model-part transforms);
+#     is the transpose of M (model_header's model-part transforms);
 #   * a wxyz quaternion goes through qmat_xyzw((x, y, z, w)).
 # The expressions are those of the copies they replaced, term for term, so every
 # caller computes the same floats as before (the test suite's outputs are

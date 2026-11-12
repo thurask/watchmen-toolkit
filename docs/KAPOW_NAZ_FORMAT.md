@@ -82,7 +82,7 @@ ZIP — no inflate at the container level.
   across archives the **lowest mount slot wins**. Room for five archives is inferred from the
   handle array (0xd91d24 … 0xd91d38), which the mount code does not bounds-check.
 
-`watchmen_extract.naz_entries` differs on purpose: it keeps the names, checks the directory
+`naz_archive.naz_entries` differs on purpose: it keeps the names, checks the directory
 magic, rejects a plain zip, reads `psize` (naz +12) bytes and `naz_read` would inflate method 8.
 Each entry carries `key` (`naz_key(name)`, the engine's index key) and `naz_entries(path,
 warn=...)` reports any entry whose compression method is not 0, since the engine would read it
@@ -166,7 +166,7 @@ The file ends with the 8-byte trailing blob, so `fragmentOffset == fileSize − 
 `[400, 243641)`, header blobs start at `243641`. The first entry is
 `/Levels/Game_Levels_Part2/Bordello` (the scene fragment).
 
-`watchmen_extract.parse_block_header(h)` returns these fields;
+`kapow_block.parse_block_header(h)` returns these fields;
 `fingerprint_decrypt()` is the cipher.
 
 Header fields @32, @327, @328, @388 in detail:
@@ -357,7 +357,7 @@ the frame's spare milliseconds and keeps a 5 ms margin)*
    stream]` in platform byte order (measured: the zlib stream starts at
    offset 8 on the 36 such files of the six sets; an `_s_z` file has no
    preamble, its zlib stream starts at offset 0, 5 files checked).
-   `watchmen_extract.standalone_preamble` returns it.
+   `kapow_block.standalone_preamble` returns it.
 
    | Type | Part 2 (PC / X360 / PS3) and PS3 Part 1 | Stand-alone Part 1 (PC / X360) |
    |---|---|---|
@@ -459,7 +459,7 @@ way and then carries a type-specific body:
 **The header states its byte order** (from data): `typeNameLen` is in the byte
 order of the block the header came from, and it is a valid name length in one
 order only, so an extracted header can be read without knowing its platform
-(`watchmen_extract.header_order`; 5,490 of 5,490 model headers of six sets —
+(`kapow_block.header_order`; 5,490 of 5,490 model headers of six sets —
 Parts 1 and 2 on PC, Xbox 360, PS3 — say so, and the result agrees with the
 platform). The toolkit uses this for every header it reads outside its block
 (character parts, ragdoll rig, model nodes, skeleton names). A rule that counts
@@ -641,7 +641,7 @@ holds
 
 Read this way all six faces of all 310 maps are pixel-identical on the three
 platforms. Reading a PC cube as six face chains is right for face 0 only
-(`watchmen_extract.PC_CUBE_LEVEL_MAJOR = False` gives that reading).
+(`texture_carve.PC_CUBE_LEVEL_MAJOR = False` gives that reading).
 Code: 0x454384 reads level by level, six faces per level, into the pointers
 0x454492 took from `LockRect(face, level)`; file face *k* is D3D cube face *k*
 (+X, −X, +Y, −Y, +Z, −Z). `sheet.json` of a cube map states it as
@@ -728,7 +728,7 @@ the descriptor type (`1` = 2D, `2` = cube → `WrappedCreateCubeTexture`).
   22 % of the PC and 25 % of the Xbox 360 channel values of Part 2's normal
   maps (measured, 909 layer decodes each; never more than 1).
   On PC (format enum 9) the **first** 8-byte block of each 16-byte block is
-  **Y** and the **second** is **X** (`watchmen_extract.ati2_xy`); a decoder that
+  **Y** and the **second** is **X** (`texture_decode.ati2_xy`); a decoder that
   writes the first block to red produces a `*_normal_*_ATI2.png` with X and Y
   swapped, and nothing in a PNG says which decoder wrote it. The X360 layers
   (enum 10) and the PS3 `DXT5` layers decode X-first. In the written PNG, red
@@ -749,7 +749,7 @@ the top stored mip for maximum resolution.
 The 20-byte records of the header's property bag (§4.1) are
 `[salt u32][name hash u32][type hash u32][tag u32][value]`, both hashes
 being the engine name hash of the strings. Nine of the names are the
-TextureSheet's material switches (`watchmen_extract.TEXTURE_SHEET_PROPS`):
+TextureSheet's material switches (`texture_sheet.TEXTURE_SHEET_PROPS`):
 
 | property | type | meaning |
 |---|---|---|
@@ -805,7 +805,7 @@ run of property records (§4.6) sharing one salt. A record is
 `[salt u32][name hash u32][type hash u32][payload dwords u32][payload]`; a
 string payload is `[length u32][bytes, NUL-padded to 4]`. Part 2 PC: 936
 textures, 769 with one sheet, 123 with two, up to eight.
-`watchmen_extract.texture_sheets(header)` returns them in file order, and
+`texture_sheet.texture_sheets(header)` returns them in file order, and
 `sheet.json` lists them under `sheets`.
 
 | property | meaning |
@@ -841,7 +841,7 @@ The engine takes entry `sheet+0x6c` of the override texture's frame table
 texture's first layer file of that kind, which is the same thing unless the
 override texture has more than one frame (no case was looked for).
 
-How the exporters write a blend type (`watchmen_extract.sheet_blend`,
+How the exporters write a blend type (`texture_sheet.sheet_blend`,
 `blend_material`; engine states in `ENGINE_CONSTANTS.md`, "Render lists, alpha
 and blend states"): `standard` → `alphaMode: BLEND`; `subtract` → the layer
 rewritten as black with alpha = brightness × alpha (exact over white); `add`,
@@ -867,7 +867,8 @@ express a blend equation and links the raw layer.
 4. Write each PNG under the asset's embedded source path to rebuild the original
    `/data/art/...` tree.
 
-This is what the texture path in `wlib/watchmen_extract.py` implements, and
+This is what the texture path (`wlib/texture_header.py`, `texture_carve.py`,
+`texture_decode.py`) implements, and
 it needs nothing but the block files and Python + Pillow + numpy.
 
 ---
@@ -1060,7 +1061,7 @@ for byte). So the console comes from where the model was read
 (`console_color_order`, `CONSOLE_COLOR_ORDERS`), in this order:
 
 1. `WATCHMEN_CONSOLE=x360` or `ps3` (environment), or
-   `watchmen_extract.set_console_platform()`;
+   `model_mesh.set_console_platform()`;
 2. the source path: a block path inside the `.naz` starts with `derived_x360/`
    or `derived_ps3/` (every block of both Part 2 console sets and of PS3
    Part 1), and the loose Xbox Live Part 1 tree is the directory
@@ -1254,7 +1255,7 @@ found (0x4a5961) reads part 0's value only. It is 0 on all 6,220 parts.
 
 ### Extractor
 
-`watchmen_extract.parse_model_header` and `model_stream_layout` implement this
+`model_header.parse_model_header` and `model_stream_layout` implement this
 layout; `decode_model_mesh` returns everything per submesh (name, part, LOD,
 texture, positions, normals, UVs, triangles, colour, tangent, bitangent,
 joints, weights). `decode_model` writes an **OBJ + MTL** per model (and, with

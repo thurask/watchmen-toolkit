@@ -91,7 +91,8 @@ per-platform texture format table. States plainly what the PC executable cannot 
 framing, the X360 2D mip tail). Evidence: read from code, and "validated" where the reference
 parsers reproduce real files exactly (models 740 / 740, textures 936 / 936, sequences 194 / 194).
 Tables: `formats_tables.json`, `formats_vertex_decls.json`. The reference parsers it mentions are
-not shipped; their logic is in `wlib/watchmen_extract.py` and `wlib/decode_sequence.py`.
+not shipped; their logic is in the extractor modules (`wlib/model_header.py`,
+`wlib/texture_header.py`, ...) and `wlib/decode_sequence.py`.
 
 ### [names.md](names.md) — the name hash, command hashes, property names
 

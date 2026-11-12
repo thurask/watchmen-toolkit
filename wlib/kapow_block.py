@@ -2,9 +2,8 @@
 `<name>.block_s_z` (per-asset zlib streams); standalone `_h_z` / `_s_z` files
 and `.mediastream_s` too.  The block header, directory and trailer
 (`parse_block_header`, `parse_block_toc`, `parse_block_trailer`), the byte order
-of the block (`detect_block_order`; each directory entry's `order`, the last
-one mirrored in `BLOCK_ORDER`), language slots and stream
-sets, one asset's header and stream (`extract_block`, `maybe_inflate`,
+of the block (`detect_block_order`; each directory entry's `order`), language
+slots and stream sets, one asset's header and stream (`extract_block`, `maybe_inflate`,
 `inflate_standalone`), asset types and classes, and the property-bag walk
 (`prop_walk`, `propbag_end`).
 """
@@ -251,7 +250,6 @@ class Toc:
 # (names, GUIDs) are byte-order-independent, so ONLY the block-header integer
 # reads need to flip.  detect_block_order() reads NUM_TABLES both ways and keeps
 # the interpretation that is a plausible asset count -- no CLI flag required.
-BLOCK_ORDER = "<"  # the byte order of the last parse_block_toc call; each Toc carries its own
 
 
 def detect_block_order(h):
@@ -335,8 +333,7 @@ def parse_block_toc(h, order=None, language=0):
     """-> (entries, data_start).  `entries` holds the `num_entries` main records
     followed by the `num_localized` per-language ones (`.localized` is True);
     each carries the block's byte order in `.order` ("<" / ">": `order`, else
-    detect_block_order).  BLOCK_ORDER mirrors the order of the last call."""
-    global BLOCK_ORDER
+    detect_block_order)."""
     if (
         isinstance(language, bool)
         or not isinstance(language, int)
@@ -344,7 +341,6 @@ def parse_block_toc(h, order=None, language=0):
     ):
         raise ValueError("language slot must be 0..%d, not %r" % (BLOCK_LANGUAGES - 1, language))
     bo = order or detect_block_order(h)
-    BLOCK_ORDER = bo
     tables_size = struct.unpack_from(bo + "I", h, TABLES_SIZE_OFFSET)[0]
     num = struct.unpack_from(bo + "I", h, NUM_TABLES_OFFSET)[0]
     nloc = struct.unpack_from(bo + "I", h, 356)[0]

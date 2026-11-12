@@ -234,7 +234,7 @@ there is no inverted-normal convention.
 | **TANGENT** | **Emit xyz as is (stored, unit); `w = −s` with the green-flipped normal texture** | glTF builds `B = cross(N, T)·w`. The engine uses the stored bitangent, which is +∂P/∂v. Let `s = sign(dot(cross(N, T), B_stored))` computed on the numbers as exported. With the normal texture's green channel inverted for glTF (the toolkit's default, `gltf_tangents(green_up=True)`), `w = −s`; with the texture left in the engine's orientation, `w = s`. If X is mirrored instead of flipping indices, negate once more. Render test (`impl_vcolor.md`): `w = −s` with the inverted-green texture matches the engine math to about 1° median in three.js and Blender; a PC `ATI2` normal map must be decoded with X and Y in the right order for this to hold (a swapped decode, not the sign of `w`, is what makes bumps read as dents). |
 | `_BITANGENT` | Optional custom attribute | Only a custom shader can reproduce the engine exactly on the ~15 % of vertices whose stored bitangent is not ±cross(N, T). Do not orthogonalise by default: the engine does not. |
 
-Toolkit: `watchmen_extract.gltf_tangents` returns `w = −s` for `green_up=True` (default) and `w = s`
+Toolkit: `model_mesh.gltf_tangents` returns `w = −s` for `green_up=True` (default) and `w = s`
 otherwise; `char_lib` flips green by default, so both agree. The 17 % darkening is real engine
 behaviour: switching COLOR_0 off makes those 387 models brighter than in game and removes the decal
 edge fades.

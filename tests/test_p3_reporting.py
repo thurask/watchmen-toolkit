@@ -154,9 +154,8 @@ def test_without_glb_option_the_sidecar_has_no_marker(tmp_path, monkeypatch):
     monkeypatch.setattr(obj_mtl, "write_obj_mtl", lambda *a: None)
     meta, st, logs = _decode(tmp_path, *pm.build("<", "part2"))
     assert "glb" not in meta and st["glb"] is None
-    # a caller that passes no dict finds the same facts in MODEL_STATUS
+    # a caller that passes no dict gets the same result
     assert model_export.decode_model(*pm.build("<", "part2"), tmp_path / "n.obj") is True
-    assert model_export.MODEL_STATUS["glb"] is None and model_export.MODEL_STATUS["partial"] is None
 
 
 def test_scan_decode_that_misses_submeshes_is_marked(tmp_path, glb_on, monkeypatch):

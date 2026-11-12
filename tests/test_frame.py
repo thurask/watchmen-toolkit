@@ -115,7 +115,7 @@ def test_cli_frame_option_is_refused_where_it_means_nothing(monkeypatch, capsys)
 
 def test_extract_parser_has_the_option_too(monkeypatch, tmp_path, capsys):
     """`watchmen extract` strips --frame itself; the extractor run on its own
-    (python wlib/watchmen_extract.py) takes it as well."""
+    (python wlib/extract_driver.py) takes it as well."""
     monkeypatch.setenv("WATCHMEN_FRAME", "true")
     with pytest.raises(SystemExit):
         extract_driver.main(["--help"])

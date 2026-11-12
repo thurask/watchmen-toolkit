@@ -133,7 +133,7 @@ def test_changelog_has_one_entry_per_release_and_the_docs_do_not_date_it_backwar
         "docs/KAPOW_NAZ_FORMAT.md",
         "docs/ENGINE_CONSTANTS.md",
         "docs/WATCHMEN_EXTRACTION_MASTER.md",
-        "wlib/watchmen_extract.py",
+        "wlib/extract_driver.py",
     ):
         with open(os.path.join(root, rel), encoding="utf-8") as f:
             text = " ".join(f.read().split()).lower()

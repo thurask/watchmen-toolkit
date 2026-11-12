@@ -3,7 +3,7 @@
 The smaller asset formats (`.grass`, `.detailmesh`, `.pb`, `.font`, `.terrain`,
 `.terraincoloringasset`, `.scene`, `.sequence`, `sound`, the console shader archive) and the
 serialization they share with `.particle` and `.fragment`. JSON emission is integrated into
-`watchmen_extract.py` (writes `extracted/<name>.json` next to each raw asset; a Part 2 PC tree
+the extractor (`extract_driver.py`; writes `extracted/<name>.json` next to each raw asset; a Part 2 PC tree
 converts 1203/1203 files with 0 errors).
 
 ## The Kapow property hash
@@ -87,7 +87,7 @@ Parser: `kapow_props.py` (name resolution via the hash dict).
   `stream.stride_matches_format` compares the two (a `WARNING:` line when they differ).
   `inferred["stream.format_stride on consoles"]` says what that comparison rests on for a
   console file: the Xbox 360 executable's table (0x8308b6e0,
-  `watchmen_extract.CONSOLE_VERTEX_STRIDES`) gives 60 for format 7 as well; the PS3 table was
+  `model_header.CONSOLE_VERTEX_STRIDES`) gives 60 for format 7 as well; the PS3 table was
   not read. All 30 detail meshes of the six sets tile with 60 bytes (measured).
   Its `.stream` (reader `0x5322c6`) =
   `[u32 n][n index offsets][u32 n][n mid offsets][u32 n][n counts]`, then
@@ -435,7 +435,7 @@ Many mesh-free bones have `nGroup = 1` with an empty group (e.g. every bone of
 `skeleton_records.parse_node_tail` gives up on any non-zero group count;
 `parse_node_tail(..., meshes=True)` walks the mesh section (submesh 0x542541, MeshBuffer
 0x4336ec) and reads the lists of every node. The header-driven readers
-(`watchmen_extract.parse_model_header`, `parse_model_nodes.model_physics`) read every node of
+(`model_header.parse_model_header`, `parse_model_nodes.model_physics`) read every node of
 every model.
 
 | type | shape | type data | bytes without blob |
@@ -524,7 +524,7 @@ floats after the type word of a capsule are (diameter, height, x), not a positio
 - **Output.** `parse_volume_lists` surfaces: `class`, `tris` [{`normal`,
   `area_weight`, `material_id`}] (`vec`, `value`, `id` are aliases of the same
   three values), `verts`, `indices`, `weight_sum`, `weight_is_area`.
-  `watchmen_extract.model_surfaces(header)` returns them for every node,
+  `model_header.model_surfaces(header)` returns them for every node,
   `parse_model_nodes.model_physics` puts them on its nodes, and the model
   sidecar `<name>.model.json` gains `particle_surfaces` [{`node`, `part`,
   `class`, `triangles`, `vertices`, `material_ids`, `weight_sum`,
@@ -653,7 +653,7 @@ console joint order in [KAPOW_NAZ_FORMAT.md](KAPOW_NAZ_FORMAT.md) §6b was read 
 
 ## JSON pipeline (integrated)
 
-`watchmen_extract.py` emits `.json` beside every extracted
+The extractor (`extract_driver.py`) emits `.json` beside every extracted
 .fragment/.scene/.sequence/.pb/.particle/.grass/.detailmesh/.terrain/.terraincoloringasset/.font
 (lazy import of `kapow_json.py`; `--no-extract-all` disables). Standalone:
 `python3 kapow_json.py FILE [OUT.json]`.

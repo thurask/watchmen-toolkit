@@ -22,7 +22,7 @@ Pipeline: see docs/WATCHMEN_EXTRACTION_MASTER.md for the detail, and the
 docstring of each module for its step.
 
 Usage:
-    python watchmen_extract.py game.naz -o OUT
+    python wlib/extract_driver.py game.naz -o OUT
         [--no-files] [--no-textures] [--no-models] [--no-audio]
         [--exact-audio]   sample-perfect Ogg granulepos (parses Vorbis modes)
         [--flat-music]    music streams as ONE file each (the output of releases before 1.4.0)
@@ -1433,3 +1433,11 @@ def _parser():
         help="no progress log; the warning lines ('!' and 'WARNING:') still go to stderr",
     )
     return ap
+
+
+if __name__ == "__main__":
+    # run through the module of that name, so a module that imports
+    # extract_driver shares this run's state with it
+    import extract_driver
+
+    sys.exit(extract_driver.main(sys.argv[1:]))

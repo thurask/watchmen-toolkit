@@ -75,7 +75,7 @@ FRAGMENT_KEYS = os.path.join(_HERE, "kapow_fragment_keys.pkl")
 # ---- archive ----------------------------------------------------------------
 def extract_all(naz, out, *extra):
     """Full asset extraction (files/textures/models/audio/JSON) from game.naz.
-    Extra args are passed through to watchmen_extract (e.g. '--vgmstream-cli',
+    Extra args are passed through to extract_driver.main (e.g. '--vgmstream-cli',
     '/path/to/vgmstream-cli' for console X360/PS3 audio -> wav)."""
     return extract_driver.main([str(naz), "-o", str(out)] + [str(x) for x in extra])
 

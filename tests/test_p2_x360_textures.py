@@ -3,7 +3,8 @@
 Synthetic big-endian fixtures only: X360 streams are built tiled and 16-bit
 swapped the way the console stores them, PS3 streams as [36-byte descriptor]
 [data] segments.  What is pinned here was measured on the real sets (the
-numbers are in the docstrings of wlib/watchmen_extract.py):
+numbers are in the docstrings and comments of wlib/texture_header.py,
+texture_decode.py and texture_carve.py):
 
 * the last u32 of an X360 image descriptor is the layer's stored size;
 * format id 8 (DXT3A) is a layer, not the end of the list;

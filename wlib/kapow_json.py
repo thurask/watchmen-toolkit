@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Human-readable JSON emitters for Kapow property/sequence/fragment assets.
-# Used by watchmen_extract.py (extracted/*.json) and standalone:
+# Used by extract_driver.py (extracted/*.json) and standalone:
 #   python3 kapow_json.py FILE            (prints JSON)
 import json
 import struct

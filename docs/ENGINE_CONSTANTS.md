@@ -2725,7 +2725,7 @@ executable's bytes at the stated width; not checked in the running game.
 ## 13. Renderer, materials and texture sheets
 
 Reports: `re/wp1_renderer.md`, `re/vcolor.md` (+ `vcolor_shaders.json`). Toolkit:
-`wlib/materials.py`, `wlib/rig_glb.py`, `watchmen_extract`.
+`wlib/materials.py`, `wlib/rig_glb.py`, `wlib/texture_sheet.py`, `wlib/obj_mtl.py`.
 
 ### Device and frame [code + measured]
 
@@ -3099,14 +3099,14 @@ replaced by (1, 1 − v.w, 1 − v.w) of a texcoord.
   indices of the signs equal the file's. That Kynapse's navigation space is the engine's with
   x negated (bridge 0x48110f, NAV_DATA.md) fits the same picture.
 - Toolkit: NORMAL as stored; a primitive that gets NORMAL has its triangles reversed when they
-  wind against it. TANGENT = stored tangent, `w = −s` (`watchmen_extract.gltf_tangents`,
+  wind against it. TANGENT = stored tangent, `w = −s` (`model_mesh.gltf_tangents`,
   `green_up=False` gives +s), written only for a material with a normal map; the embedded
   normal texture has green inverted. A GLB without NORMAL is shaded flat by glTF consumers;
   no model GLB of the six-set export lacks NORMAL (§15).
 
 ### PC `ATI2` normal maps store Y first [data + bytecode + render test]
 
-Direct3D 9 `ATI2` keeps the Y block first and the X block second. `watchmen_extract.ati2_xy`:
+Direct3D 9 `ATI2` keeps the Y block first and the X block second. `texture_decode.ati2_xy`:
 PC enum 9 decodes X from the second block, Y from the first. The per-platform format table at 0x009E8F78 gives the format (normal maps PC 9
 -> X360 10 -> PS3 7), not the channel order: the X360 (enum 10) and PS3 (DXT5) layers are
 X-first. Evidence:
@@ -3169,7 +3169,7 @@ X-first. Evidence:
   blending:1,Glass:2,Water:3,Hair:6,SkyBox:7,Sprite:9,Falloff:10,Wet surface:11`);
   `blendType` from `items=standard:0,add:1,subtract:2,manual:3|caption=blend type`.
   `twoSided` is the byte at sheet+0xA4. `alphaThreshold` is the alpha-test reference, 0..255.
-  `watchmen_extract.texture_sheet` reads the first sheet of a header; the further sheets are
+  `texture_sheet.texture_sheet` reads the first sheet of a header; the further sheets are
   named alternatives, not defaults; texture extraction writes the result as `sheet.json`
   beside the PNGs (with `stored_name` and `overrides`).
 - Animated sheets [code]: constructor 0x525964 (`enableAnim` +0xa7 = 0, `animDelayInMs` +0xa8 with +0xac =
@@ -3536,7 +3536,7 @@ version signature is the u32 at 32.
 `[u32 typeNameLen][typeName][u32 bagDwords][bag]`, body at 4 + typeNameLen + 4 + 4 ×
 bagDwords. The u32 is the property bag's length in dwords (FUN_00511f96), not a class id: 45
 Texture, 91 ModelRes, 55 TextureEffects, 96 ModelEffects. An asset header's opening name
-length states the byte order of the header (`watchmen_extract.header_order`). A 64-bit
+length states the byte order of the header (`kapow_block.header_order`). A 64-bit
 property value is two u32 words, low word first, each byte-swapped on console. The standalone
 Part 1 (PC, Xbox 360) stores property records without the type hash (KAPOW_NAZ_FORMAT.md §3).
 

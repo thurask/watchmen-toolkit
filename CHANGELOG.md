@@ -175,6 +175,13 @@
   header module itself (it took the module as its first argument). The `generator` strings of
   the GLB writers and the detail-mesh note that name `watchmen_extract` are output and stay as
   they are. (2026-11-12)
+- **`watchmen_extract.py` is retired.** `import watchmen_extract` no longer works; import the
+  module that holds the name (`docs/INDEX.md` lists them). The extractor runs on its own as
+  `python wlib/extract_driver.py game.naz -o OUT [options]` (was `python
+  wlib/watchmen_extract.py`), or as `watchmen extract`. The mirrors go with it:
+  `kapow_block.BLOCK_ORDER` (each directory entry carries its block's byte order in `.order`)
+  and `model_export.MODEL_STATUS` (`decode_model(status=)` fills the dict a caller passes).
+  The docs name the home modules wherever they named `watchmen_extract`. (2026-11-12)
 
 ## 1.7.0 — 2026-11-11
 

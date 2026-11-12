@@ -26,7 +26,7 @@ per-platform result table.
 | block → asset (header+stream) | solved & verified | `extract_block(header, RAW block_s_z)`. `KAPOW_NAZ_FORMAT.md` §2 |
 | Asset property-bag header format | characterized | typed, name-HASHED records (config). `KAPOW_NAZ_FORMAT.md` §3 |
 | **Texture header → name/format/layers** | **solved & verified** | exact header grammar; 100 % exact name + format + layers on all 186 bordello textures. `KAPOW_NAZ_FORMAT.md` §4 |
-| **Models — geometry → OBJ / GLB** | **header-driven on all six sets** (735 models with a stream per Part 2 set, 1,085 per Part 1 set; PC, Xbox 360, PS3) | `wlib/watchmen_extract.py`. Every buffer offset comes from the model header (§5); the descriptor scan is the fallback and decodes no shipped model. The extractor writes OBJ + MTL (and GLB with `--glb`); it has no FBX or STL writer |
+| **Models — geometry → OBJ / GLB** | **header-driven on all six sets** (735 models with a stream per Part 2 set, 1,085 per Part 1 set; PC, Xbox 360, PS3) | `wlib/model_header.py`, `model_mesh.py`, `model_export.py`. Every buffer offset comes from the model header (§5); the descriptor scan is the fallback and decodes no shipped model. The extractor writes OBJ + MTL (and GLB with `--glb`); it has no FBX or STL writer |
 | **Models — full byte-faithful parse** | header + stream tile exactly (740/740 Part 2 PC); node collision volumes parsed | The non-render bytes of the stream are shadow hulls, per-part occluders and cluster tables; collision volumes are in the header, per node (`skeleton_records.parse_node_tail`, `FORMATS_MISC.md`); the articulated body (ragdoll) and cloth lists are parsed (`KAPOW_NAZ_FORMAT.md` §6b) |
 | **Models — skin weights** | **decoded** (4×u8 idx @+44, 4×half wt @+48, Σ=1) | rigged GLBs need the skeleton + keyframes from the `.animation` asset; see §5 |
 | **Animation / skeleton (`.animation`)** | **decoded** — skeleton extracted (428/428), keyframe format decoded | bone names + fps + frames parse; compact quat/trans tracks decoded; `ENGINE_CONSTANTS.md` |
@@ -38,8 +38,8 @@ per-platform result table.
 | **Textures — format enum** | solved (Ghidra) | enum→D3DFORMAT table @0xc799e0 |
 | **Texture → stream binding** | **solved, deterministic** (1190/1190, no search) | the (off,sz) pair is the tail of the asset's own directory record. `KAPOW_NAZ_FORMAT.md` §2.3 |
 | **Textures — pixel decode** | **complete — 1190/1190** stream-exact | the exact header plans every stream as single / cube×6 / animN; multi-layer diffuse + BC5 normal + spec all decode; §6 |
-| **Audio — SFX (`sound`)** | **complete — 848/848** → WAV | `wlib/watchmen_extract.py`; format tag @+10 selects MS-ADPCM (98 %) / PCM (2 %); mono + stereo; §7 |
-| **Audio — music (`.mediastream_s`)** | **13/13 → Ogg Vorbis** (one file per track) | `watchmen_extract.py`; `KAPOW_NAZ_FORMAT.md` §8 |
+| **Audio — SFX (`sound`)** | **complete — 848/848** → WAV | `wlib/sound_header.py`, `audio_decode.py`; format tag @+10 selects MS-ADPCM (98 %) / PCM (2 %); mono + stereo; §7 |
+| **Audio — music (`.mediastream_s`)** | **13/13 → Ogg Vorbis** (one file per track) | `audio_decode.py`; `KAPOW_NAZ_FORMAT.md` §8 |
 | **Determinism** | textures + archive verified reproducible | identical manifest + byte-identical PNG across runs |
 | Full-binary decompile corpus | available | `ghidra_kapow_out\` (14,910 funcs); the pass with the scripts in `tools/ghidra/` has 19,233 functions (17,225 after `FixEHProlog`); the research reports are in `docs/re/` |
 
@@ -98,7 +98,7 @@ rules. What matters for an implementer:
   the type hash.
 - **`block_s_z` is a CONCATENATION of per-asset zlib substreams.** Each asset's
   stream = `inflate(block_s_z[offset : offset+size])` using the TOC pair.
-- **Correct entry point:** `watchmen_extract.extract_block(decompressed_header_block,
+- **Correct entry point:** `kapow_block.extract_block(decompressed_header_block,
   RAW block_s_z)`. Do **not** `zlib.decompress` the whole `block_s_z` first — that
   returns only the first substream and silently truncates everything.
 - Header→stream pairing is proven: FemaleSkinBody_Black → stream offset 0 →
@@ -158,13 +158,13 @@ header).
   clockwise against the normals. With `--glb` the extractor writes them as
   NORMAL / TANGENT / COLOR_0 and writes a GLB for rigid models too
   (`--no-vertex-attrs` turns that off).
-- `watchmen_extract.decode_model` writes the full-detail LOD by default
+- `model_export.decode_model` writes the full-detail LOD by default
   (`--model-lod N|all`), names each material from the submesh's texture-list
   index, and writes neither shadow hulls nor occluders. A model header lists
   its textures as full asset paths and the game loads exactly those
   (`ModelRes::Read` 0x547006): twelve bare names exist in more than one folder
   of Part 2, so the toolkit resolves textures by path
-  (`watchmen_extract.TextureIndex`), never by material name alone
+  (`obj_mtl.TextureIndex`), never by material name alone
   (`ENGINE_CONSTANTS.md`, "How a model's textures are resolved").
 - **The character pieces read the header too.** `char_lib.load_parts`,
   `variant_glb.load_parts`, the weapon / rigid attachments of
@@ -229,7 +229,7 @@ presence byte per optional slot, eight slots per frame, slot roles, layer
 sizing with 4-byte row padding, cube maps per platform, decoding, material
 switches and texture sheets).
 
-**Header** (engine `FUN_005382aa` / `FUN_00429e77`; `watchmen_extract.parse_texture_frames`
+**Header** (engine `FUN_005382aa` / `FUN_00429e77`; `texture_header.parse_texture_frames`
 reads it exactly): after the bag `u32 nFrames, u8 hasAnim`, then per frame eight
 slots — a 29-byte descriptor for slot 0 and, for slots 1–7, a presence byte
 followed by a descriptor if present — and the source path. The descriptor is
@@ -258,7 +258,7 @@ no per-layer framing.
 ```
 Found via `cmp eax,'DXT1'/'DXT5'` @0x455695/0x4556a3 + `[0xc799e0+enum*4]`.
 Enum 9 on PC stores each 16-byte block as **Y (8 bytes) then X (8 bytes)**;
-`watchmen_extract.ati2_xy` reads them in that order. A PC `*_normal_*_ATI2.png`
+`texture_decode.ati2_xy` reads them in that order. A PC `*_normal_*_ATI2.png`
 decoded X-first has X and Y swapped, and nothing in a PNG says which decoder
 wrote it. Console enums: PC 9 (ATI2) → X360 10 → PS3 7 (§14).
 
@@ -359,7 +359,7 @@ ranges / 1681 MB) against the `.naz` streams:
 ## 7. Audio
 
 libVorbis + Bink + libpng/zlib are present in the executable.
-`watchmen_extract.decode_audio` is the PC music path (Ogg/Vorbis with CRC +
+`audio_decode.decode_audio` is the PC music path (Ogg/Vorbis with CRC +
 lacing; one file per track, `KAPOW_NAZ_FORMAT.md` §8); `decode_sfx` the PC
 `sound` path (`FORMATS_MISC.md`, "The `sound` asset"); the console paths are
 in §14.
@@ -435,7 +435,7 @@ asset containers **loose on disk** under `derived_pc/`
 Those loose files are byte-for-byte what the `.naz` stored internally, so every
 decoder works unchanged.
 
-`naz_entries()`/`naz_read()` in `wlib/watchmen_extract.py` accept a
+`naz_entries()`/`naz_read()` in `wlib/naz_archive.py` accept a
 **directory** as well as a `.naz`. Point any command at the loose tree:
 
 ```
@@ -527,7 +527,7 @@ independent, so only the block-header `struct` reads change.
 **Auto-detect, no flag.** `detect_block_order(h)` reads `NUM_TABLES` (@352) both
 ways and keeps the plausible asset count (the wrong endianness reads as a huge
 number); `parse_block_toc(h, order=None)` calls it and gives every directory
-entry the result as `.order` (`BLOCK_ORDER` mirrors the last call).
+entry the result as `.order`.
 Verified: X360 & PS3 bordello block → auto-picks BIG → **2291 assets, identical to
 PC**; PC bordello auto-picks LITTLE → 2291. Console carve lands 2291
 correctly-named assets on disk (fragments/wav/animation/model/bmp).

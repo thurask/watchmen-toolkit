@@ -86,7 +86,7 @@ if hasStream: 6 x { u32 offset, u32 size }    -> stream entry: offset[6] at +0x1
   and the per-language offset table). On Part 2 PC data all six are equal (validated: 0 differing entries in
   bordello). Which slot the *stream* reader uses was not traced (inferred: the same language index).
 
-**Toolkit:** `watchmen_extract.parse_block_toc` starts at 400 (`BLOCK_HEADER_SIZE`), reads
+**Toolkit:** `kapow_block.parse_block_toc` starts at 400 (`BLOCK_HEADER_SIZE`), reads
 `[6 sizes][hash][name][u8 hasStream][6 pairs]`, binds the pair to its own entry, exposes `type_hash` and picks the
 slot by `language` when slots differ (localized entries, e.g. `watchmenpart2` `_uk` text and the `mainmenu` logo).
 `parse_block_header()` returns the fixed header (`tables_size`, `num_localized`, `num_streams`,
@@ -122,7 +122,7 @@ and 28 `TextureEffects` textures):
 - `TextureEffects(Texture)`: bag is 55 dwords vs 45 → two extra records, `0x4d10a1c1` (Collision Effect Type)
   and `0x2a1529e3` (Special Collision Effect Type). Then the Texture body of §5.1.
 
-**Toolkit:** the five names are in the asset-type table (`watchmen_extract.asset_type_name`); `kapow_props.kapow_hash`
+**Toolkit:** the five names are in the asset-type table (`kapow_block.asset_type_name`); `kapow_props.kapow_hash`
 folds with `byte & 0xDF`; the body offset comes from the bag dword count (not a fixed 196 for textures).
 
 ---
@@ -246,7 +246,7 @@ Not established: how the engine routes these bytes at load time (`FUN_004341f5` 
 whose producer was not traced). The cluster ranges `a, b` are index positions (first index, end index; reader
 0x4326a0): KAPOW_NAZ_FORMAT.md "Stream blob".
 
-### 3.5 Toolkit (`watchmen_extract.py`, `mesh_loader.py`)
+### 3.5 Toolkit (`model_header.py`, `model_mesh.py`, `mesh_loader.py`)
 
 1. **Buffers are located from the header**: `parse_model_header()` + `model_stream_layout()` (the port of
    `parse_model()` / `model_stream_layout()` from `formats_ref_parsers.py`), which must consume the stream exactly.

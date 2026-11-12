@@ -1,5 +1,5 @@
 """rig_glb.py  -- rigged + textured + animated glTF (.glb) export for Watchmen Kapow
-character models, designed to be called from watchmen_extract.py.
+character models, designed to be called from model_export.decode_model.
 
 Given the per-submesh geometry the master script already carves (positions / normals /
 UVs / triangles / per-submesh material names) plus the SKIN channel read from the same

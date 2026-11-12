@@ -1,7 +1,7 @@
 """wlib — extraction library for Watchmen: The End Is Nigh (Kapow engine).
 
 The modules in this package are flat top-level modules that import each
-other directly (``import watchmen_extract``, ...).  Importing this package
+other directly (``import kapow_block``, ...).  Importing this package
 puts the package directory on ``sys.path`` so those flat imports work,
 whether the package is used from a source checkout or a pip install.
 

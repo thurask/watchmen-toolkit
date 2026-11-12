@@ -1,6 +1,6 @@
 """One model asset to files: the mesh read where its header puts it, or by the
 descriptor scan for a header neither layout reads, written as OBJ + MTL and,
-with `--glb`, as a GLB (`decode_model`; `MODEL_STATUS`: why the last model
+with `--glb`, as a GLB (`decode_model`; its `status` dict says why a model
 has no GLB), and the `<name>.model.json` sidecar (`model_meta`,
 `model_meta_scanned`; `PARTS_NOTE`, `MORPH_CHANNEL_NOTE`).  `GlbOptions` holds
 the `--glb` switches the caller passes to `decode_model` (`glb_options`).
@@ -323,11 +323,6 @@ def _model_skipped(log, out_path, reason):
     return False
 
 
-#: what the last decode_model call recorded when it was given no `status` dict
-#: (the extract driver passes its own)
-MODEL_STATUS = {}
-
-
 def decode_model(
     header,
     stream,
@@ -389,7 +384,7 @@ def decode_model(
 def _decode_model(header, stream, out_path, tex_index, log, order, lod, status, stored_name, glb):
     """decode_model's body."""
     if status is None:
-        status = MODEL_STATUS  # the last call's facts, for callers that pass none
+        status = {}  # a caller that wants the facts passes its own dict
     status.clear()
     status.update(glb=None, glb_reason=None, color_not_decoded=False, partial=None)
     if tex_index is None:
