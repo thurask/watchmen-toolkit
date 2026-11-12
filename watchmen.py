@@ -913,11 +913,11 @@ def main(argv):
         if cmd == "extract":
             # forward to the extractor's argparse help (shows --vgmstream-cli, --glb, ...),
             # after the command's own usage line: OUT is the second argument here
-            import watchmen_extract as _we
+            import extract_driver
 
             print("usage: watchmen.py %s" % USAGE[cmd][1])
             print("OUT is the second argument (or -o / --out OUT). The extractor's options:\n")
-            return _we.main(["--help"])
+            return extract_driver.main(["--help"])
         command_parser(cmd).print_help()
         return 0
     try:

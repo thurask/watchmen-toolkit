@@ -39,6 +39,7 @@ HOMES = {
     "model_export",
     "sound_header",
     "audio_decode",
+    "extract_driver",
 }
 
 
@@ -148,8 +149,8 @@ def test_a_name_neither_here_nor_forwarded_is_an_attribute_error():
 
 
 def test_a_name_defined_here_is_set_here(monkeypatch):
-    monkeypatch.setattr(we, "main", "patched")
-    assert vars(we)["main"] == "patched"
+    monkeypatch.setattr(we, "_forwarding_type", "patched")
+    assert vars(we)["_forwarding_type"] == "patched"
 
 
 def test_the_script_entry_point_runs():
