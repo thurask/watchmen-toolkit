@@ -2,10 +2,11 @@
 descriptor scan for a header neither layout reads, written as OBJ + MTL and,
 with `--glb`, as a GLB (`decode_model`; `MODEL_STATUS`: why the last model
 has no GLB), and the `<name>.model.json` sidecar (`model_meta`,
-`model_meta_scanned`; `PARTS_NOTE`, `MORPH_CHANNEL_NOTE`).  `_RIG` holds the
-`--glb` switches the driver sets.
+`model_meta_scanned`; `PARTS_NOTE`, `MORPH_CHANNEL_NOTE`).  `GlbOptions` holds
+the `--glb` switches the caller passes to `decode_model` (`glb_options`).
 """
 
+import dataclasses
 import itertools
 import os
 import struct
@@ -33,39 +34,27 @@ import obj_mtl  # noqa: E402
 #      read. Emitted glbs are bind-pose; engine-exact ANIMATED per-character
 #      glbs come from the file-only pipeline: `watchmen.py characters` (binds ->
 #      bake -> variant glbs). ----
-#: "attrs": --glb also writes the engine's per-vertex data (NORMAL, TANGENT,
-#: COLOR_0), sheet-driven materials and static .glb files for rigid models;
-#: --no-vertex-attrs clears it (the .glb output of releases before 1.4.0).
-#: "tex_size": --glb-texture-size (None: embed the textures at full size).
-#: The rig layout is $WATCHMEN_RIG (--rig; variant_glb.rig_mode).
-_RIG = {"on": False, "mod": None, "loaded": False, "attrs": True, "tex_size": None}
+@dataclasses.dataclass(frozen=True)
+class GlbOptions:
+    """The `--glb` switches decode_model reads; decode_model writes no .glb
+    without one.  `rig`: the loaded `rig_glb` module (glb_options loads it).
+    `attrs`: also write the engine's per-vertex data (NORMAL, TANGENT,
+    COLOR_0), sheet-driven materials and static .glb files for rigid models;
+    --no-vertex-attrs clears it (the .glb output of releases before 1.4.0).
+    `tex_size`: --glb-texture-size (None: embed the textures at full size).
+    The rig layout is $WATCHMEN_RIG (--rig; variant_glb.rig_mode)."""
+
+    rig: object
+    attrs: bool = True
+    tex_size: int | None = None
 
 
-def _texture_size_arg(v):
-    """argparse type of --glb-texture-size: an integer >= 1."""
-    import argparse
+def glb_options(attrs=True, tex_size=None):
+    """GlbOptions with `rig_glb` loaded.  Raises ImportError when it does not
+    import."""
+    import rig_glb
 
-    try:
-        n = int(v)
-    except ValueError:
-        raise argparse.ArgumentTypeError("%r is not a whole number" % v)  # noqa: B904
-    if n < 1:
-        raise argparse.ArgumentTypeError("must be at least 1 (got %d)" % n)
-    return n
-
-
-def _rig_load():
-    if _RIG["loaded"]:
-        return _RIG["mod"] is not None
-    _RIG["loaded"] = True
-    try:
-        import rig_glb
-
-        _RIG["mod"] = rig_glb
-    except ImportError as e:
-        _RIG["mod"] = None
-        _RIG["error"] = "%s: %s" % (type(e).__name__, e)
-    return _RIG["mod"] is not None
+    return GlbOptions(rig_glb, attrs, tex_size)
 
 
 def _model_palette(header, name=None):
@@ -348,6 +337,7 @@ def decode_model(
     lod=0,
     status=None,
     stored_name=None,
+    glb=None,
 ):
     """Per-submesh OBJ (+ .mtl linking the diffuse/normal/specular/glossiness maps
     dumped to textures/), each material named by its texture.
@@ -362,7 +352,8 @@ def decode_model(
     _pick_vb scan.  With --glb, also emits a rigged + textured .glb for skinned
     (stride-56) character models; header-decoded models get NORMAL, TANGENT,
     COLOR_0 (buffers with the has_color flag) and sheet-driven materials in it,
-    and rigid models a static .glb, unless _RIG["attrs"] is off.
+    and rigid models a static .glb, unless `glb.attrs` is off.  `glb`: the
+    --glb switches (GlbOptions); None writes no .glb.
 
     Nothing is left out silently.  With --glb, a model that gets NO .glb has
     `"glb": {"written": false, "reason": ...}` in its .model.json, and a scan
@@ -376,7 +367,7 @@ def decode_model(
     and the console in effect."""
     try:
         return _decode_model(
-            header, stream, out_path, tex_index, log, order, lod, status, stored_name
+            header, stream, out_path, tex_index, log, order, lod, status, stored_name, glb
         )
     except Exception as ex:
         ex.add_note(
@@ -394,7 +385,7 @@ def decode_model(
         raise
 
 
-def _decode_model(header, stream, out_path, tex_index, log, order, lod, status, stored_name):
+def _decode_model(header, stream, out_path, tex_index, log, order, lod, status, stored_name, glb):
     """decode_model's body."""
     if status is None:
         status = MODEL_STATUS  # the last call's facts, for callers that pass none
@@ -437,7 +428,7 @@ def _decode_model(header, stream, out_path, tex_index, log, order, lod, status, 
     SKIN_I = []
     SKIN_W = []
     have_skin = True
-    rig = _RIG["on"] and _rig_load()
+    rig = glb is not None
     didx = []  # descriptor index per emitted sub (for submesh_materials pairing)
     restored = []  # restored content in this model (decode_mesh_vertices)
     if descs:
@@ -484,7 +475,7 @@ def _decode_model(header, stream, out_path, tex_index, log, order, lod, status, 
                 # pass the detected byte order: without it decode_skin would use
                 # the PC layout, whose stride>=56 gate rejects every console
                 # (stride-44) skinned submesh -> no console glb.
-                si, sw = _RIG["mod"].decode_skin(stream, vbo, nv, stride, order)
+                si, sw = glb.rig.decode_skin(stream, vbo, nv, stride, order)
                 if si is None:
                     have_skin = False
                 else:
@@ -700,9 +691,9 @@ def _decode_model(header, stream, out_path, tex_index, log, order, lod, status, 
     # per-vertex attributes need the header-driven decode: its buffers carry the
     # has_color / has_alpha flags and the tangent frame at known offsets
     attrs = None
-    if rig and hplan and _RIG.get("attrs", True) and didx and len(didx) == len(subs):
+    if rig and hplan and glb.attrs and didx and len(didx) == len(subs):
         try:
-            attrs = _RIG["mod"].mesh_vertex_attributes(header, stream, subs, lod)
+            attrs = glb.rig.mesh_vertex_attributes(header, stream, subs, lod)
         except Exception as ex:
             status["glb_reason"] = "vertex attributes not decoded: %s" % ex
             log("      ! vertex attributes %s: %s" % (out_path.stem, ex))
@@ -745,7 +736,7 @@ def _decode_model(header, stream, out_path, tex_index, log, order, lod, status, 
                     has_alpha=attrs["has_alpha"],
                     engine_materials=True,
                 )
-            _RIG["mod"].build_rigged_glb(
+            glb.rig.build_rigged_glb(
                 glb_path,
                 _np.asarray(V, float),
                 None,
@@ -760,7 +751,7 @@ def _decode_model(header, stream, out_path, tex_index, log, order, lod, status, 
                 None,
                 log,
                 static=not _is_body,
-                tex_size=_RIG.get("tex_size"),
+                tex_size=glb.tex_size,
                 nodes=rig_nodes,
                 **kw,
             )
@@ -782,7 +773,7 @@ def _decode_model(header, stream, out_path, tex_index, log, order, lod, status, 
                     "not apply) and has no skin: a static GLB is only written from the "
                     "header-driven decode"
                 )
-            elif not _RIG.get("attrs", True):
+            elif not glb.attrs:
                 why = "--no-vertex-attrs: only skinned models get a GLB (the 1.3.0 output)"
             elif attrs is None:
                 why = "the vertex attributes of the header's buffers could not be paired"

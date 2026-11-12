@@ -329,9 +329,8 @@ _HOMES = {
     "_mtl_const_roughness": ("obj_mtl", "mtl_const_roughness"),
     "_mtl_ns_of_roughness": ("obj_mtl", "mtl_ns_of_roughness"),
     "_write_obj_mtl": ("obj_mtl", "write_obj_mtl"),
-    "_RIG": ("model_export", "_RIG"),
-    "_texture_size_arg": ("model_export", "_texture_size_arg"),
-    "_rig_load": ("model_export", "_rig_load"),
+    "GlbOptions": ("model_export", "GlbOptions"),
+    "glb_options": ("model_export", "glb_options"),
     "_model_palette": ("model_export", "_model_palette"),
     "_model_is_body": ("model_export", "_model_is_body"),
     "_surface_summary": ("model_export", "_surface_summary"),
@@ -412,6 +411,7 @@ _HOMES = {
     "_STREAM_CACHE": ("extract_driver", "_STREAM_CACHE"),
     "BLOCK_CACHE_BYTES": ("extract_driver", "BLOCK_CACHE_BYTES"),
     "ModelSpool": ("extract_driver", "ModelSpool"),
+    "texture_size_arg": ("extract_driver", "texture_size_arg"),
     "main": ("extract_driver", "main"),
 }
 

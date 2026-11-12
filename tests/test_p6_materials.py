@@ -172,7 +172,6 @@ def _tex(tmp_path, name, sheet):
 
 
 def _mtl(tmp_path, sheet, monkeypatch):
-    monkeypatch.setitem(we._RIG, "on", False)
     h, s = tv._rigid_model()
     idx = {"wall_01": _tex(tmp_path, "Wall_01", sheet)}
     assert we.decode_model(h, s, tmp_path / "m.obj", idx, None)
@@ -217,12 +216,9 @@ def test_mtl_names_a_glow_map_the_first_sheet_does_not_light(tmp_path, monkeypat
 # GLB
 # ---------------------------------------------------------------------------
 def _glb_material(tmp_path, sheet, monkeypatch):
-    monkeypatch.setitem(we._RIG, "on", True)
-    monkeypatch.setitem(we._RIG, "loaded", False)
-    monkeypatch.setitem(we._RIG, "attrs", True)
     h, s = tv._rigid_model()
     idx = {"wall_01": _tex(tmp_path, "Wall_01", sheet)}
-    assert we.decode_model(h, s, tmp_path / "m.obj", idx, None)
+    assert we.decode_model(h, s, tmp_path / "m.obj", idx, None, glb=we.glb_options())
     return parse_glb(tmp_path / "m.glb").j["materials"][0]
 
 

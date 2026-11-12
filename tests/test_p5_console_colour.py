@@ -250,7 +250,7 @@ def test_extract_passes_the_block_path_console_to_every_model(tmp_path, monkeypa
     (files / "derived_pc").rename(files / "derived_ps3")
     seen = []
 
-    def decode(header, stream, out_path, tex_index=None, log=None, order=None, lod=0):
+    def decode(header, stream, out_path, tex_index=None, log=None, order=None, lod=0, glb=None):
         seen.append(we.console_platform())
         return True
 

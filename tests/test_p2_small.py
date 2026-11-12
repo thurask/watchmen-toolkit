@@ -157,10 +157,10 @@ def recorded(monkeypatch):
         (out_dir / "0.png").write_bytes(stream)
         return True
 
-    def decode(header, stream, out_path, tex_index=None, log=None, order=None, lod=0):
+    def decode(header, stream, out_path, tex_index=None, log=None, order=None, lod=0, glb=None):
         calls["mdl"].append(out_path.name)
         if not stream:
-            return real(header, stream, out_path, tex_index, log, order=order, lod=lod)
+            return real(header, stream, out_path, tex_index, log, order=order, lod=lod, glb=glb)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_bytes(out_path.stem.encode() + b"|" + stream)
         return True
@@ -284,7 +284,6 @@ def test_scanned_model_with_more_textures_than_buffers_logs_the_missing_material
     )
     written = {}
     monkeypatch.setattr(wx, "write_obj_mtl", lambda *a: written.update(mats=a[7]))
-    monkeypatch.setitem(wx._RIG, "on", False)
     lines = []
     out = tmp_path / "Palm_Banana_01.model.obj"
     assert wx.decode_model(hdr, b"\1" * 400, out, {}, lines.append, order=">")

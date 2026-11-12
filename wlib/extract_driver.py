@@ -143,6 +143,119 @@ class ModelSpool:
             self._f = None
 
 
+def texture_size_arg(v):
+    """argparse type of --glb-texture-size: an integer >= 1."""
+    try:
+        n = int(v)
+    except ValueError:
+        raise argparse.ArgumentTypeError("%r is not a whole number" % v)  # noqa: B904
+    if n < 1:
+        raise argparse.ArgumentTypeError("must be at least 1 (got %d)" % n)
+    return n
+
+
+@dataclasses.dataclass(frozen=True)
+class ExtractOptions:
+    """The options of one `extract` run: the argparse values and what follows
+    from them (from_args).  The `--glb` group: `glb` (asked for),
+    `vertex_attrs`, `glb_texture_size`, and `model_glb`, the switches
+    decode_model gets (model_export.GlbOptions with rig_glb loaded, load_glb;
+    None without --glb or when rig_glb does not import).  `rig`, `frame`,
+    `names` and `json_floats` reach the modules that read them through the
+    environment (apply_env)."""
+
+    naz: Path
+    out: Path
+    files: bool = True
+    textures: bool = True
+    models: bool = True  # --glb turns it on whatever --no-models says
+    audio: bool = True
+    extract_all: bool = True
+    glb: bool = False
+    vertex_attrs: bool = True
+    glb_texture_size: int | None = None
+    rig: str | None = None
+    frame: str | None = None
+    names: str | None = None
+    json_floats: str | None = None
+    exact_audio: bool = False
+    vgmstream_cli: Path | None = None
+    keep_xma: bool = False
+    flat_music: bool = False
+    music_track_labels: bool = False
+    smpl_loops: bool = False
+    text: bool = True
+    nav: bool = True
+    limit: int | None = None
+    model_lod: object = 0
+    language: int = 0
+    quiet: bool = False
+    model_glb: model_export.GlbOptions | None = None
+
+    @classmethod
+    def from_args(cls, a):
+        """The options of the parsed arguments `a` (_parser); `model_glb` stays
+        None until load_glb."""
+        return cls(
+            naz=a.naz,
+            out=a.out,
+            files=not a.no_files,
+            textures=not a.no_textures,
+            models=not a.no_models or a.glb,
+            audio=not a.no_audio,
+            extract_all=not a.no_extract_all,
+            glb=a.glb,
+            vertex_attrs=not a.no_vertex_attrs,
+            glb_texture_size=a.glb_texture_size,
+            rig=a.rig,
+            frame=a.frame,
+            names=a.names,
+            json_floats=a.json_floats,
+            exact_audio=a.exact_audio,
+            vgmstream_cli=a.vgmstream_cli,
+            keep_xma=a.keep_xma,
+            flat_music=a.flat_music,
+            music_track_labels=a.music_track_labels,
+            smpl_loops=a.smpl_loops,
+            text=not a.no_text,
+            nav=not a.no_nav,
+            limit=a.limit,
+            model_lod=a.model_lod,
+            language=a.language,
+            quiet=a.quiet,
+        )
+
+    def apply_env(self):
+        """--rig, --frame, --names and --json-floats, for the modules that read
+        them: $WATCHMEN_RIG (variant_glb.rig_mode), $WATCHMEN_FRAME (frame.mode),
+        $WATCHMEN_NAMES (canonical_names.mode), $WATCHMEN_JSON_FLOATS
+        (f32json.mode).  An option not given leaves its variable as it is."""
+        if self.rig:
+            os.environ["WATCHMEN_RIG"] = self.rig
+        if self.frame:
+            os.environ["WATCHMEN_FRAME"] = self.frame
+        if self.names:
+            os.environ["WATCHMEN_NAMES"] = self.names
+        if self.json_floats:
+            os.environ["WATCHMEN_JSON_FLOATS"] = self.json_floats
+
+    def load_glb(self):
+        """With --glb: these options with `model_glb` set (rig_glb loaded); a
+        WARNING on stderr and no model GLBs when rig_glb does not import."""
+        if not self.glb:
+            return self
+        try:
+            g = model_export.glb_options(self.vertex_attrs, self.glb_texture_size)
+        except ImportError as e:
+            print(
+                "WARNING: --glb requested but rig_glb.py (or numpy) not importable (%s: %s); "
+                "skipping rig export" % (type(e).__name__, e),
+                file=sys.stderr,
+            )
+            return self
+        return dataclasses.replace(self, model_glb=g)
+
+
 class BlockPlan:
     """The blocks of an `extract` run as pass 1 plans them, and their readers.
 
@@ -253,17 +366,14 @@ class RunReport:
 
 
 class ExtractRun:
-    """One `extract` run: the options (`a`), the log, the block plan, the audio
+    """One `extract` run: the options (ExtractOptions), the log, the block plan, the audio
     queue, the model queue, the report and the naming state, with one method
     per pass."""
 
-    def __init__(self, a, log):
-        self.a = a
+    def __init__(self, opts, log):
+        self.opts = opts
         self.log = log
-        self.do_tex = not a.no_textures
-        self.do_mdl = not a.no_models
-        self.do_extract_all = not a.no_extract_all
-        self.block_plan = BlockPlan(a.naz, log)
+        self.block_plan = BlockPlan(opts.naz, log)
         self.audio = AudioQueue()
         self.report = RunReport()
         self.platform = None  # the console of a big-endian source; None on PC
@@ -279,15 +389,15 @@ class ExtractRun:
     def plan(self):
         """Pass 1, archive order: files/, the standalone audio streams, and the
         block plan."""
-        a, log = self.a, self.log
+        opts, log = self.opts, self.log
         blocks = self.block_plan.blocks
         stats = self.report.stats
         console_audio, pc_audio = self.audio.console_audio, self.audio.pc_audio
-        entries = list(naz_archive.naz_entries(a.naz, warn=lambda m: log("  ! " + m)))
-        log("NAZ %s : %d entries -> %s" % (a.naz, len(entries), a.out))
+        entries = list(naz_archive.naz_entries(opts.naz, warn=lambda m: log("  ! " + m)))
+        log("NAZ %s : %d entries -> %s" % (opts.naz, len(entries), opts.out))
         # the console of a big-endian source, named by its derived root (the path of
         # a loose tree, or the block paths inside the .naz); None on PC
-        run_platform = model_mesh.console_platform_of(a.naz)
+        run_platform = model_mesh.console_platform_of(opts.naz)
         for e in entries:
             if run_platform:
                 break
@@ -295,16 +405,16 @@ class ExtractRun:
         # --names: the canonical spelling of every output path, and what was respelled
         name_run = extract_paths.names_module().begin()
         # extracted/, textures/, models/ and audio/ spell every folder alike
-        extract_paths.names_module().share_folders(a.out)
+        extract_paths.names_module().share_folders(opts.out)
         names = extract_paths.OutputNames(
             log, name_run
         )  # one output per asset name (repeats, twins, variants)
         text_writer = None
-        if not a.no_text:
+        if opts.text:
             try:
                 import text_assets as _ta
 
-                text_writer = _ta.TextWriter(a.out, log)
+                text_writer = _ta.TextWriter(opts.out, log)
             except Exception as ex:
                 log("note: text_assets not importable (%s) -> no text/" % ex)
 
@@ -315,17 +425,17 @@ class ExtractRun:
         # reads them), so the archive is read once, not twice.
         for e in entries:
             low = e.name.lower()
-            _audio = not a.no_audio and low.endswith(".mediastream_s")
-            if a.no_files and not _audio:
+            _audio = opts.audio and low.endswith(".mediastream_s")
+            if not opts.files and not _audio:
                 data = None  # planned from the directory; read when its block is processed
             else:
                 try:
-                    data = naz_archive.naz_read(a.naz, e)
+                    data = naz_archive.naz_read(opts.naz, e)
                 except Exception as ex:
                     log("  ! %s: %s" % (e.name, ex))
                     continue
-            if data is not None and not a.no_files:
-                p = extract_paths.safe(a.out / "files", name_run.name(e.name))
+            if data is not None and opts.files:
+                p = extract_paths.safe(opts.out / "files", name_run.name(e.name))
                 p.parent.mkdir(parents=True, exist_ok=True)
                 p.write_bytes(data)
                 stats["files"] += 1
@@ -336,12 +446,12 @@ class ExtractRun:
                 continue
             # standalone audio (PC = Vorbis packet container; console handled after
             # the block pass so channel/rate metadata is available)
-            if not a.no_audio and low.endswith(".mediastream_s"):
+            if opts.audio and low.endswith(".mediastream_s"):
                 try:
-                    if not a.flat_music and audio_decode.audio_packets(data):
+                    if not opts.flat_music and audio_decode.audio_packets(data):
                         pc_audio.append((e.name, e))  # needs the descriptors
                     elif audio_decode.decode_audio(
-                        data, extract_paths.safe(a.out / "audio", e.name + ".ogg"), True, log
+                        data, extract_paths.safe(opts.out / "audio", e.name + ".ogg"), True, log
                     ):
                         stats["aud"] += 1
                     else:
@@ -363,15 +473,15 @@ class ExtractRun:
         self.platform = run_platform
         self.name_run, self.names, self.text_writer = name_run, names, text_writer
         self.block_plan.seal()
-        self.model_jobs = ModelSpool(a.out)
+        self.model_jobs = ModelSpool(opts.out)
 
     def blocks(self):
         """The block pass: every asset of every planned block, in a fixed order."""
-        a, log = self.a, self.log
+        opts, log = self.opts, self.log
         plan, rep = self.block_plan, self.report
         names, name_run, text_writer = self.names, self.name_run, self.text_writer
         run_platform, model_jobs, model_stored = self.platform, self.model_jobs, self.model_stored
-        do_tex, do_mdl, do_extract_all = self.do_tex, self.do_mdl, self.do_extract_all
+        do_tex, do_mdl, do_extract_all = opts.textures, opts.models, opts.extract_all
         aq = self.audio
         media_meta, media_desc, music_frags = aq.media_meta, aq.media_desc, aq.music_frags
         sound_info, sfx_failed = aq.sound_info, aq.sfx_failed
@@ -399,11 +509,11 @@ class ExtractRun:
                 if do_tex and ".texture" in low:
                     try:
                         if texture_carve.carve_texture(
-                            stream, header, extract_paths.safe(a.out / "textures", name), log
+                            stream, header, extract_paths.safe(opts.out / "textures", name), log
                         ):
                             stats["tex"] += 1
                             texture_sheet.mark_stored_name(
-                                extract_paths.safe(a.out / "textures", name),
+                                extract_paths.safe(opts.out / "textures", name),
                                 name_run.stored_of(name),
                             )
                     except Exception as ex:
@@ -413,14 +523,14 @@ class ExtractRun:
                         (
                             header,
                             stream,
-                            extract_paths.safe(a.out / "models", name + ".obj"),
+                            extract_paths.safe(opts.out / "models", name + ".obj"),
                             None,
                             model_mesh.console_platform_of(stem) or run_platform,
                         )
                     )
                 continue
             # real block pair
-            if a.limit is not None and rep.n_assets >= a.limit:
+            if opts.limit is not None and rep.n_assets >= opts.limit:
                 break  # --limit N: stop after N block assets
             log("\nBLOCK %s" % stem)
             try:
@@ -434,7 +544,7 @@ class ExtractRun:
                     text_writer.add_block(h_data, stem)
                 except Exception as ex:
                     log("  ! text assets: %s" % ex)
-            _args = (h_data, s_data, a.language) if a.language else (h_data, s_data)
+            _args = (h_data, s_data, opts.language) if opts.language else (h_data, s_data)
             try:
                 # check pass: the whole block parses and inflates (what does not inflate is
                 # reported here, before any asset of the block is written).  The
@@ -465,7 +575,7 @@ class ExtractRun:
             _kept = None
             h_data = s_data = _args = None  # the generator holds the block's bytes until done
             for e, header, stream in it:
-                if a.limit is not None and rep.n_assets >= a.limit:
+                if opts.limit is not None and rep.n_assets >= opts.limit:
                     break
                 rep.n_assets += 1
                 # script classes ("ModelEffects(ModelRes)", "TextureEffects(Texture)")
@@ -481,7 +591,7 @@ class ExtractRun:
                 # "mediastream" and "MediaStream"; a case-sensitive miss here would leave
                 # media_meta empty (console XMA then wrapped with default 2ch/48000
                 # instead of the real channel/rate/sample values).
-                if not a.no_audio and cls.lower() == "mediastream":
+                if opts.audio and cls.lower() == "mediastream":
                     try:
                         mm = sound_header.media_meta_from_header(header, kapow_block.BLOCK_ORDER)
                         if mm:
@@ -494,13 +604,13 @@ class ExtractRun:
                             "      WARNING: music %s: stream description not read, channels and "
                             "rate left to the stream (%s: %s)" % (name, type(ex).__name__, ex)
                         )
-                if not a.no_audio and low.endswith(".fragment") and b"MusicStreamSlot" in header:
+                if opts.audio and low.endswith(".fragment") and b"MusicStreamSlot" in header:
                     music_frags.append((name, header, kapow_block.BLOCK_ORDER))
                 # dump EVERY asset raw (header + optional stream) to extracted/ for offline
                 # analysis; a later copy with the same header and stream wrote the same files
                 # under the same name already (raw, JSON, the files beside it), so it is skipped
                 if do_extract_all and not (placed == "repeat" and names.same_bytes):
-                    _ep = extract_paths.safe(a.out / "extracted", name)
+                    _ep = extract_paths.safe(opts.out / "extracted", name)
                     _ep.parent.mkdir(parents=True, exist_ok=True)
                     _ep.write_bytes(header if header else b"")
                     if stream:
@@ -542,7 +652,7 @@ class ExtractRun:
                                         stream,
                                         str(_ep),
                                         kapow_block.BLOCK_ORDER,
-                                        glb=bool(a.glb),
+                                        glb=bool(opts.glb),
                                     )
                                 else:
                                     d = kj.to_json(low, header, order=kapow_block.BLOCK_ORDER)
@@ -594,7 +704,7 @@ class ExtractRun:
                         raw_only[_k] = raw_only.get(_k, 0) + (placed != "repeat")
                 # SFX / voice 'sound' assets keep their PCM INLINE in the header
                 # (stream is None) -> handle these before the stream-None skip below.
-                if not a.no_audio and cls == "sound":
+                if opts.audio and cls == "sound":
                     try:
                         if kapow_block.BLOCK_ORDER == "<":
                             r = audio_decode.decode_sfx(header)
@@ -606,13 +716,13 @@ class ExtractRun:
                                     r[0],
                                     r[1],
                                     r[2],
-                                    extract_paths.safe(a.out / "audio", wn),
-                                    a.smpl_loops and loop,
+                                    extract_paths.safe(opts.out / "audio", wn),
+                                    opts.smpl_loops and loop,
                                 )
                                 stats["aud"] += 1
                                 if si:
                                     si.pop("_pe", None)
-                                    si["file"] = extract_paths.out_rel(a.out / "audio", wn)
+                                    si["file"] = extract_paths.out_rel(opts.out / "audio", wn)
                                     sound_info[name.replace("\\", "/").lstrip("/")] = si
                             else:
                                 sfx_failed.append(name)
@@ -625,10 +735,10 @@ class ExtractRun:
                                 header,
                                 kapow_block.BLOCK_ORDER,
                                 name,
-                                a.out / "audio",
-                                a.vgmstream_cli,
+                                opts.out / "audio",
+                                opts.vgmstream_cli,
                                 log,
-                                a.keep_xma,
+                                opts.keep_xma,
                             )
                             if si:
                                 stats["aud"] += 1
@@ -669,11 +779,11 @@ class ExtractRun:
                         continue
                     try:
                         if texture_carve.carve_texture(
-                            stream, header, extract_paths.safe(a.out / "textures", name), log
+                            stream, header, extract_paths.safe(opts.out / "textures", name), log
                         ):
                             stats["tex"] += 1
                             texture_sheet.mark_stored_name(
-                                extract_paths.safe(a.out / "textures", name),
+                                extract_paths.safe(opts.out / "textures", name),
                                 name_run.stored_of(name),
                             )
                     except Exception as ex:
@@ -683,22 +793,22 @@ class ExtractRun:
                         rep.mdl_repeats += 1
                         continue
                     if name_run.stored_of(name):
-                        model_stored[extract_paths.safe(a.out / "models", name + ".obj")] = (
+                        model_stored[extract_paths.safe(opts.out / "models", name + ".obj")] = (
                             name_run.stored_of(name)
                         )
                     model_jobs.append(
                         (
                             header,
                             stream,
-                            extract_paths.safe(a.out / "models", name + ".obj"),
+                            extract_paths.safe(opts.out / "models", name + ".obj"),
                             kapow_block.BLOCK_ORDER,
                             model_mesh.console_platform_of(stem) or run_platform,
                         )
                     )
-                elif not a.no_audio and (cls.lower() == "mediastream" or ".mediastream" in low):
+                elif opts.audio and (cls.lower() == "mediastream" or ".mediastream" in low):
                     try:
                         if audio_decode.decode_audio(
-                            stream, extract_paths.safe(a.out / "audio", name + ".ogg"), True, log
+                            stream, extract_paths.safe(opts.out / "audio", name + ".ogg"), True, log
                         ):
                             stats["aud"] += 1
                     except Exception as ex:
@@ -728,7 +838,7 @@ class ExtractRun:
         descriptors (tracks, cue points) are known.  A stream that does not
         split is written as one file, one that does not decode goes to the
         console pass."""
-        a, log = self.a, self.log
+        opts, log = self.opts, self.log
         aq, stats = self.audio, self.report.stats
         setups = self.setups
         for fname, fhead, forder in aq.music_frags:
@@ -743,13 +853,13 @@ class ExtractRun:
             try:
                 raw = self.block_plan.entry_bytes(ent)
                 tr = audio_decode.decode_audio_tracks(
-                    raw, a.out / "audio", name, True, log, self._slot_labels(name)
+                    raw, opts.out / "audio", name, True, log, self._slot_labels(name)
                 )
                 if tr:
                     stats["aud"] += len(tr)
                     self._music_sidecar(name, tr, "one file per track")
                 elif audio_decode.decode_audio(
-                    raw, extract_paths.safe(a.out / "audio", name + ".ogg"), True, log
+                    raw, extract_paths.safe(opts.out / "audio", name + ".ogg"), True, log
                 ):
                     stats["aud"] += 1
                     log("      ! %s does not split into tracks: written as one file" % name)
@@ -803,14 +913,14 @@ class ExtractRun:
         }
         import json as _json
 
-        jp = extract_paths.safe(self.a.out / "audio", name + ".json")
+        jp = extract_paths.safe(self.opts.out / "audio", name + ".json")
         jp.parent.mkdir(parents=True, exist_ok=True)
         with open(jp, "w", encoding="utf-8", newline="\n") as _f:
             _f.write(_json.dumps(doc, indent=1))
 
     def _slot_labels(self, name):
         """--music-track-labels: the MusicStreamSlot track names of a stream."""
-        if not self.a.music_track_labels:
+        if not self.opts.music_track_labels:
             return None
         dname = self._desc_of(name)[0]
         for s in self.setups:
@@ -824,7 +934,7 @@ class ExtractRun:
     def sounds(self):
         """audio/sound_info.json: the header facts of every sound asset, and the
         sound assets no reader took."""
-        a, log = self.a, self.log
+        opts, log = self.opts, self.log
         sound_info, sfx_failed = self.audio.sound_info, self.audio.sfx_failed
         if not (sound_info or sfx_failed):
             return
@@ -833,9 +943,9 @@ class ExtractRun:
         doc = {"format": "watchmen-sound-info/1", "sounds": dict(sorted(sound_info.items()))}
         if sfx_failed:  # marker: sound assets whose header no reader took
             doc["not_decoded"] = sorted(n.replace("\\", "/").lstrip("/") for n in sfx_failed)
-        (a.out / "audio").mkdir(parents=True, exist_ok=True)
+        (opts.out / "audio").mkdir(parents=True, exist_ok=True)
         with open(
-            extract_paths.safe(a.out / "audio", "sound_info.json"),
+            extract_paths.safe(opts.out / "audio", "sound_info.json"),
             "w",
             encoding="utf-8",
             newline="\n",
@@ -859,19 +969,19 @@ class ExtractRun:
             if src:
                 log(
                     "CONSOLE SFX: %d of %d sounds written as .mp3 / .xma containers (vgmstream: %s)"
-                    % (kept, len(sound_info), a.vgmstream_cli or "not set")
+                    % (kept, len(sound_info), opts.vgmstream_cli or "not set")
                 )
 
     def console_music(self):
         """The console music streams (and PC streams the music pass could not
         decode), with the per-stream channel / rate the block pass read."""
-        a, log = self.a, self.log
+        opts, log = self.opts, self.log
         aq, stats = self.audio, self.report.stats
         if not aq.console_audio:
             return
         log(
             "\nCONSOLE AUDIO: %d streams (vgmstream: %s)"
-            % (len(aq.console_audio), a.vgmstream_cli or "not set")
+            % (len(aq.console_audio), opts.vgmstream_cli or "not set")
         )
         for name, ent in aq.console_audio:
             try:
@@ -880,12 +990,12 @@ class ExtractRun:
                 r = audio_decode.decode_console_audio(
                     name,
                     raw,
-                    a.out / "audio",
+                    opts.out / "audio",
                     meta,
-                    a.vgmstream_cli,
+                    opts.vgmstream_cli,
                     log,
-                    a.keep_xma,
-                    tracks=not a.flat_music,
+                    opts.keep_xma,
+                    tracks=not opts.flat_music,
                     labels=self._slot_labels(name),
                     desc=self._desc_of(name)[1],
                 )
@@ -902,19 +1012,19 @@ class ExtractRun:
 
     def skeletons(self):
         """--glb: the base skeletons' rest poses -> skeletons/*.json."""
-        a, log = self.a, self.log
+        opts, log = self.opts, self.log
         # SKELETON REFERENCE DUMP: decode the base *_Skeleton.model rest poses to
         # OUT/skeletons/*.json (file-decoded; see docs/ENGINE_CONSTANTS.md).  This is
         # reference output only -- the glb rig takes its joint names/order from each
         # model's OWN embedded palette in decode_model (skeleton assets have a 0-byte
         # stream, so they never enter model_jobs; collect them straight from the naz).
-        if model_export._RIG["on"]:
+        if self.opts.model_glb is not None:
             try:
                 import extract_skeletons as _es
                 import json as _json
 
-                _sk = _es.collect(str(a.naz))
-                skdir = a.out / "skeletons"
+                _sk = _es.collect(str(opts.naz))
+                skdir = opts.out / "skeletons"
                 skdir.mkdir(parents=True, exist_ok=True)
                 for _fam, _s in _sk.items():
                     with open(
@@ -935,10 +1045,10 @@ class ExtractRun:
     def models(self, tex_index):
         """Every queued model, decoded with the texture index `tex_index` (all
         textures are on disk by now, so per-submesh materials resolve)."""
-        a, log, rep = self.a, self.log, self.report
+        opts, log, rep = self.opts, self.log, self.report
         model_jobs, model_stored = self.model_jobs, self.model_stored
         stats, mdl_repeats = rep.stats, rep.mdl_repeats
-        model_lod = a.model_lod
+        model_lod = opts.model_lod
         log(
             "\nMODELS: %d  (textures indexed: %d)%s"
             % (
@@ -966,7 +1076,15 @@ class ExtractRun:
                 # stored_name only for a respelled model (--names canonical)
                 _kw = {"stored_name": model_stored[out_path]} if out_path in model_stored else {}
                 if model_export.decode_model(
-                    header, stream, out_path, tex_index, log, order=mo, lod=model_lod, **_kw
+                    header,
+                    stream,
+                    out_path,
+                    tex_index,
+                    log,
+                    order=mo,
+                    lod=model_lod,
+                    glb=opts.model_glb,
+                    **_kw,
                 ):
                     stats["mdl"] += 1
                     _mn = out_path.name[: -len(".obj")]
@@ -998,33 +1116,35 @@ class ExtractRun:
 
     def nav(self):
         """nav/: the navigation data of the levels this run (or an earlier one) wrote."""
-        a, log = self.a, self.log
+        opts, log = self.opts, self.log
         stats, name_run = self.report.stats, self.name_run
-        if not a.no_nav:  # navigation data of the levels this run (or an earlier one) wrote
+        if opts.nav:  # navigation data of the levels this run (or an earlier one) wrote
             try:
                 import nav_data as _nav
 
-                trees = _nav.extract_trees(a.out)
-                if a.naz.is_dir():
+                trees = _nav.extract_trees(opts.out)
+                if opts.naz.is_dir():
                     # a loose-folder source (Part 1 PC / Xbox Live) keeps the .hpd path
                     # data and the .bik movies beside the folder it was given: bring
                     # them to files/data/, where the archive sets have them (--no-files:
                     # the path data is read in place, the movies are not fetched)
-                    if a.no_files:
+                    if not opts.files:
                         trees = trees + [
                             p
-                            for _n, p in _nav.loose_source_files(a.naz)
+                            for _n, p in _nav.loose_source_files(opts.naz)
                             if not p.lower().endswith(".bik")
                         ]
                     else:
-                        stats["files"] += len(_nav.stage_loose_source(a.naz, a.out, log, name_run))
-                        trees = _nav.extract_trees(a.out)
-                res = _nav.export(trees, str(a.out / "nav"))
+                        stats["files"] += len(
+                            _nav.stage_loose_source(opts.naz, opts.out, log, name_run)
+                        )
+                        trees = _nav.extract_trees(opts.out)
+                res = _nav.export(trees, str(opts.out / "nav"))
                 if res:
                     bad = sum(1 for r in res if "error" in r)
                     log(
                         "NAV: %d level(s) -> %s%s"
-                        % (len(res) - bad, a.out / "nav", ", %d failed" % bad if bad else "")
+                        % (len(res) - bad, opts.out / "nav", ", %d failed" % bad if bad else "")
                     )
                     nohpd = [r["level"] for r in res if "error" not in r and not r.get("hpd")]
                     if nohpd:
@@ -1038,7 +1158,7 @@ class ExtractRun:
     def summary(self):
         """The closing summary, and `_canonical_names.json`.  Returns 1 when a block
         could not be read or parsed (its assets are missing), else 0."""
-        a, log, rep = self.a, self.log, self.report
+        opts, log, rep = self.opts, self.log, self.report
         blocks, model_jobs = self.block_plan.blocks, self.model_jobs
         names, name_run = self.names, self.name_run
         stats, n_assets, failed_blocks = rep.stats, rep.n_assets, rep.failed_blocks
@@ -1070,7 +1190,7 @@ class ExtractRun:
                 ),
             )
         )
-        if model_export._RIG["on"]:
+        if self.opts.model_glb is not None:
             _ng = sum(len(v) for v in glb_none.values())
             log(
                 "  model GLBs  : %d%s"
@@ -1133,7 +1253,7 @@ class ExtractRun:
                 % (len(names.variants), ", ".join(v[1] for v in names.variants))
             )
         try:
-            name_run.write(a.out)
+            name_run.write(opts.out)
         except OSError as ex:
             log("  ! %s: %s" % (extract_paths.names_module().RUN_FILE, ex))
         if name_run.renamed:
@@ -1143,7 +1263,7 @@ class ExtractRun:
                 % (len(name_run.renamed), extract_paths.names_module().RUN_FILE)
             )
         log("  audio       : %d" % stats["aud"])
-        log("  output      : %s" % a.out)
+        log("  output      : %s" % opts.out)
         if failed_blocks:
             log(
                 "  ! blocks    : %d not extracted (reason logged above; exit code 1): %s"
@@ -1164,7 +1284,7 @@ class ExtractRun:
             self.console_music()
             # all blocks parsed -> textures are now on disk; decode models last with the
             # full texture index so per-submesh materials resolve correctly.
-            tex_index = obj_mtl.build_texture_index(self.a.out / "textures")
+            tex_index = obj_mtl.build_texture_index(self.opts.out / "textures")
             self.skeletons()
             self.models(tex_index)
             self.text()
@@ -1183,8 +1303,12 @@ def main(argv):
         if not a.naz.exists():
             print("error: %s not found" % a.naz, file=sys.stderr)
             return 2
-        _apply_options(a)
-        return ExtractRun(a, extract_log.extract_logger(a.quiet)).run()
+        opts = ExtractOptions.from_args(a)
+        opts.apply_env()
+        if a.glb and a.no_models:
+            print("note: --glb requires model decoding; overriding --no-models", file=sys.stderr)
+        opts = opts.load_glb()
+        return ExtractRun(opts, extract_log.extract_logger(opts.quiet)).run()
     finally:
         extract_paths.names_module().end()
 
@@ -1223,7 +1347,7 @@ def _parser():
     )
     ap.add_argument(
         "--glb-texture-size",
-        type=model_export._texture_size_arg,
+        type=texture_size_arg,
         default=None,
         metavar="N",
         help="with --glb: shrink every texture embedded in a model .glb to at most N x N pixels (aspect kept). Default: the full size of the extracted PNG; 512 gives the 1.4.0 files.",
@@ -1311,29 +1435,3 @@ def _parser():
         help="no progress log; the warning lines ('!' and 'WARNING:') still go to stderr",
     )
     return ap
-
-
-def _apply_options(a):
-    """The options other modules read: --glb (model_export._RIG) and the
-    environment variables of --rig, --frame, --names, --json-floats."""
-    model_export._RIG["on"] = bool(getattr(a, "glb", False))
-    model_export._RIG["attrs"] = not bool(getattr(a, "no_vertex_attrs", False))
-    model_export._RIG["tex_size"] = getattr(a, "glb_texture_size", None)
-    if getattr(a, "rig", None):
-        os.environ["WATCHMEN_RIG"] = a.rig  # the --glb rig and variant_glb.rig_mode() read it
-    if getattr(a, "frame", None):
-        os.environ["WATCHMEN_FRAME"] = a.frame  # frame.mode() reads it
-    if getattr(a, "names", None):
-        os.environ["WATCHMEN_NAMES"] = a.names  # canonical_names.mode() reads it
-    if getattr(a, "json_floats", None):
-        os.environ["WATCHMEN_JSON_FLOATS"] = a.json_floats  # f32json.mode() reads it
-    if model_export._RIG["on"] and a.no_models:
-        print("note: --glb requires model decoding; overriding --no-models", file=sys.stderr)
-        a.no_models = False
-    if model_export._RIG["on"] and not model_export._rig_load():
-        print(
-            "WARNING: --glb requested but rig_glb.py (or numpy) not importable (%s); "
-            "skipping rig export" % model_export._RIG.get("error"),
-            file=sys.stderr,
-        )
-        model_export._RIG["on"] = False

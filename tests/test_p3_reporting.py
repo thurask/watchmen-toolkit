@@ -18,6 +18,7 @@ inferred is shown like a fact.
 
 Synthetic fixtures only (those of the earlier passes are reused)."""
 
+import dataclasses
 import json
 
 import pytest
@@ -115,38 +116,37 @@ def test_extract_says_none_when_every_misc_asset_is_decoded(tmp_path):
 # ------------------------------------------------------------ models
 @pytest.fixture
 def glb_on(monkeypatch):
-    """decode_model with --glb in force (the rig writer loaded), default attributes."""
-    monkeypatch.setitem(wx._RIG, "on", True)
-    monkeypatch.setitem(wx._RIG, "attrs", True)
-    assert wx._rig_load()
+    """The --glb switches of decode_model (the rig writer loaded), default attributes."""
     monkeypatch.setattr(wx, "write_obj_mtl", lambda *a: None)
+    return wx.glb_options()
 
 
-def _decode(tmp_path, h, s, **kw):
+def _decode(tmp_path, h, s, glb=None):
     logs = []
     st = {}
-    ok = wx.decode_model(h, s, tmp_path / "m.obj", log=lambda *a: logs.append(a[0]), status=st)
+    ok = wx.decode_model(
+        h, s, tmp_path / "m.obj", log=lambda *a: logs.append(a[0]), status=st, glb=glb
+    )
     assert ok is True
     return json.loads((tmp_path / "m.model.json").read_text()), st, logs
 
 
 def test_model_with_a_glb_has_no_glb_marker(tmp_path, glb_on):
-    meta, st, logs = _decode(tmp_path, *pm.build("<", "part2"))
+    meta, st, logs = _decode(tmp_path, *pm.build("<", "part2"), glb=glb_on)
     assert (tmp_path / "m.glb").exists()
     assert "glb" not in meta and "not_decoded" not in meta
     assert st["glb"] is True and st["glb_reason"] is None and st["partial"] is None
 
 
-def test_model_without_glb_says_why_in_its_sidecar(tmp_path, glb_on, monkeypatch):
-    monkeypatch.setitem(wx._RIG, "attrs", False)  # --no-vertex-attrs: static models get none
-    meta, st, logs = _decode(tmp_path, *pm.build("<", "part2"))
+def test_model_without_glb_says_why_in_its_sidecar(tmp_path, glb_on):
+    no_attrs = dataclasses.replace(glb_on, attrs=False)  # --no-vertex-attrs: static models get none
+    meta, st, logs = _decode(tmp_path, *pm.build("<", "part2"), glb=no_attrs)
     assert not (tmp_path / "m.glb").exists()
     assert meta["glb"]["written"] is False and "--no-vertex-attrs" in meta["glb"]["reason"]
     assert st["glb"] is False and st["glb_reason"] == meta["glb"]["reason"]
 
 
 def test_without_glb_option_the_sidecar_has_no_marker(tmp_path, monkeypatch):
-    monkeypatch.setitem(wx._RIG, "on", False)
     monkeypatch.setattr(wx, "write_obj_mtl", lambda *a: None)
     meta, st, logs = _decode(tmp_path, *pm.build("<", "part2"))
     assert "glb" not in meta and st["glb"] is None
@@ -161,7 +161,7 @@ def test_scan_decode_that_misses_submeshes_is_marked(tmp_path, glb_on, monkeypat
     h, s = pm.build(">", "part2", console="x360")
     full = wx.find_descriptors(h, ">")
     monkeypatch.setattr(wx, "find_descriptors", lambda hd, o: full[:1] if o == ">" else [])
-    meta, st, logs = _decode(tmp_path, h, s)
+    meta, st, logs = _decode(tmp_path, h, s, glb=glb_on)
     assert meta["mesh_source"] == "descriptor scan" and meta["not_decoded"] == ["submeshes"]
     assert (
         meta["submeshes"]["decoded"] == 1 and meta["submeshes"]["header_render_buffers_lod0"] == 2
@@ -184,9 +184,9 @@ def test_extract_summary_counts_models_without_glb(tmp_path, monkeypatch, capsys
     files = ps._two_block_tree(tmp_path)
     real = wx.decode_model
 
-    def decode(header, stream, out_path, tex_index=None, log=None, order=None, lod=0):
+    def decode(header, stream, out_path, tex_index=None, log=None, order=None, lod=0, glb=None):
         if not stream:
-            return real(header, stream, out_path, tex_index, log, order=order, lod=lod)
+            return real(header, stream, out_path, tex_index, log, order=order, lod=lod, glb=glb)
         rock = out_path.name.startswith("Rock")
         wx.MODEL_STATUS.update(
             glb=not rock,
@@ -200,10 +200,7 @@ def test_extract_summary_counts_models_without_glb(tmp_path, monkeypatch, capsys
     monkeypatch.setattr(wx, "decode_model", decode)
     out = tmp_path / "out"
     args = [str(files), "-o", str(out), "--no-files", "--no-text", "--no-audio", "--glb"]
-    try:
-        assert wx.main(args) == 0
-    finally:
-        wx._RIG["on"] = False
+    assert wx.main(args) == 0
     log = capsys.readouterr().out
     assert '  model GLBs  : 1  (2 decoded model(s) WITHOUT a .glb; "glb" in their' in log
     assert (

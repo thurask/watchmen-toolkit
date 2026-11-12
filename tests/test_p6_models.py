@@ -133,11 +133,8 @@ def test_shadow_hull_follows_its_part():
 
 @pytest.mark.usefixtures("engine_frame")
 def test_glb_positions_are_in_model_space(tmp_path, monkeypatch):
-    monkeypatch.setitem(we._RIG, "on", True)
-    monkeypatch.setitem(we._RIG, "loaded", False)
-    monkeypatch.setitem(we._RIG, "attrs", True)
     h, s = tm.build("<", "part2")
-    assert we.decode_model(h, s, tmp_path / "m.obj", {}, None)
+    assert we.decode_model(h, s, tmp_path / "m.obj", {}, None, glb=we.glb_options())
     g = parse_glb(tmp_path / "m.glb")
     lo, hi = np.full(3, 1e9), np.full(3, -1e9)
     for m in g.j["meshes"]:

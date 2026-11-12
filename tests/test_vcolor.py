@@ -12,6 +12,7 @@ Sections
   6. character GLBs (variant_glb): attributes carried by the parts
 """
 
+import dataclasses
 import io
 import json
 import struct
@@ -296,11 +297,9 @@ def test_without_sheet_json_materials_stay_double_sided(tmp_path):
 
 
 @pytest.fixture
-def rig_on(monkeypatch):
-    monkeypatch.setitem(we._RIG, "on", True)
-    monkeypatch.setitem(we._RIG, "loaded", False)
-    monkeypatch.setitem(we._RIG, "attrs", True)
-    return we._RIG
+def rig_on():
+    """The --glb switches of decode_model (rig_glb loaded, default attributes)."""
+    return we.glb_options()
 
 
 def _rigid_model():
@@ -315,11 +314,11 @@ def _skinned_model():
 def test_rigid_model_gets_a_static_glb_with_its_vertex_data(tmp_path, rig_on):
     h, s = _rigid_model()
     # no normal map for the material: NORMAL and COLOR_0, but no (unused) TANGENT
-    assert we.decode_model(h, s, tmp_path / "plain.obj", {}, None)
+    assert we.decode_model(h, s, tmp_path / "plain.obj", {}, None, glb=rig_on)
     A = parse_glb(tmp_path / "plain.glb").j["meshes"][0]["primitives"][0]["attributes"]
     assert set(A) == {"POSITION", "NORMAL", "TEXCOORD_0", "COLOR_0"}
     idx = {"wall_01": _texture_dir(tmp_path, "Wall_01", {"twoSided": False}, alpha=False)}
-    assert we.decode_model(h, s, tmp_path / "crate.obj", idx, None)
+    assert we.decode_model(h, s, tmp_path / "crate.obj", idx, None, glb=rig_on)
     g = parse_glb(tmp_path / "crate.glb")
     assert "skins" not in g.j
     A = g.j["meshes"][0]["primitives"][0]["attributes"]
@@ -334,20 +333,19 @@ def test_rigid_model_gets_a_static_glb_with_its_vertex_data(tmp_path, rig_on):
 
 
 def test_no_vertex_attrs_restores_the_130_output(tmp_path, rig_on):
-    rig_on["attrs"] = False
+    no_attrs = dataclasses.replace(rig_on, attrs=False)
     h, s = _rigid_model()
-    assert we.decode_model(h, s, tmp_path / "crate.obj", {}, None)
+    assert we.decode_model(h, s, tmp_path / "crate.obj", {}, None, glb=no_attrs)
     assert not (tmp_path / "crate.glb").exists()  # 1.3.0: no .glb for a rigid model
     h, s = _skinned_model()
-    assert we.decode_model(h, s, tmp_path / "body.obj", {}, None)
+    assert we.decode_model(h, s, tmp_path / "body.obj", {}, None, glb=no_attrs)
     g = parse_glb(tmp_path / "body.glb")
     p = g.j["meshes"][0]["primitives"][0]
     assert set(p["attributes"]) == {"POSITION", "TEXCOORD_0", "JOINTS_0", "WEIGHTS_0"}
     assert g.j["materials"][p["material"]]["doubleSided"] is True
     off = (tmp_path / "body.glb").read_bytes()
-    rig_on["attrs"] = True
     idx = {"trim_02": _texture_dir(tmp_path, "Trim_02", None, alpha=False)}
-    assert we.decode_model(h, s, tmp_path / "body.obj", idx, None)
+    assert we.decode_model(h, s, tmp_path / "body.obj", idx, None, glb=rig_on)
     on = parse_glb(tmp_path / "body.glb")
     assert {"NORMAL", "TANGENT", "COLOR_0"} <= set(on.j["meshes"][0]["primitives"][0]["attributes"])
     assert (tmp_path / "body.glb").read_bytes() != off

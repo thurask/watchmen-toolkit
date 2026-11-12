@@ -619,17 +619,16 @@ def test_extract_glb_embeds_textures_at_full_size_unless_asked(tmp_path):
 
 
 def test_glb_texture_size_option():
-    assert we._texture_size_arg("512") == 512
+    assert we.texture_size_arg("512") == 512
     import argparse
 
     for bad in ("0", "-3", "big"):
         with pytest.raises(argparse.ArgumentTypeError):
-            we._texture_size_arg(bad)
+            we.texture_size_arg(bad)
 
 
 def test_extract_options_set_the_rig_and_texture_size(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("WATCHMEN_RIG", "hierarchy")
-    monkeypatch.setitem(we._RIG, "tex_size", None)
     missing = str(tmp_path / "missing.naz")
     assert (
         we.main(

@@ -149,12 +149,8 @@ class _RigStub:
 
 
 @pytest.fixture
-def rig_stub(monkeypatch):
-    stub = _RigStub()
-    monkeypatch.setitem(we._RIG, "on", True)
-    monkeypatch.setitem(we._RIG, "mod", stub)
-    monkeypatch.setitem(we._RIG, "loaded", True)
-    return stub
+def rig_stub():
+    return _RigStub()
 
 
 @pytest.mark.parametrize("order", ["<", ">"])
@@ -167,7 +163,7 @@ def test_decode_model_passes_detected_byte_order_to_decode_skin(tmp_path, rig_st
     """
     joints = [(i % 5, 0, 0, 0) for i in range(8)]
     hdr, stream = skinned_model(order, joints)
-    assert we.decode_model(hdr, stream, tmp_path / "m.obj") is True
+    assert we.decode_model(hdr, stream, tmp_path / "m.obj", glb=we.GlbOptions(rig_stub)) is True
     assert len(rig_stub.skin_calls) == 1, "one skinned submesh -> one decode_skin call"
     call = rig_stub.skin_calls[0]
     assert call["order"] == order
@@ -184,7 +180,7 @@ def test_console_model_yields_a_skinned_glb(tmp_path, rig_stub):
     """
     joints = [((i * 3) % 5, 0, 0, 0) for i in range(8)]
     hdr, stream = skinned_model(">", joints)
-    assert we.decode_model(hdr, stream, tmp_path / "m.obj") is True
+    assert we.decode_model(hdr, stream, tmp_path / "m.obj", glb=we.GlbOptions(rig_stub)) is True
     assert len(rig_stub.glb_calls) == 1, "console skinned model must produce a glb"
     SI = rig_stub.glb_calls[0]["SI"]
     assert SI.shape == (8, 4)
