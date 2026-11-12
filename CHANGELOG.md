@@ -71,6 +71,30 @@
   --help` calls `extract_driver.main` directly. The usage text is in `extract_driver`'s
   docstring, each pipeline line in that of its module. Output unchanged. (2026-11-11)
 
+- **The extract driver is one run object with a method per pass.** `extract_driver.main`
+  parses the command line, builds `ExtractOptions` and runs `ExtractRun(opts, log).run()`.
+  `ExtractOptions` (frozen) holds the argparse values and what follows from them
+  (`from_args`); `apply_env()` sets `WATCHMEN_RIG`, `WATCHMEN_FRAME`, `WATCHMEN_NAMES` and
+  `WATCHMEN_JSON_FLOATS` for the modules that read them, as before; `load_glb()` loads
+  `rig_glb` for `--glb`. `ExtractRun` has `plan` (pass 1), `blocks`, `stream_set_report`,
+  `music`, `sounds`, `console_music`, `skeletons`, `models`, `text`, `nav` and `summary` (the
+  exit code); `BlockPlan` holds the planned blocks and reads their halves and the stream-only
+  files, `AudioQueue` the audio collections, `RunReport` the counts. The longest function was
+  `_extract_blocks_and_rest`, 750 lines and 29 arguments; the longest now is
+  `ExtractRun.blocks`, 336 lines and none. `--glb-texture-size` is parsed by
+  `extract_driver.texture_size_arg`. Output unchanged. (2026-11-11)
+- **`decode_model(glb=)` replaces the `_RIG` switches.** The `--glb` switches are a
+  `model_export.GlbOptions` (the loaded `rig_glb` module, `attrs`, `tex_size`) passed to
+  `decode_model`; `glb_options()` builds one. Without it no `.glb` is written. `_RIG`,
+  `_rig_load` and `_texture_size_arg` are gone, from `watchmen_extract` too. The driver passes
+  its own `status` dict to `decode_model`; `MODEL_STATUS` stays the default for callers that
+  pass none. Output unchanged. (2026-11-11)
+- **Directory entries carry their block's byte order.** `parse_block_toc` sets `order` on
+  every `Toc` it returns; the extract driver and `text_assets` read it, and `BLOCK_ORDER`
+  remains a mirror of the last call. Output unchanged: `pc_p2` after steps 21 and 24, `pc_p1`
+  and `ps3_p2` byte-identical to the 1.7.0 export, `_extract_done.txt` excluded (measured).
+  (2026-11-11)
+
 ## 1.7.0 — 2026-11-11
 
 **Failures are reported, and a few wrong values are fixed.** `extract` exits 1 when a block
