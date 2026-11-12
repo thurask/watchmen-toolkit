@@ -38,6 +38,7 @@ HOMES = {
     "obj_mtl",
     "model_export",
     "sound_header",
+    "audio_decode",
 }
 
 
