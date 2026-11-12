@@ -452,6 +452,366 @@ def _sanitize_uv_tangents(part, eps=1.5 / 512.0):
     return out
 
 
+class VariantGlb:
+    """One variant GLB as write_glb writes it: the inputs, the body bind and the
+    rig layout read from them, the glTF document (gltf_build.GltfDoc) and the
+    material caches.  write_glb's docstring describes the arguments and the file."""
+
+    def __init__(
+        self,
+        parts,
+        manifest,
+        bindnpz,
+        textures=None,
+        face=None,
+        attachments=None,
+        meta=None,
+        face_rule=None,
+        face_idle=None,
+        alt_parts=None,
+        parts_record=None,
+        outfit_parts=None,
+        asset_extras=None,
+        ragdoll=None,
+        rig=None,
+    ):
+        import anim_meta as _am
+        import face_rule as _fr
+        import frame as _frame
+
+        self.engine = _fr.rule(face_rule) == "engine"
+        self.idle = _fr.idle_enabled(face_idle)
+        # Guard against the degenerate-UV -> black-tangent artifact on any part whose
+        # material has a normal map (see _sanitize_uv_tangents).  Gated on normal-
+        # mapped materials so UV-less / untextured parts aren't needlessly split.
+        _norm_mats = {
+            nm for nm, l in (textures or {}).items() if isinstance(l, dict) and l.get("normal")
+        }
+        if _norm_mats:
+            _san = lambda pl: [_sanitize_uv_tangents(p) if p[5] in _norm_mats else p for p in pl]
+            parts = _san(parts)
+            if attachments:
+                attachments = [(an, _san(ap)) for an, ap in attachments]
+            if alt_parts:
+                alt_parts = [(an, _san(ap)) for an, ap in alt_parts]
+            if outfit_parts:
+                outfit_parts = [(an, _san(ap), sh) for an, ap, sh in outfit_parts]
+            if face is not None and face.get("parts"):
+                face = dict(face)
+                face["parts"] = _san(face["parts"])
+        self.parts = parts
+        self.manifest = manifest
+        self.textures = textures
+        self.face = face
+        self.attachments = attachments
+        self.alt_parts = alt_parts
+        self.parts_record = parts_record
+        self.outfit_parts = outfit_parts
+        self.asset_extras = asset_extras
+        self.ragdoll = ragdoll
+        # the clip extras copy GLB-frame numbers out of `meta`: it has to be in the
+        # frame this file is written in (a table without the marker is mirrored)
+        self.meta = _am.to_frame(meta)
+        bt = load_npz(bindnpz)
+        Rb = bt["Rb"]
+        tb = bt["tb"]
+        NB = self.NB = len(Rb)
+        # real bone names + parents (palette order) -- written to `extras` so an
+        # importer needs no per-skeleton table to rebuild the hierarchy.
+        bnames = self.bnames = [str(x) for x in bt["names"]] if "names" in bt else None
+        bpar = self.bpar = [int(x) for x in bt["par"]] if "par" in bt else None
+        skel = (
+            _am.skeleton_extras(bnames, bpar)
+            if bnames and bpar and len(bnames) == NB and len(bpar) == NB
+            else None
+        )
+        B4 = self.B4 = np.tile(np.eye(4), (NB, 1, 1))
+        B4[:, :3, :3] = Rb
+        B4[:, :3, 3] = tb
+        self.IBM = np.array([np.linalg.inv(B4[k]) for k in range(NB)])
+        # the skeleton layout (RIG_MODES): joint node names, parents, local TRS
+        rigrec = {"mode": rig_mode(rig)}
+        jnames = None
+        if rigrec["mode"] == "hierarchy":
+            _reserved = [a for a, _p in attachments or []] + [a for a, _p in alt_parts or []]
+            _reserved += [a for a, _p, _s in outfit_parts or []]
+            jnames = glb_joint_names(bnames, bpar, _reserved) if skel else None
+            if jnames is None:
+                rigrec = {
+                    "mode": "flat",
+                    "reason": (
+                        "the bind has no bone names and parents"
+                        if not skel
+                        else "the bind's parent table is not a tree"
+                    ),
+                }
+        self.jnames = jnames
+        self.hier = jnames is not None
+        if self.hier:
+            skel = _am.skeleton_extras(bnames, bpar, rig="hierarchy", joint_nodes=jnames)
+        self.skel = skel
+        self.doc = gltf_build.GltfDoc(
+            {
+                "version": "2.0",
+                "generator": "watchmen_extract variant_glb",
+                "extras": {
+                    "watchmen": {
+                        "format": _am.FORMAT,
+                        "conventions": _am.conventions(),
+                        "rig": rigrec,
+                    }
+                },
+            },
+            (
+                "nodes",
+                "meshes",
+                "skins",
+                "accessors",
+                "bufferViews",
+                "buffers",
+                "materials",
+                "animations",
+                "images",
+                "textures",
+            ),
+            {"magFilter": 9729, "minFilter": 9987, "wrapS": 10497, "wrapT": 10497},
+        )
+        self.j = self.doc.j
+        # outfit nodes of the same model: identical data is written once and the
+        # ACCESSOR is shared (doc.packer.share; a buffer view shared by two
+        # accessors would need a byteStride; a shared accessor needs nothing)
+        self.va = vertex_attrs_enabled()
+        # everything below is built from engine numbers (binds, bakes, meshes);
+        # _frame.finish_gltf reflects the finished document for the "true" frame
+        self.true_frame = _frame.is_true()
+        self.texdone = {}  # material name -> index of its textured material
+        self.blendmat = {}  # material index -> its alphaMode BLEND twin
+        self.sheetalpha = {}  # id(material) -> (sheet, header alpha, pixel alpha): engine materials
+        self.vamat = {}  # material index -> the material a part with vertex alpha uses
+
+    # ------------------------------------------------------------ materials
+    def vertex_prep(self, part, Vg, T):
+        """Per-vertex attributes of one part -> (index array to write, pending
+        attribute arrays or None, vertex-alpha blend flag).  NORMAL is the stored
+        normal; TANGENT the stored tangent with w for the green-inverted normal
+        texture (we.gltf_tangents), written when the part's material has a normal
+        map; COLOR_0 only when the buffer has colours.
+        A part that gets NORMAL has its winding turned to glTF's (the engine's
+        triangles wind clockwise against their normals)."""
+        T = np.asarray(T)
+        at = getattr(part, "attrs", None) if self.va else None
+        Np = None
+        if at is not None and len(at["normal"]) == len(Vg):
+            Np = rig_glb.unit_normals(at["normal"])
+        if Np is None:
+            if self.true_frame and T.size:
+                # no normals: the file order is the front face in the true frame,
+                # so cancel the reversal frame.finish_gltf applies
+                T = T.reshape(-1, 3)[:, [0, 2, 1]]
+            return T, None, False
+        pend = {"NORMAL": (Np, "VEC3")}
+        tg = np.asarray(at["tangent"], np.float32)
+        lay = (self.textures or {}).get(part[5])
+        has_nmap = isinstance(lay, dict) and bool(lay.get("normal"))  # else TANGENT is unused
+        if has_nmap and np.isfinite(tg).all() and (np.linalg.norm(tg, axis=1) > 1e-6).all():
+            Tp = rig_glb.well_formed_tangents(
+                we.gltf_tangents(
+                    Np,
+                    tg,
+                    at["bitangent"],
+                    green_up=os.environ.get("WATCHMEN_NORMALS", "gl") != "dx",
+                )
+            )
+            if Tp is not None:
+                pend["TANGENT"] = (Tp, "VEC4")
+        if at.get("has_color"):
+            pend["COLOR_0"] = (
+                np.ascontiguousarray(rig_glb.linear_vertex_colors(at["color"])),
+                "VEC4",
+            )
+        if T.size and rig_glb.winding_reversed(Vg, Np, T):
+            T = T.reshape(-1, 3)[:, [0, 2, 1]]
+        return T, pend, bool(at.get("has_color") and at.get("has_alpha"))
+
+    def blend(self, mi, blend):
+        """material index `mi`, or its alphaMode BLEND twin for a part whose
+        vertex alpha varies (it multiplies the texture alpha in the engine).
+        A material written from its sheet (materials.py, engine mode) gets no
+        twin unless the sheet blends: the engine picks the render list from
+        renderType and opacity alone (0x5739d0), and the opaque lists are drawn
+        with blending off, so vertex alpha only reaches the alpha test there.
+        It is recorded as extras.watchmen.vertex_alpha instead.  The legacy mode
+        and a material without a known sheet keep the twin."""
+        j = self.j
+        if not blend or j["materials"][mi].get("alphaMode") == "BLEND":
+            return mi
+        m = j["materials"][mi]
+        if id(m) in self.sheetalpha:
+            import materials as _mt
+
+            if mi not in self.vamat:
+                sheet, has_a, pix_a = self.sheetalpha[id(m)]
+                amode, cutoff, _afac = _mt.alpha(sheet, has_a, True, pix_a)
+                if amode == m.get("alphaMode") and cutoff == m.get("alphaCutoff"):
+                    m.setdefault("extras", {}).setdefault("watchmen", {})["vertex_alpha"] = True
+                    self.vamat[mi] = mi
+                else:  # the vertex alpha changes the mode (a flagged texture without
+                    # alpha pixels is alpha-tested on it; a type 1 sheet blends it)
+                    m2 = json.loads(json.dumps(m))
+                    m2.pop("alphaMode", None)
+                    m2.pop("alphaCutoff", None)
+                    if amode:
+                        m2["alphaMode"] = amode
+                    if cutoff is not None:
+                        m2["alphaCutoff"] = cutoff
+                    if sheet.get("renderType") is not None:
+                        m2.setdefault("extras", {}).setdefault("watchmen", {})["vertex_alpha"] = (
+                            True
+                        )
+                    j["materials"].append(m2)
+                    self.vamat[mi] = len(j["materials"]) - 1
+            return self.vamat[mi]
+        if mi not in self.blendmat:
+            m2 = json.loads(json.dumps(j["materials"][mi]))
+            m2["alphaMode"] = "BLEND"
+            m2.pop("alphaCutoff", None)
+            j["materials"].append(m2)
+            self.blendmat[mi] = len(j["materials"]) - 1
+        return self.blendmat[mi]
+
+    def sheet_material(self, mat, layers):
+        """Engine values from the texture's sheet.json (char_lib.find_layers):
+        the alpha-test reference, the normal-map power and the subtractive blend."""
+        if layers.get("blend_info"):
+            # the texture is ink / light with its coverage in alpha (char_lib._blend_layer)
+            bct = mat.get("pbrMetallicRoughness", {}).get("baseColorTexture", {})
+            we.blend_material(
+                mat,
+                layers["blend_info"],
+                bct.get("index"),
+                (layers.get("sheet") or {}).get("opacity"),
+            )
+        if layers.get("sheet_name"):  # a sheet other than the texture's first
+            mat.setdefault("extras", {}).setdefault("watchmen", {})["sheet"] = layers["sheet_name"]
+            # its own name: two materials of one texture would otherwise share one
+            # (Blender renames the second "<name>.001")
+            mat["name"] = "%s [%s]" % (mat.get("name"), layers["sheet_name"])
+        if layers.get("materials") == "engine":
+            self.engine_material(mat, layers)
+        sheet = layers.get("sheet") if self.va else None
+        if not sheet:
+            return
+        thr = sheet.get("alphaThreshold")
+        if mat.get("alphaMode") == "MASK" and thr:
+            mat["alphaCutoff"] = round(min(int(thr), 255) / 255.0, 6)
+        power = sheet.get("normalMapPower")
+        if "normalTexture" in mat and power is not None and abs(float(power) - 1.0) > 1e-6:
+            mat["normalTexture"]["scale"] = round(float(power), 6)
+
+    def image_texture(self, data, name):
+        """Index of a new texture (sampler 0) of a new PNG image `name` whose bytes
+        go into the buffer now."""
+        j = self.j
+        j["images"].append(
+            {"bufferView": self.doc.view(data), "mimeType": "image/png", "name": name}
+        )
+        j["textures"].append({"source": len(j["images"]) - 1, "sampler": 0})
+        return len(j["textures"]) - 1
+
+    def engine_material(self, mat, layers):
+        """materials.py: roughness / specular / emission / alpha mode / culling from
+        the sheet (layers["materials"] == "engine", set by char_lib.find_layers)."""
+        import materials as _mt
+
+        sheet = layers.get("sheet") or {}
+        P = _mt.engine_material(
+            sheet,
+            layers.get("diffuse"),
+            layers.get("spec"),
+            layers.get("specsize"),
+            layers.get("glow"),
+        )
+        _mt.apply(
+            self.j, mat, P, lambda data, label: self.image_texture(data, mat["name"] + "_" + label)
+        )
+        if "twoSided" in sheet:
+            mat["doubleSided"] = bool(sheet["twoSided"])
+        if not layers.get("blend_info"):
+            pix_a = bool(layers.get("texAlpha") or layers.get("alphaMask"))
+            # the engine's alpha test follows the texture header's alpha flag
+            # (0x429e77 -> 0x571d5d): layers["texAlphaFlag"] when the extract has
+            # it (sheet.json "textureHasAlpha"), else the pixels
+            has_a = layers.get("texAlphaFlag")
+            has_a = pix_a if has_a is None else bool(has_a)
+            self.sheetalpha[id(mat)] = (sheet, has_a, pix_a)
+            amode, cutoff, afac = _mt.alpha(sheet, has_a, False, pix_a)
+            mat.pop("alphaMode", None)
+            mat.pop("alphaCutoff", None)
+            if amode:
+                mat["alphaMode"] = amode
+            if cutoff is not None:
+                mat["alphaCutoff"] = cutoff
+            if afac is not None:
+                mat["pbrMetallicRoughness"]["baseColorFactor"] = [1.0, 1.0, 1.0, afac]
+
+    def material(self, nm):
+        """Material index for nm: the textured material of `textures[nm]` (made once per
+        name, for the body, attachment and face primitives alike), else a new grey one."""
+        j = self.j
+        png = (self.textures or {}).get(nm)
+        if png is not None and nm in self.texdone:
+            return self.texdone[nm]
+        if png is not None:
+            layers = png if isinstance(png, dict) else {"diffuse": png}
+
+            mat = {
+                "name": nm,
+                "pbrMetallicRoughness": {"metallicFactor": 0, "roughnessFactor": 0.85},
+                "doubleSided": True,
+            }
+            if "diffuse" in layers:
+                mat["pbrMetallicRoughness"]["baseColorTexture"] = {
+                    "index": self.image_texture(layers["diffuse"], nm + "_diffuse")
+                }
+            if "mr" in layers:
+                mat["pbrMetallicRoughness"]["metallicRoughnessTexture"] = {
+                    "index": self.image_texture(layers["mr"], nm + "_mr")
+                }
+                mat["pbrMetallicRoughness"]["roughnessFactor"] = 1.0
+            if "normal" in layers:
+                mat["normalTexture"] = {
+                    "index": self.image_texture(layers["normal"], nm + "_normal")
+                }
+            if layers.get("alphaMask"):
+                mat["alphaMode"] = "MASK"
+                mat["alphaCutoff"] = 0.5
+            self.sheet_material(mat, layers)
+            if "spec" in layers and layers.get("materials") != "engine":
+                mat.setdefault("extensions", {})["KHR_materials_specular"] = {
+                    "specularColorTexture": {
+                        "index": self.image_texture(layers["spec"], nm + "_spec")
+                    }
+                }
+                j.setdefault("extensionsUsed", [])
+                if "KHR_materials_specular" not in j["extensionsUsed"]:
+                    j["extensionsUsed"].append("KHR_materials_specular")
+            j["materials"].append(mat)
+            self.texdone[nm] = len(j["materials"]) - 1
+            return self.texdone[nm]
+        j["materials"].append(
+            {
+                "name": nm,
+                "pbrMetallicRoughness": {
+                    "baseColorFactor": [0.8, 0.8, 0.82, 1],
+                    "metallicFactor": 0,
+                    "roughnessFactor": 0.8,
+                },
+                "doubleSided": True,
+            }
+        )
+        return len(j["materials"]) - 1
+
+
 def write_glb(
     parts,
     manifest,
@@ -517,273 +877,39 @@ def write_glb(
     without names and parents, or with a parent table that is not a tree, is
     written flat.  "flat" is the flat layout (see RIG_MODES).  The mode written,
     and why a requested hierarchy was not, is in asset.extras.watchmen.rig."""
-    import face_rule as _fr
-
-    _engine = _fr.rule(face_rule) == "engine"
-    _idle = _fr.idle_enabled(face_idle)
-    # Guard against the degenerate-UV -> black-tangent artifact on any part whose
-    # material has a normal map (see _sanitize_uv_tangents).  Gated on normal-
-    # mapped materials so UV-less / untextured parts aren't needlessly split.
-    _norm_mats = {
-        nm for nm, l in (textures or {}).items() if isinstance(l, dict) and l.get("normal")
-    }
-    if _norm_mats:
-        _san = lambda pl: [_sanitize_uv_tangents(p) if p[5] in _norm_mats else p for p in pl]
-        parts = _san(parts)
-        if attachments:
-            attachments = [(an, _san(ap)) for an, ap in attachments]
-        if alt_parts:
-            alt_parts = [(an, _san(ap)) for an, ap in alt_parts]
-        if outfit_parts:
-            outfit_parts = [(an, _san(ap), sh) for an, ap, sh in outfit_parts]
-        if face is not None and face.get("parts"):
-            face = dict(face)
-            face["parts"] = _san(face["parts"])
+    g = VariantGlb(
+        parts,
+        manifest,
+        bindnpz,
+        textures=textures,
+        face=face,
+        attachments=attachments,
+        meta=meta,
+        face_rule=face_rule,
+        face_idle=face_idle,
+        alt_parts=alt_parts,
+        parts_record=parts_record,
+        outfit_parts=outfit_parts,
+        asset_extras=asset_extras,
+        ragdoll=ragdoll,
+        rig=rig,
+    )
     import anim_meta as _am
+    import face_rule as _fr
+    import frame as _frame
 
-    # the clip extras copy GLB-frame numbers out of `meta`: it has to be in the
-    # frame this file is written in (a table without the marker is mirrored)
-    meta = _am.to_frame(meta)
-    bt = load_npz(bindnpz)
-    Rb = bt["Rb"]
-    tb = bt["tb"]
-    NB = len(Rb)
-    # real bone names + parents (palette order) -- written to `extras` so an
-    # importer needs no per-skeleton table to rebuild the hierarchy.
-    _bnames = [str(x) for x in bt["names"]] if "names" in bt else None
-    _bpar = [int(x) for x in bt["par"]] if "par" in bt else None
-    _skel = (
-        _am.skeleton_extras(_bnames, _bpar)
-        if _bnames and _bpar and len(_bnames) == NB and len(_bpar) == NB
-        else None
-    )
-    B4 = np.tile(np.eye(4), (NB, 1, 1))
-    B4[:, :3, :3] = Rb
-    B4[:, :3, 3] = tb
-    IBM = np.array([np.linalg.inv(B4[k]) for k in range(NB)])
-    # the skeleton layout (RIG_MODES): joint node names, parents, local TRS
-    _rigrec = {"mode": rig_mode(rig)}
-    _jnames = None
-    if _rigrec["mode"] == "hierarchy":
-        _reserved = [a for a, _p in attachments or []] + [a for a, _p in alt_parts or []]
-        _reserved += [a for a, _p, _s in outfit_parts or []]
-        _jnames = glb_joint_names(_bnames, _bpar, _reserved) if _skel else None
-        if _jnames is None:
-            _rigrec = {
-                "mode": "flat",
-                "reason": (
-                    "the bind has no bone names and parents"
-                    if not _skel
-                    else "the bind's parent table is not a tree"
-                ),
-            }
-    _hier = _jnames is not None
-    if _hier:
-        _skel = _am.skeleton_extras(_bnames, _bpar, rig="hierarchy", joint_nodes=_jnames)
-    doc = gltf_build.GltfDoc(
-        {
-            "version": "2.0",
-            "generator": "watchmen_extract variant_glb",
-            "extras": {
-                "watchmen": {
-                    "format": _am.FORMAT,
-                    "conventions": _am.conventions(),
-                    "rig": _rigrec,
-                }
-            },
-        },
-        (
-            "nodes",
-            "meshes",
-            "skins",
-            "accessors",
-            "bufferViews",
-            "buffers",
-            "materials",
-            "animations",
-            "images",
-            "textures",
-        ),
-        {"magFilter": 9729, "minFilter": 9987, "wrapS": 10497, "wrapT": 10497},
-    )
+    _engine, _idle = g.engine, g.idle
+    parts, attachments, alt_parts = g.parts, g.attachments, g.alt_parts
+    outfit_parts, face, meta = g.outfit_parts, g.face, g.meta
+    NB, B4, IBM = g.NB, g.B4, g.IBM
+    _bnames, _bpar, _skel, _jnames, _hier = g.bnames, g.bpar, g.skel, g.jnames, g.hier
+    doc = g.doc
     j = doc.j
     _pk = doc.packer
     BIN = doc.bin
-
     _used_joints = used_joints
-
     av = _pk.view  # (data, target=None) -> bufferView index
     ac = _pk.accessor  # (bv, ct, count, type, mn=None, mx=None)
-
-    _texdone = {}
-    _va = vertex_attrs_enabled()
-    import frame as _frame
-
-    # everything below is built from engine numbers (binds, bakes, meshes);
-    # _frame.finish_gltf reflects the finished document for the "true" frame
-    _true_frame = _frame.is_true()
-    _blendmat = {}
-    _sheetalpha = {}  # id(material) -> (sheet, header alpha, pixel alpha): engine materials
-    _vamat = {}
-
-    def _vprep(part, Vg, T):
-        """Per-vertex attributes of one part -> (index array to write, pending
-        attribute arrays or None, vertex-alpha blend flag).  NORMAL is the stored
-        normal; TANGENT the stored tangent with w for the green-inverted normal
-        texture (we.gltf_tangents), written when the part's material has a normal
-        map; COLOR_0 only when the buffer has colours.
-        A part that gets NORMAL has its winding turned to glTF's (the engine's
-        triangles wind clockwise against their normals)."""
-        T = np.asarray(T)
-        at = getattr(part, "attrs", None) if _va else None
-        Np = None
-        if at is not None and len(at["normal"]) == len(Vg):
-            Np = rig_glb.unit_normals(at["normal"])
-        if Np is None:
-            if _true_frame and T.size:
-                # no normals: the file order is the front face in the true frame,
-                # so cancel the reversal frame.finish_gltf applies
-                T = T.reshape(-1, 3)[:, [0, 2, 1]]
-            return T, None, False
-        pend = {"NORMAL": (Np, "VEC3")}
-        tg = np.asarray(at["tangent"], np.float32)
-        lay = (textures or {}).get(part[5])
-        has_nmap = isinstance(lay, dict) and bool(lay.get("normal"))  # else TANGENT is unused
-        if has_nmap and np.isfinite(tg).all() and (np.linalg.norm(tg, axis=1) > 1e-6).all():
-            Tp = rig_glb.well_formed_tangents(
-                we.gltf_tangents(
-                    Np,
-                    tg,
-                    at["bitangent"],
-                    green_up=os.environ.get("WATCHMEN_NORMALS", "gl") != "dx",
-                )
-            )
-            if Tp is not None:
-                pend["TANGENT"] = (Tp, "VEC4")
-        if at.get("has_color"):
-            pend["COLOR_0"] = (
-                np.ascontiguousarray(rig_glb.linear_vertex_colors(at["color"])),
-                "VEC4",
-            )
-        if T.size and rig_glb.winding_reversed(Vg, Np, T):
-            T = T.reshape(-1, 3)[:, [0, 2, 1]]
-        return T, pend, bool(at.get("has_color") and at.get("has_alpha"))
-
-    def _blend(mi, blend):
-        """material index `mi`, or its alphaMode BLEND twin for a part whose
-        vertex alpha varies (it multiplies the texture alpha in the engine).
-        A material written from its sheet (materials.py, engine mode) gets no
-        twin unless the sheet blends: the engine picks the render list from
-        renderType and opacity alone (0x5739d0), and the opaque lists are drawn
-        with blending off, so vertex alpha only reaches the alpha test there.
-        It is recorded as extras.watchmen.vertex_alpha instead.  The legacy mode
-        and a material without a known sheet keep the twin."""
-        if not blend or j["materials"][mi].get("alphaMode") == "BLEND":
-            return mi
-        m = j["materials"][mi]
-        if id(m) in _sheetalpha:
-            import materials as _mt
-
-            if mi not in _vamat:
-                sheet, has_a, pix_a = _sheetalpha[id(m)]
-                amode, cutoff, _afac = _mt.alpha(sheet, has_a, True, pix_a)
-                if amode == m.get("alphaMode") and cutoff == m.get("alphaCutoff"):
-                    m.setdefault("extras", {}).setdefault("watchmen", {})["vertex_alpha"] = True
-                    _vamat[mi] = mi
-                else:  # the vertex alpha changes the mode (a flagged texture without
-                    # alpha pixels is alpha-tested on it; a type 1 sheet blends it)
-                    m2 = json.loads(json.dumps(m))
-                    m2.pop("alphaMode", None)
-                    m2.pop("alphaCutoff", None)
-                    if amode:
-                        m2["alphaMode"] = amode
-                    if cutoff is not None:
-                        m2["alphaCutoff"] = cutoff
-                    if sheet.get("renderType") is not None:
-                        m2.setdefault("extras", {}).setdefault("watchmen", {})["vertex_alpha"] = (
-                            True
-                        )
-                    j["materials"].append(m2)
-                    _vamat[mi] = len(j["materials"]) - 1
-            return _vamat[mi]
-        if mi not in _blendmat:
-            m2 = json.loads(json.dumps(j["materials"][mi]))
-            m2["alphaMode"] = "BLEND"
-            m2.pop("alphaCutoff", None)
-            j["materials"].append(m2)
-            _blendmat[mi] = len(j["materials"]) - 1
-        return _blendmat[mi]
-
-    def _sheet_material(mat, layers):
-        """Engine values from the texture's sheet.json (char_lib.find_layers):
-        the alpha-test reference, the normal-map power and the subtractive blend."""
-        if layers.get("blend_info"):
-            # the texture is ink / light with its coverage in alpha (char_lib._blend_layer)
-            bct = mat.get("pbrMetallicRoughness", {}).get("baseColorTexture", {})
-            we.blend_material(
-                mat,
-                layers["blend_info"],
-                bct.get("index"),
-                (layers.get("sheet") or {}).get("opacity"),
-            )
-        if layers.get("sheet_name"):  # a sheet other than the texture's first
-            mat.setdefault("extras", {}).setdefault("watchmen", {})["sheet"] = layers["sheet_name"]
-            # its own name: two materials of one texture would otherwise share one
-            # (Blender renames the second "<name>.001")
-            mat["name"] = "%s [%s]" % (mat.get("name"), layers["sheet_name"])
-        if layers.get("materials") == "engine":
-            _engine_material(mat, layers)
-        sheet = layers.get("sheet") if _va else None
-        if not sheet:
-            return
-        thr = sheet.get("alphaThreshold")
-        if mat.get("alphaMode") == "MASK" and thr:
-            mat["alphaCutoff"] = round(min(int(thr), 255) / 255.0, 6)
-        power = sheet.get("normalMapPower")
-        if "normalTexture" in mat and power is not None and abs(float(power) - 1.0) > 1e-6:
-            mat["normalTexture"]["scale"] = round(float(power), 6)
-
-    def _engine_material(mat, layers):
-        """materials.py: roughness / specular / emission / alpha mode / culling from
-        the sheet (layers["materials"] == "engine", set by char_lib.find_layers)."""
-        import materials as _mt
-
-        sheet = layers.get("sheet") or {}
-
-        def _add(data, label):
-            j["images"].append(
-                {"bufferView": av(data), "mimeType": "image/png", "name": mat["name"] + "_" + label}
-            )
-            j["textures"].append({"source": len(j["images"]) - 1, "sampler": 0})
-            return len(j["textures"]) - 1
-
-        P = _mt.engine_material(
-            sheet,
-            layers.get("diffuse"),
-            layers.get("spec"),
-            layers.get("specsize"),
-            layers.get("glow"),
-        )
-        _mt.apply(j, mat, P, _add)
-        if "twoSided" in sheet:
-            mat["doubleSided"] = bool(sheet["twoSided"])
-        if not layers.get("blend_info"):
-            pix_a = bool(layers.get("texAlpha") or layers.get("alphaMask"))
-            # the engine's alpha test follows the texture header's alpha flag
-            # (0x429e77 -> 0x571d5d): layers["texAlphaFlag"] when the extract has
-            # it (sheet.json "textureHasAlpha"), else the pixels
-            has_a = layers.get("texAlphaFlag")
-            has_a = pix_a if has_a is None else bool(has_a)
-            _sheetalpha[id(mat)] = (sheet, has_a, pix_a)
-            amode, cutoff, afac = _mt.alpha(sheet, has_a, False, pix_a)
-            mat.pop("alphaMode", None)
-            mat.pop("alphaCutoff", None)
-            if amode:
-                mat["alphaMode"] = amode
-            if cutoff is not None:
-                mat["alphaCutoff"] = cutoff
-            if afac is not None:
-                mat["pbrMetallicRoughness"]["baseColorFactor"] = [1.0, 1.0, 1.0, afac]
 
     def _node_trs(L):
         """4x4 -> glTF node TRS dict (rotation is XYZW, same as glTF)."""
@@ -815,66 +941,6 @@ def write_glb(
         av(np.array([m.T.reshape(16) for m in IBM], np.float32).tobytes()), 5126, NB, "MAT4"
     )
 
-    def _mkmat(nm):
-        """Material index for nm: the textured material of `textures[nm]` (made once per
-        name, for the body, attachment and face primitives alike), else a new grey one."""
-        png = (textures or {}).get(nm)
-        if png is not None and nm in _texdone:
-            return _texdone[nm]
-        if png is not None:
-            layers = png if isinstance(png, dict) else {"diffuse": png}
-
-            def _tex(data, label):
-                bvi = av(data)
-                j["images"].append(
-                    {"bufferView": bvi, "mimeType": "image/png", "name": nm + "_" + label}
-                )
-                j["textures"].append({"source": len(j["images"]) - 1, "sampler": 0})
-                return len(j["textures"]) - 1
-
-            mat = {
-                "name": nm,
-                "pbrMetallicRoughness": {"metallicFactor": 0, "roughnessFactor": 0.85},
-                "doubleSided": True,
-            }
-            if "diffuse" in layers:
-                mat["pbrMetallicRoughness"]["baseColorTexture"] = {
-                    "index": _tex(layers["diffuse"], "diffuse")
-                }
-            if "mr" in layers:
-                mat["pbrMetallicRoughness"]["metallicRoughnessTexture"] = {
-                    "index": _tex(layers["mr"], "mr")
-                }
-                mat["pbrMetallicRoughness"]["roughnessFactor"] = 1.0
-            if "normal" in layers:
-                mat["normalTexture"] = {"index": _tex(layers["normal"], "normal")}
-            if layers.get("alphaMask"):
-                mat["alphaMode"] = "MASK"
-                mat["alphaCutoff"] = 0.5
-            _sheet_material(mat, layers)
-            if "spec" in layers and layers.get("materials") != "engine":
-                mat.setdefault("extensions", {})["KHR_materials_specular"] = {
-                    "specularColorTexture": {"index": _tex(layers["spec"], "spec")}
-                }
-                j.setdefault("extensionsUsed", [])
-                if "KHR_materials_specular" not in j["extensionsUsed"]:
-                    j["extensionsUsed"].append("KHR_materials_specular")
-            j["materials"].append(mat)
-            _texdone[nm] = len(j["materials"]) - 1
-            return _texdone[nm]
-        j["materials"].append(
-            {
-                "name": nm,
-                "pbrMetallicRoughness": {
-                    "baseColorFactor": [0.8, 0.8, 0.82, 1],
-                    "metallicFactor": 0,
-                    "roughnessFactor": 0.8,
-                },
-                "doubleSided": True,
-            }
-        )
-        return len(j["materials"]) - 1
-
     def _primitive(part, material_first):
         """The skinned primitive of one part (V, SI, SW, T, UV, material name).
         material_first: the part's material is made before its NORMAL / TANGENT /
@@ -883,7 +949,7 @@ def write_glb(
         first."""
         V, SI, SW, T, UV, nm = part
         Vg = np.ascontiguousarray(V, np.float32)
-        T, pend, vblend = _vprep(part, Vg, T)
+        T, pend, vblend = g.vertex_prep(part, Vg, T)
         return doc.add_skinned_primitive(
             Vg,
             _used_joints(SI, SW),
@@ -891,7 +957,7 @@ def write_glb(
             T,
             UV,
             pend,
-            lambda: _blend(_mkmat(nm), vblend),
+            lambda: g.blend(g.material(nm), vblend),
             material_first,
         )
 
