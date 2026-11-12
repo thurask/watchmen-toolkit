@@ -37,6 +37,7 @@ Requires numpy and Pillow. Python 3.13+.
 """
 
 import argparse
+import dataclasses
 import functools
 import os
 import struct
@@ -140,6 +141,43 @@ class ModelSpool:
         if self._f is not None:
             self._f.close()
             self._f = None
+
+
+@dataclasses.dataclass
+class ExtractRun:
+    """The state of one `extract` run that pass 1 builds and the passes after it
+    read: the options, the log, the block plan and its readers, the model
+    queue, the audio collections, the report counters and the naming state."""
+
+    a: argparse.Namespace
+    log: object
+    blocks: dict  # stem -> {"h": NazEntry, "s": NazEntry[, "standalone": True]}
+    half: object  # (planned block, "h" / "s") -> bytes of that half, or None
+    entry_bytes: object  # NazEntry -> its bytes, read again
+    stream_only: dict  # stream-only `.block_s_z` file -> its plan
+    stream_used: dict  # stream-set file path -> times read
+    stream_file: object  # stream-set file path -> bytes or None
+    model_jobs: ModelSpool
+    run_platform: object  # console of a big-endian source; None on PC
+    console_audio: list
+    pc_audio: list
+    media_meta: dict
+    media_desc: dict
+    music_frags: list
+    sound_info: dict
+    sfx_failed: list
+    stats: dict
+    name_run: object
+    names: object
+    model_stored: dict
+    text_writer: object
+    no_stream: dict
+    misc: dict
+    raw_only: dict
+    from_sets: dict
+    do_tex: bool
+    do_mdl: bool
+    do_extract_all: bool
 
 
 def main(argv):
@@ -439,75 +477,76 @@ def _extract_main(argv):
     model_jobs = ModelSpool(a.out)
     extract_log.push(log)
     try:
-        return _extract_blocks_and_rest(
-            a,
-            log,
-            blocks,
-            _half,
-            _entry_bytes,
-            _stream_only,
-            _stream_used,
-            _stream_file,
-            model_jobs,
-            run_platform,
-            console_audio,
-            pc_audio,
-            media_meta,
-            media_desc,
-            music_frags,
-            sound_info,
-            sfx_failed,
-            stats,
-            name_run,
-            names,
-            model_stored,
-            text_writer,
-            no_stream,
-            misc,
-            raw_only,
-            from_sets,
-            do_tex,
-            do_mdl,
-            do_extract_all,
+        run = ExtractRun(
+            a=a,
+            log=log,
+            blocks=blocks,
+            half=_half,
+            entry_bytes=_entry_bytes,
+            stream_only=_stream_only,
+            stream_used=_stream_used,
+            stream_file=_stream_file,
+            model_jobs=model_jobs,
+            run_platform=run_platform,
+            console_audio=console_audio,
+            pc_audio=pc_audio,
+            media_meta=media_meta,
+            media_desc=media_desc,
+            music_frags=music_frags,
+            sound_info=sound_info,
+            sfx_failed=sfx_failed,
+            stats=stats,
+            name_run=name_run,
+            names=names,
+            model_stored=model_stored,
+            text_writer=text_writer,
+            no_stream=no_stream,
+            misc=misc,
+            raw_only=raw_only,
+            from_sets=from_sets,
+            do_tex=do_tex,
+            do_mdl=do_mdl,
+            do_extract_all=do_extract_all,
         )
+        return _extract_blocks_and_rest(run)
     finally:
         extract_log.pop()
         model_jobs.close()
 
 
-def _extract_blocks_and_rest(
-    a,
-    log,
-    blocks,
-    _half,
-    _entry_bytes,
-    _stream_only,
-    _stream_used,
-    _stream_file,
-    model_jobs,
-    run_platform,
-    console_audio,
-    pc_audio,
-    media_meta,
-    media_desc,
-    music_frags,
-    sound_info,
-    sfx_failed,
-    stats,
-    name_run,
-    names,
-    model_stored,
-    text_writer,
-    no_stream,
-    misc,
-    raw_only,
-    from_sets,
-    do_tex,
-    do_mdl,
-    do_extract_all,
-):
-    """The block pass and everything after it (`extract`, see _extract_main).  Returns
-    1 when a block could not be read or parsed (its assets are missing), else 0."""
+def _extract_blocks_and_rest(run):
+    """The block pass and everything after it (`extract`, see _extract_main) over
+    `run`, the state pass 1 left (ExtractRun).  Returns 1 when a block could not be
+    read or parsed (its assets are missing), else 0."""
+    a = run.a
+    log = run.log
+    blocks = run.blocks
+    _half = run.half
+    _entry_bytes = run.entry_bytes
+    _stream_only = run.stream_only
+    _stream_used = run.stream_used
+    _stream_file = run.stream_file
+    model_jobs = run.model_jobs
+    run_platform = run.run_platform
+    console_audio = run.console_audio
+    pc_audio = run.pc_audio
+    media_meta = run.media_meta
+    media_desc = run.media_desc
+    music_frags = run.music_frags
+    sound_info = run.sound_info
+    sfx_failed = run.sfx_failed
+    stats = run.stats
+    name_run = run.name_run
+    names = run.names
+    model_stored = run.model_stored
+    text_writer = run.text_writer
+    no_stream = run.no_stream
+    misc = run.misc
+    raw_only = run.raw_only
+    from_sets = run.from_sets
+    do_tex = run.do_tex
+    do_mdl = run.do_mdl
+    do_extract_all = run.do_extract_all
     n_assets = 0
     failed_blocks = []  # blocks whose halves did not read or whose parse failed
     tex_repeats = mdl_repeats = 0
