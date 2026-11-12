@@ -413,7 +413,6 @@ _HOMES = {
     "BLOCK_CACHE_BYTES": ("extract_driver", "BLOCK_CACHE_BYTES"),
     "ModelSpool": ("extract_driver", "ModelSpool"),
     "main": ("extract_driver", "main"),
-    "_extract_main": ("extract_driver", "_extract_main"),
 }
 
 

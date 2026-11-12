@@ -241,6 +241,15 @@ class RunReport:
     n_assets: int = 0
     tex_repeats: int = 0
     mdl_repeats: int = 0
+    # models that gave no output: decode_model logged the reason
+    mdl_none: list = dataclasses.field(default_factory=list)
+    glb_yes: int = 0
+    # reason -> [model names]: decoded models that got no .glb (--glb)
+    glb_none: dict = dataclasses.field(default_factory=dict)
+    # models whose vertex colours are not decoded
+    col_none: list = dataclasses.field(default_factory=list)
+    # models decoded incompletely (fewer submeshes than the header lists)
+    mdl_partial: list = dataclasses.field(default_factory=list)
 
 
 class ExtractRun:
@@ -891,17 +900,297 @@ class ExtractRun:
                 log("      ! console audio %s: %s" % (name, ex))
             raw = None
 
+    def skeletons(self):
+        """--glb: the base skeletons' rest poses -> skeletons/*.json."""
+        a, log = self.a, self.log
+        # SKELETON REFERENCE DUMP: decode the base *_Skeleton.model rest poses to
+        # OUT/skeletons/*.json (file-decoded; see docs/ENGINE_CONSTANTS.md).  This is
+        # reference output only -- the glb rig takes its joint names/order from each
+        # model's OWN embedded palette in decode_model (skeleton assets have a 0-byte
+        # stream, so they never enter model_jobs; collect them straight from the naz).
+        if model_export._RIG["on"]:
+            try:
+                import extract_skeletons as _es
+                import json as _json
+
+                _sk = _es.collect(str(a.naz))
+                skdir = a.out / "skeletons"
+                skdir.mkdir(parents=True, exist_ok=True)
+                for _fam, _s in _sk.items():
+                    with open(
+                        skdir / ("skeleton_%s.json" % _fam), "w", encoding="utf-8", newline="\n"
+                    ) as _f:
+                        _json.dump(_s, _f, indent=1)
+                log("\nSKELETONS: %d base skeletons decoded from file -> %s" % (len(_sk), skdir))
+                for _fam, _s in sorted(_sk.items()):
+                    log("  skeleton_%-12s %3d bones" % (_fam, _s["bone_count"]))
+                import skeleton_records as _skr
+
+                _note = _skr.scan_note()
+                if _note:
+                    log("  note: " + _note)
+            except Exception as _ex:
+                log("  ! skeleton pass: %s" % _ex)
+
+    def models(self, tex_index):
+        """Every queued model, decoded with the texture index `tex_index` (all
+        textures are on disk by now, so per-submesh materials resolve)."""
+        a, log, rep = self.a, self.log, self.report
+        model_jobs, model_stored = self.model_jobs, self.model_stored
+        stats, mdl_repeats = rep.stats, rep.mdl_repeats
+        model_lod = a.model_lod
+        log(
+            "\nMODELS: %d  (textures indexed: %d)%s"
+            % (
+                len(model_jobs),
+                len(tex_index),
+                (
+                    "  [%d entries: %d identical copies in other blocks not decoded again]"
+                    % (len(model_jobs) + mdl_repeats, mdl_repeats)
+                    if mdl_repeats
+                    else ""
+                ),
+            )
+        )
+        mdl_none = []  # models that gave no output: decode_model logged the reason
+        glb_yes = 0
+        glb_none = {}  # reason -> [model names]: decoded models that got no .glb (--glb)
+        col_none = []  # models whose vertex colours are not decoded
+        mdl_partial = []  # models decoded incompletely (fewer submeshes than the header lists)
+        _platform_before = model_mesh.CONSOLE_PLATFORM
+        for header, stream, out_path, mo, mplat in model_jobs:
+            try:
+                _st = model_export.MODEL_STATUS
+                _st.clear()
+                model_mesh.set_console_platform(mplat)
+                # stored_name only for a respelled model (--names canonical)
+                _kw = {"stored_name": model_stored[out_path]} if out_path in model_stored else {}
+                if model_export.decode_model(
+                    header, stream, out_path, tex_index, log, order=mo, lod=model_lod, **_kw
+                ):
+                    stats["mdl"] += 1
+                    _mn = out_path.name[: -len(".obj")]
+                    if _st.get("glb"):
+                        glb_yes += 1
+                    elif _st.get("glb") is False:
+                        glb_none.setdefault(_st.get("glb_reason") or "not written", []).append(_mn)
+                    if _st.get("color_not_decoded"):
+                        col_none.append(_mn)
+                    if _st.get("partial"):
+                        mdl_partial.append(_mn)
+                else:
+                    mdl_none.append(out_path.name[: -len(".obj")])
+            except Exception as ex:
+                mdl_none.append(out_path.name[: -len(".obj")])
+                log("      ! model %s: %s" % (out_path.name, ex))
+        model_mesh.set_console_platform(_platform_before)
+        rep.mdl_none, rep.glb_yes, rep.glb_none = mdl_none, glb_yes, glb_none
+        rep.col_none, rep.mdl_partial = col_none, mdl_partial
+
+    def text(self):
+        """text/: every text asset the block pass collected, in every language."""
+        log, text_writer = self.log, self.text_writer
+        if text_writer is not None:
+            try:
+                text_writer.write()
+            except Exception as ex:
+                log("  ! text assets: %s" % ex)
+
+    def nav(self):
+        """nav/: the navigation data of the levels this run (or an earlier one) wrote."""
+        a, log = self.a, self.log
+        stats, name_run = self.report.stats, self.name_run
+        if not a.no_nav:  # navigation data of the levels this run (or an earlier one) wrote
+            try:
+                import nav_data as _nav
+
+                trees = _nav.extract_trees(a.out)
+                if a.naz.is_dir():
+                    # a loose-folder source (Part 1 PC / Xbox Live) keeps the .hpd path
+                    # data and the .bik movies beside the folder it was given: bring
+                    # them to files/data/, where the archive sets have them (--no-files:
+                    # the path data is read in place, the movies are not fetched)
+                    if a.no_files:
+                        trees = trees + [
+                            p
+                            for _n, p in _nav.loose_source_files(a.naz)
+                            if not p.lower().endswith(".bik")
+                        ]
+                    else:
+                        stats["files"] += len(_nav.stage_loose_source(a.naz, a.out, log, name_run))
+                        trees = _nav.extract_trees(a.out)
+                res = _nav.export(trees, str(a.out / "nav"))
+                if res:
+                    bad = sum(1 for r in res if "error" in r)
+                    log(
+                        "NAV: %d level(s) -> %s%s"
+                        % (len(res) - bad, a.out / "nav", ", %d failed" % bad if bad else "")
+                    )
+                    nohpd = [r["level"] for r in res if "error" not in r and not r.get("hpd")]
+                    if nohpd:
+                        log(
+                            "  WARNING: nav: no path data (.hpd) found for %s: definition only, no .nav.glb"
+                            % ", ".join(nohpd)
+                        )
+            except Exception as ex:
+                log("  ! navigation data: %s" % ex)
+
+    def summary(self):
+        """The closing summary, and `_canonical_names.json`.  Returns 1 when a block
+        could not be read or parsed (its assets are missing), else 0."""
+        a, log, rep = self.a, self.log, self.report
+        blocks, model_jobs = self.block_plan.blocks, self.model_jobs
+        names, name_run = self.names, self.name_run
+        stats, n_assets, failed_blocks = rep.stats, rep.n_assets, rep.failed_blocks
+        tex_repeats, misc, raw_only = rep.tex_repeats, rep.misc, rep.raw_only
+        mdl_none, glb_yes, glb_none = rep.mdl_none, rep.glb_yes, rep.glb_none
+        col_none, mdl_partial = rep.col_none, rep.mdl_partial
+        log("\nDONE  (%d assets across %d blocks)" % (n_assets, len(blocks)))
+        log("  files       : %d" % stats["files"])
+        log(
+            "  textures    : %d%s"
+            % (
+                stats["tex"],
+                (
+                    "  (+ %d identical copies in other blocks, not written again)" % tex_repeats
+                    if tex_repeats
+                    else ""
+                ),
+            )
+        )
+        log(
+            "  models      : %d%s"
+            % (
+                stats["mdl"],
+                (
+                    "  of %d  (%d without output, reason logged above: %s)"
+                    % (len(model_jobs), len(mdl_none), ", ".join(sorted(mdl_none)))
+                    if mdl_none
+                    else ""
+                ),
+            )
+        )
+        if model_export._RIG["on"]:
+            _ng = sum(len(v) for v in glb_none.values())
+            log(
+                "  model GLBs  : %d%s"
+                % (
+                    glb_yes,
+                    (
+                        '  (%d decoded model(s) WITHOUT a .glb; "glb" in their .model.json'
+                        " says why)" % _ng
+                        if _ng
+                        else ""
+                    ),
+                )
+            )
+            for _why, _nms in sorted(glb_none.items()):
+                log(
+                    "  note: no GLB for %d model(s): %s: %s"
+                    % (
+                        len(_nms),
+                        _why,
+                        ", ".join(sorted(_nms)[:12]) + (" ..." if len(_nms) > 12 else ""),
+                    )
+                )
+        if mdl_partial:
+            log(
+                '  WARNING: %d model(s) decoded incompletely ("submeshes" under not_decoded in'
+                " their .model.json): %s" % (len(mdl_partial), ", ".join(sorted(mdl_partial)))
+            )
+        if col_none:
+            log(
+                "  note: vertex colours not decoded for %d model(s) (not_decoded: COLOR_0 in"
+                " their .model.json; the console is not known and their data does not show"
+                " the colour byte order: set WATCHMEN_CONSOLE=x360 or ps3)" % len(col_none)
+            )
+        if misc:
+            _bad = ["%s %d of %d" % (k, v[1], v[0]) for k, v in sorted(misc.items()) if v[1]]
+            log(
+                "  misc JSON   : %s"
+                % ", ".join("%s %d" % (k, v[0]) for k, v in sorted(misc.items()))
+            )
+            log(
+                "  not decoded completely: %s"
+                % (", ".join(_bad) + "  (a WARNING: line above names each)" if _bad else "none")
+            )
+        if raw_only:
+            log(
+                "  WARNING: raw only (no decoder for this kind; kept under extracted/): %s"
+                % ", ".join("%s %d" % kv for kv in sorted(raw_only.items()))
+            )
+        if names.case_twins:
+            log(
+                "  names       : %d stored under a second spelling that differs only in letter case;"
+                " written once, under the spelling of the first block in case-insensitive block"
+                " order: %s"
+                % (len(names.case_twins), ", ".join("%s (= %s)" % t for t in names.case_twins))
+            )
+        if names.variants:
+            log(
+                "  names       : %d stored with different content in different blocks; each kept"
+                " under its own name: %s"
+                % (len(names.variants), ", ".join(v[1] for v in names.variants))
+            )
+        try:
+            name_run.write(a.out)
+        except OSError as ex:
+            log("  ! %s: %s" % (extract_paths.names_module().RUN_FILE, ex))
+        if name_run.renamed:
+            log(
+                "  names       : %d written under their canonical spelling (--names stored keeps"
+                " the archive's); canonical -> stored in %s"
+                % (len(name_run.renamed), extract_paths.names_module().RUN_FILE)
+            )
+        log("  audio       : %d" % stats["aud"])
+        log("  output      : %s" % a.out)
+        if failed_blocks:
+            log(
+                "  ! blocks    : %d not extracted (reason logged above; exit code 1): %s"
+                % (len(failed_blocks), ", ".join(failed_blocks))
+            )
+            return 1
+        return 0
+
+    def run(self):
+        """All passes in order -> the exit code (summary)."""
+        self.plan()
+        extract_log.push(self.log)
+        try:
+            self.blocks()
+            self.stream_set_report()
+            self.music()
+            self.sounds()
+            self.console_music()
+            # all blocks parsed -> textures are now on disk; decode models last with the
+            # full texture index so per-submesh materials resolve correctly.
+            tex_index = obj_mtl.build_texture_index(self.a.out / "textures")
+            self.skeletons()
+            self.models(tex_index)
+            self.text()
+            self.nav()
+            return self.summary()
+        finally:
+            extract_log.pop()
+            self.model_jobs.close()
+
 
 def main(argv):
     """`extract`: see --help.  The run's name record (canonical_names.Run) is
     closed however the extraction ends."""
     try:
-        return _extract_main(argv)
+        a = _parser().parse_args(argv)
+        if not a.naz.exists():
+            print("error: %s not found" % a.naz, file=sys.stderr)
+            return 2
+        _apply_options(a)
+        return ExtractRun(a, extract_log.extract_logger(a.quiet)).run()
     finally:
         extract_paths.names_module().end()
 
 
-def _extract_main(argv):
+def _parser():
+    """The argument parser of `extract`."""
     ap = argparse.ArgumentParser(description="Extract Watchmen Part 2 (Kapow) assets from game.naz")
     ap.add_argument("naz", type=Path)
     ap.add_argument("-o", "--out", type=Path, default=Path("watchmen_out"))
@@ -1021,10 +1310,12 @@ def _extract_main(argv):
         action="store_true",
         help="no progress log; the warning lines ('!' and 'WARNING:') still go to stderr",
     )
-    a = ap.parse_args(argv)
-    if not a.naz.exists():
-        print("error: %s not found" % a.naz, file=sys.stderr)
-        return 2
+    return ap
+
+
+def _apply_options(a):
+    """The options other modules read: --glb (model_export._RIG) and the
+    environment variables of --rig, --frame, --names, --json-floats."""
     model_export._RIG["on"] = bool(getattr(a, "glb", False))
     model_export._RIG["attrs"] = not bool(getattr(a, "no_vertex_attrs", False))
     model_export._RIG["tex_size"] = getattr(a, "glb_texture_size", None)
@@ -1046,261 +1337,3 @@ def _extract_main(argv):
             file=sys.stderr,
         )
         model_export._RIG["on"] = False
-    log = extract_log.extract_logger(a.quiet)
-    run = ExtractRun(a, log)
-    run.plan()
-    extract_log.push(log)
-    try:
-        run.blocks()
-        run.stream_set_report()
-        run.music()
-        run.sounds()
-        run.console_music()
-        return _extract_after_blocks(run)
-    finally:
-        extract_log.pop()
-        run.model_jobs.close()
-
-
-def _extract_after_blocks(run):
-    """Everything after the audio passes (`extract`, see _extract_main) over `run`.
-    Returns 1 when a block could not be read or parsed (its assets are missing),
-    else 0."""
-    a = run.a
-    log = run.log
-    blocks = run.block_plan.blocks
-    model_jobs = run.model_jobs
-    stats = run.report.stats
-    name_run = run.name_run
-    names = run.names
-    model_stored = run.model_stored
-    text_writer = run.text_writer
-    misc = run.report.misc
-    raw_only = run.report.raw_only
-    n_assets = run.report.n_assets
-    failed_blocks = run.report.failed_blocks
-    tex_repeats = run.report.tex_repeats
-    mdl_repeats = run.report.mdl_repeats
-
-    # all blocks parsed -> textures are now on disk; decode models last with the
-    # full texture index so per-submesh materials resolve correctly.
-    tex_index = obj_mtl.build_texture_index(a.out / "textures")
-    # SKELETON REFERENCE DUMP: decode the base *_Skeleton.model rest poses to
-    # OUT/skeletons/*.json (file-decoded; see docs/ENGINE_CONSTANTS.md).  This is
-    # reference output only -- the glb rig takes its joint names/order from each
-    # model's OWN embedded palette in decode_model (skeleton assets have a 0-byte
-    # stream, so they never enter model_jobs; collect them straight from the naz).
-    if model_export._RIG["on"]:
-        try:
-            import extract_skeletons as _es
-            import json as _json
-
-            _sk = _es.collect(str(a.naz))
-            skdir = a.out / "skeletons"
-            skdir.mkdir(parents=True, exist_ok=True)
-            for _fam, _s in _sk.items():
-                with open(
-                    skdir / ("skeleton_%s.json" % _fam), "w", encoding="utf-8", newline="\n"
-                ) as _f:
-                    _json.dump(_s, _f, indent=1)
-            log("\nSKELETONS: %d base skeletons decoded from file -> %s" % (len(_sk), skdir))
-            for _fam, _s in sorted(_sk.items()):
-                log("  skeleton_%-12s %3d bones" % (_fam, _s["bone_count"]))
-            import skeleton_records as _skr
-
-            _note = _skr.scan_note()
-            if _note:
-                log("  note: " + _note)
-        except Exception as _ex:
-            log("  ! skeleton pass: %s" % _ex)
-    model_lod = a.model_lod
-    log(
-        "\nMODELS: %d  (textures indexed: %d)%s"
-        % (
-            len(model_jobs),
-            len(tex_index),
-            (
-                "  [%d entries: %d identical copies in other blocks not decoded again]"
-                % (len(model_jobs) + mdl_repeats, mdl_repeats)
-                if mdl_repeats
-                else ""
-            ),
-        )
-    )
-    mdl_none = []  # models that gave no output: decode_model logged the reason
-    glb_yes = 0
-    glb_none = {}  # reason -> [model names]: decoded models that got no .glb (--glb)
-    col_none = []  # models whose vertex colours are not decoded
-    mdl_partial = []  # models decoded incompletely (fewer submeshes than the header lists)
-    _platform_before = model_mesh.CONSOLE_PLATFORM
-    for header, stream, out_path, mo, mplat in model_jobs:
-        try:
-            _st = model_export.MODEL_STATUS
-            _st.clear()
-            model_mesh.set_console_platform(mplat)
-            # stored_name only for a respelled model (--names canonical)
-            _kw = {"stored_name": model_stored[out_path]} if out_path in model_stored else {}
-            if model_export.decode_model(
-                header, stream, out_path, tex_index, log, order=mo, lod=model_lod, **_kw
-            ):
-                stats["mdl"] += 1
-                _mn = out_path.name[: -len(".obj")]
-                if _st.get("glb"):
-                    glb_yes += 1
-                elif _st.get("glb") is False:
-                    glb_none.setdefault(_st.get("glb_reason") or "not written", []).append(_mn)
-                if _st.get("color_not_decoded"):
-                    col_none.append(_mn)
-                if _st.get("partial"):
-                    mdl_partial.append(_mn)
-            else:
-                mdl_none.append(out_path.name[: -len(".obj")])
-        except Exception as ex:
-            mdl_none.append(out_path.name[: -len(".obj")])
-            log("      ! model %s: %s" % (out_path.name, ex))
-    model_mesh.set_console_platform(_platform_before)
-
-    if text_writer is not None:
-        try:
-            text_writer.write()
-        except Exception as ex:
-            log("  ! text assets: %s" % ex)
-
-    if not a.no_nav:  # navigation data of the levels this run (or an earlier one) wrote
-        try:
-            import nav_data as _nav
-
-            trees = _nav.extract_trees(a.out)
-            if a.naz.is_dir():
-                # a loose-folder source (Part 1 PC / Xbox Live) keeps the .hpd path
-                # data and the .bik movies beside the folder it was given: bring
-                # them to files/data/, where the archive sets have them (--no-files:
-                # the path data is read in place, the movies are not fetched)
-                if a.no_files:
-                    trees = trees + [
-                        p
-                        for _n, p in _nav.loose_source_files(a.naz)
-                        if not p.lower().endswith(".bik")
-                    ]
-                else:
-                    stats["files"] += len(_nav.stage_loose_source(a.naz, a.out, log, name_run))
-                    trees = _nav.extract_trees(a.out)
-            res = _nav.export(trees, str(a.out / "nav"))
-            if res:
-                bad = sum(1 for r in res if "error" in r)
-                log(
-                    "NAV: %d level(s) -> %s%s"
-                    % (len(res) - bad, a.out / "nav", ", %d failed" % bad if bad else "")
-                )
-                nohpd = [r["level"] for r in res if "error" not in r and not r.get("hpd")]
-                if nohpd:
-                    log(
-                        "  WARNING: nav: no path data (.hpd) found for %s: definition only, no .nav.glb"
-                        % ", ".join(nohpd)
-                    )
-        except Exception as ex:
-            log("  ! navigation data: %s" % ex)
-
-    log("\nDONE  (%d assets across %d blocks)" % (n_assets, len(blocks)))
-    log("  files       : %d" % stats["files"])
-    log(
-        "  textures    : %d%s"
-        % (
-            stats["tex"],
-            (
-                "  (+ %d identical copies in other blocks, not written again)" % tex_repeats
-                if tex_repeats
-                else ""
-            ),
-        )
-    )
-    log(
-        "  models      : %d%s"
-        % (
-            stats["mdl"],
-            (
-                "  of %d  (%d without output, reason logged above: %s)"
-                % (len(model_jobs), len(mdl_none), ", ".join(sorted(mdl_none)))
-                if mdl_none
-                else ""
-            ),
-        )
-    )
-    if model_export._RIG["on"]:
-        _ng = sum(len(v) for v in glb_none.values())
-        log(
-            "  model GLBs  : %d%s"
-            % (
-                glb_yes,
-                (
-                    '  (%d decoded model(s) WITHOUT a .glb; "glb" in their .model.json'
-                    " says why)" % _ng
-                    if _ng
-                    else ""
-                ),
-            )
-        )
-        for _why, _nms in sorted(glb_none.items()):
-            log(
-                "  note: no GLB for %d model(s): %s: %s"
-                % (
-                    len(_nms),
-                    _why,
-                    ", ".join(sorted(_nms)[:12]) + (" ..." if len(_nms) > 12 else ""),
-                )
-            )
-    if mdl_partial:
-        log(
-            '  WARNING: %d model(s) decoded incompletely ("submeshes" under not_decoded in'
-            " their .model.json): %s" % (len(mdl_partial), ", ".join(sorted(mdl_partial)))
-        )
-    if col_none:
-        log(
-            "  note: vertex colours not decoded for %d model(s) (not_decoded: COLOR_0 in"
-            " their .model.json; the console is not known and their data does not show"
-            " the colour byte order: set WATCHMEN_CONSOLE=x360 or ps3)" % len(col_none)
-        )
-    if misc:
-        _bad = ["%s %d of %d" % (k, v[1], v[0]) for k, v in sorted(misc.items()) if v[1]]
-        log("  misc JSON   : %s" % ", ".join("%s %d" % (k, v[0]) for k, v in sorted(misc.items())))
-        log(
-            "  not decoded completely: %s"
-            % (", ".join(_bad) + "  (a WARNING: line above names each)" if _bad else "none")
-        )
-    if raw_only:
-        log(
-            "  WARNING: raw only (no decoder for this kind; kept under extracted/): %s"
-            % ", ".join("%s %d" % kv for kv in sorted(raw_only.items()))
-        )
-    if names.case_twins:
-        log(
-            "  names       : %d stored under a second spelling that differs only in letter case;"
-            " written once, under the spelling of the first block in case-insensitive block"
-            " order: %s"
-            % (len(names.case_twins), ", ".join("%s (= %s)" % t for t in names.case_twins))
-        )
-    if names.variants:
-        log(
-            "  names       : %d stored with different content in different blocks; each kept"
-            " under its own name: %s"
-            % (len(names.variants), ", ".join(v[1] for v in names.variants))
-        )
-    try:
-        name_run.write(a.out)
-    except OSError as ex:
-        log("  ! %s: %s" % (extract_paths.names_module().RUN_FILE, ex))
-    if name_run.renamed:
-        log(
-            "  names       : %d written under their canonical spelling (--names stored keeps"
-            " the archive's); canonical -> stored in %s"
-            % (len(name_run.renamed), extract_paths.names_module().RUN_FILE)
-        )
-    log("  audio       : %d" % stats["aud"])
-    log("  output      : %s" % a.out)
-    if failed_blocks:
-        log(
-            "  ! blocks    : %d not extracted (reason logged above; exit code 1): %s"
-            % (len(failed_blocks), ", ".join(failed_blocks))
-        )
-        return 1
-    return 0
